@@ -1,0 +1,19 @@
+{
+	"FileVersion": 3,
+	"EngineAssociation": "5.8",
+	"Category": "",
+	"Description": "Guscio vuoto. Tutto il codice vive in Plugins/GeoWorld.",
+	"Modules": [
+		{
+			"Name": "TestNewIG",
+			"Type": "Runtime",
+			"LoadingPhase": "Default"
+		}
+	],
+	"Plugins": [
+		{
+			"Name": "GeoWorld",
+			"Enabled": true
+		}
+	]
+}
