@@ -44,21 +44,34 @@ DECLARE_MULTICAST_DELEGATE_OneParam(FOnGeoreferenceRebased, const FGeoreferenceS
  *  saltare l'origine sotto i piedi all'altro.
  *
  * =============================================================================
- *  PERCHE' ANCHE FTickableGameObject
+ *  PERCHE' UTickableWorldSubsystem E NON UWorldSubsystem + FTickableGameObject
  * =============================================================================
- *  I subsystem NON hanno un tick nativo. Ereditando anche da FTickableGameObject
- *  si ottiene un Tick(float) per frame senza dover creare un attore fittizio
- *  solo per avere un tick. E' il modo idiomatico in UE5.
+ *  I subsystem non hanno un tick nativo, quindi serve FTickableGameObject. Ma
+ *  ereditarlo A MANO accanto a UWorldSubsystem e' una trappola: la classe base
+ *  FTickableGameObject dichiara
  *
- *  Sul TIMING: i FTickableGameObject vengono aggiornati da UWorld::Tick. Noi
- *  leggiamo la posizione della camera cosi' com'e' in quel momento, che in
- *  pratica e' quella calcolata nel frame precedente. E' deliberato e innocuo:
- *  con una soglia di 10 km, un frame di latenza corrisponde a un errore di
- *  posizione che nessuna camera riesce a produrre; in cambio, tutto il resto
- *  del frame vede un'origine gia' stabile e coerente.
+ *      virtual UWorld* GetTickableGameObjectWorld() const { return nullptr; }
+ *
+ *  e chi non la sovrascrive resta un tickable NON associato a nessun mondo. Il
+ *  risultato e' un Tick che non viene chiamato quando ci si aspetta - per
+ *  esempio non nel mondo di PIE - senza nessun errore, nessun warning e nessun
+ *  crash: semplicemente il codice non gira. E' esattamente il genere di bug che
+ *  si manifesta come "il rebasing non parte" e quindi come jitter, perche' la
+ *  camera resta a coordinate enormi.
+ *
+ *  UTickableWorldSubsystem esiste proprio per questo: lega il tick al UWorld
+ *  che possiede il subsystem e gestisce IsTickable() in base allo stato di
+ *  inizializzazione. Va usato quello.
+ *
+ *  Sul TIMING: il tick avviene durante UWorld::Tick. Leggiamo la posizione
+ *  della camera cosi' com'e' in quel momento, che in pratica e' quella
+ *  calcolata nel frame precedente. E' deliberato e innocuo: con una soglia
+ *  chilometrica un frame di latenza corrisponde a un errore di posizione che
+ *  nessuna camera riesce a produrre; in cambio tutto il resto del frame vede
+ *  un'origine gia' stabile e coerente.
  */
 UCLASS()
-class GEOCORE_API UGeoreferenceSubsystem : public UWorldSubsystem, public FTickableGameObject
+class GEOCORE_API UGeoreferenceSubsystem : public UTickableWorldSubsystem
 {
 	GENERATED_BODY()
 
@@ -78,14 +91,23 @@ public:
 	virtual void Initialize(FSubsystemCollectionBase& Collection) override;
 	virtual void Deinitialize() override;
 
-	// --- FTickableGameObject ----------------------------------------------
+	// --- UTickableWorldSubsystem ------------------------------------------
 
 	virtual void Tick(float DeltaTime) override;
 	virtual TStatId GetStatId() const override;
-	virtual bool IsTickable() const override;
 	/** Deve ticchettare anche fuori dal Play, altrimenti nell'editor il terreno
-	 *  non si aggiorna finche' non premi Play: trappola classica. */
+	 *  non si aggiorna finche' non premi Play: trappola classica.
+	 *  (IsTickable() lo gestisce gia' la classe base in funzione di
+	 *  IsInitialized(): non va sovrascritto.) */
 	virtual bool IsTickableInEditor() const override { return true; }
+
+	/**
+	 * Numero di Tick effettivamente eseguiti.
+	 * Serve alla diagnostica: se questo contatore resta a zero mentre il gioco
+	 * gira, il problema NON e' nella geodesia, e' che il tick non viene chiamato.
+	 * Averlo a disposizione trasforma un'ora di ipotesi in una riga di output.
+	 */
+	uint64 GetTickCount() const { return TickCount; }
 
 	// --- API pubblica ------------------------------------------------------
 
@@ -182,4 +204,5 @@ private:
 
 	/** Statistiche per l'HUD. */
 	double LastRebaseDistanceMeters = 0.0;
+	uint64 TickCount = 0;
 };

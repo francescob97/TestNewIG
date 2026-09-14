@@ -122,14 +122,16 @@ TStatId UGeoreferenceSubsystem::GetStatId() const
 	RETURN_QUICK_DECLARE_CYCLE_STAT(UGeoreferenceSubsystem, STATGROUP_Tickables);
 }
 
-bool UGeoreferenceSubsystem::IsTickable() const
-{
-	// Il CDO non deve mai ticchettare: e' un prototipo, non un'istanza viva.
-	return !IsTemplate() && GetWorld() != nullptr;
-}
-
 void UGeoreferenceSubsystem::Tick(float DeltaTime)
 {
+	// NOTA: IsTickable() non e' sovrascritto. UTickableWorldSubsystem lo
+	// implementa gia' correttamente (ticchetta solo se inizializzato e non e' un
+	// CDO) e lega il tick al proprio UWorld. Reimplementarlo a mano e' come si
+	// finisce per avere un tick che non parte.
+	Super::Tick(DeltaTime);
+
+	++TickCount;
+
 	if (bShowDebugOverlay)
 	{
 		DrawDebugOverlay();

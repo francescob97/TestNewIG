@@ -129,7 +129,32 @@ quel passo sta facendo qualcosa.
 **X rosso = Nord, Y verde = Est, Z blu = Alto**. Puntando la camera lungo +X,
 il compasso dell'editor deve indicare Nord.
 
-### B.4 Comandi disponibili
+### B.4 Se vedi jitter
+
+**Non ragionare per impressioni visive**: "il cubo balla" ha tre cause diverse,
+visivamente quasi identiche e con rimedi opposti. Lancia
+
+```
+geo.Diag
+```
+
+che stampa i tre numeri che le distinguono e propone un verdetto:
+
+| Verdetto | Significato | Rimedio |
+|---|---|---|
+| `Tick eseguiti: 0` | Il tick del subsystem non gira: il rebasing non parte mai e la camera resta a coordinate enormi. | Bug nel plugin — segnalalo. |
+| Camera oltre la soglia | Il tick gira ma il rebase non scatta. | `geo.Rebase`, poi capire perche' non e' scattato da solo. |
+| `ULP float` > 1 uu | Le coordinate sono troppo grandi per un float. | `geo.RebaseThreshold 2` |
+| Coordinate piccole + TSR/TAA | La geodesia e' a posto: a ballare e' l'antialiasing temporale. | `r.AntiAliasingMethod 0` per confermare. |
+
+L'ultima riga e' la piu' insidiosa: l'antialiasing temporale (TSR, il default di
+UE5) ricostruisce l'immagine accumulando frame con la proiezione spostata di un
+sotto-pixel. Su uno spigolo netto e privo di texture contro il cielo vuoto —
+cioe' esattamente i nostri cubi di verifica — produce un tremolio orizzontale
+indistinguibile a occhio da un problema di precisione. `r.AntiAliasingMethod 0`
+lo spegne: se il tremolio sparisce, la geodesia non c'entra nulla.
+
+### B.5 Comandi disponibili
 
 ```
 geo.Help                      elenco dei comandi
@@ -142,6 +167,7 @@ geo.RebaseThreshold <km>      cambia la soglia a caldo
 geo.Debug <0|1>               overlay di debug
 geo.SpawnMarkers              piazza i cubi di verifica sull'Italia
 geo.ClearMarkers              li rimuove
+geo.Diag                      diagnostica del jitter (vedi B.4)
 ```
 
 ---
