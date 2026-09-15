@@ -26,11 +26,25 @@ Il progetto `TestNewIG` e' un guscio vuoto: tutto il codice vive in
 ## Stato
 
 - [x] **Fase 1** — geodesia, georeferenziazione, origin rebasing, test
-- [ ] Fase 2 — pipeline dati offline (Python + GDAL, TINITALY -> piramide di tile)
+      *(nota: resta aperta la issue #1 sul jitter, vedi `docs/issues-aperte.md`)*
+- [x] **Fase 2** — pipeline dati offline (Python + GDAL, TINITALY -> piramide di tile)
 - [ ] Fase 3 — loader asincrono e cache LRU
 - [ ] Fase 4 — quadtree, selezione LOD, culling
 - [ ] Fase 5 — generazione mesh e skirt
 - [ ] Fase 6 — imagery drappeggiata
+
+## Formato dei dati
+
+| | |
+|---|---|
+| Tiling | geografico WGS84, livello 0 = 2x1, livello L = 2^(L+1) x 2^L |
+| Tile | 129x129 post float32, registrati sui nodi (1 post di overlap condiviso) |
+| Percorso | `<root>/<level>/<x>/<y>.ght` (+ header di 32 byte) |
+| Indice | `<root>/<level>/index.bin`, record di 16 byte per tile con min/max |
+| Manifest | `<root>/manifest.json`, metadati globali |
+| Quote | **ellissoidiche** WGS84 (ortometriche del sorgente + ondulazione del geoide) |
+
+Dettagli e motivazioni in `docs/fase2-design.md`.
 
 ## Convenzioni fissate
 
@@ -53,6 +67,15 @@ cmake --build build
 ./Plugins/GeoWorld/Tools/CheckSourceDiscipline.sh
 ```
 
+## Pipeline dati
+
+```bash
+cd Pipeline
+./run.py check-geoid                              # verifica la griglia geoidica
+./run.py build -i 'tinitaly/*.tif' -o dataset/italia
+PYTHONPATH=. python -m unittest discover -s tests # 26 test, sorgente sintetico
+```
+
 ## Verifica in Unreal
 
-Vedi `docs/fase1-verifica.md`.
+Vedi `docs/fase1-verifica.md` e `docs/fase2-verifica.md`.

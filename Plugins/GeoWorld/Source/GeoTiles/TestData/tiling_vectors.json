@@ -1,0 +1,256 @@
+{
+	"schema": {
+		"tilePosts": 129,
+		"tileCells": 128,
+		"level0TilesX": 2,
+		"level0TilesY": 1,
+		"xAxis": "est, x=0 a lon -180",
+		"yAxis": "sud, y=0 a lat +90"
+	},
+	"levels": [
+		{
+			"level": 0,
+			"tilesX": 2,
+			"tilesY": 1,
+			"tileSpanDeg": 180.0,
+			"postSpacingDeg": 1.40625,
+			"globalPostsX": 257,
+			"globalPostsY": 129
+		},
+		{
+			"level": 1,
+			"tilesX": 4,
+			"tilesY": 2,
+			"tileSpanDeg": 90.0,
+			"postSpacingDeg": 0.703125,
+			"globalPostsX": 513,
+			"globalPostsY": 257
+		},
+		{
+			"level": 2,
+			"tilesX": 8,
+			"tilesY": 4,
+			"tileSpanDeg": 45.0,
+			"postSpacingDeg": 0.3515625,
+			"globalPostsX": 1025,
+			"globalPostsY": 513
+		},
+		{
+			"level": 3,
+			"tilesX": 16,
+			"tilesY": 8,
+			"tileSpanDeg": 22.5,
+			"postSpacingDeg": 0.17578125,
+			"globalPostsX": 2049,
+			"globalPostsY": 1025
+		},
+		{
+			"level": 4,
+			"tilesX": 32,
+			"tilesY": 16,
+			"tileSpanDeg": 11.25,
+			"postSpacingDeg": 0.087890625,
+			"globalPostsX": 4097,
+			"globalPostsY": 2049
+		},
+		{
+			"level": 5,
+			"tilesX": 64,
+			"tilesY": 32,
+			"tileSpanDeg": 5.625,
+			"postSpacingDeg": 0.0439453125,
+			"globalPostsX": 8193,
+			"globalPostsY": 4097
+		},
+		{
+			"level": 6,
+			"tilesX": 128,
+			"tilesY": 64,
+			"tileSpanDeg": 2.8125,
+			"postSpacingDeg": 0.02197265625,
+			"globalPostsX": 16385,
+			"globalPostsY": 8193
+		},
+		{
+			"level": 7,
+			"tilesX": 256,
+			"tilesY": 128,
+			"tileSpanDeg": 1.40625,
+			"postSpacingDeg": 0.010986328125,
+			"globalPostsX": 32769,
+			"globalPostsY": 16385
+		},
+		{
+			"level": 8,
+			"tilesX": 512,
+			"tilesY": 256,
+			"tileSpanDeg": 0.703125,
+			"postSpacingDeg": 0.0054931640625,
+			"globalPostsX": 65537,
+			"globalPostsY": 32769
+		},
+		{
+			"level": 9,
+			"tilesX": 1024,
+			"tilesY": 512,
+			"tileSpanDeg": 0.3515625,
+			"postSpacingDeg": 0.00274658203125,
+			"globalPostsX": 131073,
+			"globalPostsY": 65537
+		},
+		{
+			"level": 10,
+			"tilesX": 2048,
+			"tilesY": 1024,
+			"tileSpanDeg": 0.17578125,
+			"postSpacingDeg": 0.001373291015625,
+			"globalPostsX": 262145,
+			"globalPostsY": 131073
+		},
+		{
+			"level": 11,
+			"tilesX": 4096,
+			"tilesY": 2048,
+			"tileSpanDeg": 0.087890625,
+			"postSpacingDeg": 0.0006866455078125,
+			"globalPostsX": 524289,
+			"globalPostsY": 262145
+		},
+		{
+			"level": 12,
+			"tilesX": 8192,
+			"tilesY": 4096,
+			"tileSpanDeg": 0.0439453125,
+			"postSpacingDeg": 0.00034332275390625,
+			"globalPostsX": 1048577,
+			"globalPostsY": 524289
+		},
+		{
+			"level": 13,
+			"tilesX": 16384,
+			"tilesY": 8192,
+			"tileSpanDeg": 0.02197265625,
+			"postSpacingDeg": 0.000171661376953125,
+			"globalPostsX": 2097153,
+			"globalPostsY": 1048577
+		},
+		{
+			"level": 14,
+			"tilesX": 32768,
+			"tilesY": 16384,
+			"tileSpanDeg": 0.010986328125,
+			"postSpacingDeg": 8.58306884765625e-05,
+			"globalPostsX": 4194305,
+			"globalPostsY": 2097153
+		},
+		{
+			"level": 15,
+			"tilesX": 65536,
+			"tilesY": 32768,
+			"tileSpanDeg": 0.0054931640625,
+			"postSpacingDeg": 4.291534423828125e-05,
+			"globalPostsX": 8388609,
+			"globalPostsY": 4194305
+		}
+	],
+	"tileBounds": [
+		{
+			"level": 0,
+			"x": 0,
+			"y": 0,
+			"west": -180.0,
+			"south": -90.0,
+			"east": 0.0,
+			"north": 90.0
+		},
+		{
+			"level": 0,
+			"x": 1,
+			"y": 0,
+			"west": 0.0,
+			"south": -90.0,
+			"east": 180.0,
+			"north": 90.0
+		},
+		{
+			"level": 1,
+			"x": 1,
+			"y": 0,
+			"west": -90.0,
+			"south": 0.0,
+			"east": 0.0,
+			"north": 90.0
+		},
+		{
+			"level": 2,
+			"x": 2,
+			"y": 1,
+			"west": -90.0,
+			"south": 0.0,
+			"east": -45.0,
+			"north": 45.0
+		},
+		{
+			"level": 8,
+			"x": 133,
+			"y": 61,
+			"west": -86.484375,
+			"south": 46.40625,
+			"east": -85.78125,
+			"north": 47.109375
+		},
+		{
+			"level": 14,
+			"x": 8560,
+			"y": 3936,
+			"west": -85.95703125,
+			"south": 46.746826171875,
+			"east": -85.946044921875,
+			"north": 46.7578125
+		}
+	],
+	"lookups": [
+		{
+			"level": 0,
+			"lon": 0.0,
+			"lat": 0.0,
+			"x": 1,
+			"y": 0
+		},
+		{
+			"level": 0,
+			"lon": -180.0,
+			"lat": 90.0,
+			"x": 0,
+			"y": 0
+		},
+		{
+			"level": 0,
+			"lon": 179.999,
+			"lat": -89.999,
+			"x": 1,
+			"y": 0
+		},
+		{
+			"level": 8,
+			"lon": 12.492231,
+			"lat": 41.89021,
+			"x": 273,
+			"y": 68
+		},
+		{
+			"level": 14,
+			"lon": 12.492231,
+			"lat": 41.89021,
+			"x": 17521,
+			"y": 4379
+		},
+		{
+			"level": 14,
+			"lon": 6.8652,
+			"lat": 45.8326,
+			"x": 17008,
+			"y": 4020
+		}
+	]
+}

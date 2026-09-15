@@ -73,3 +73,9 @@ Plugins/**/Intermediate/*
 
 # Cache files for the editor to use
 DerivedDataCache/*
+
+# Pipeline dati
+Pipeline/**/__pycache__/
+Pipeline/synthetic_source/
+Pipeline/dataset/
+_work/

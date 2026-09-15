@@ -1,0 +1,15 @@
+# Dipendenze della pipeline dati.
+#
+# GDAL non si installa con pip su tutte le piattaforme: le sue rotelle binarie
+# non esistono ufficialmente su PyPI. Vie consigliate:
+#
+#   conda install -c conda-forge gdal pyproj numpy proj-data
+#   apt install gdal-bin python3-gdal python3-pyproj python3-numpy proj-data
+#   (Windows) OSGeo4W, oppure conda-forge
+#
+# proj-data contiene le griglie geoidiche, EGM2008 inclusa. Senza, la pipeline
+# si ferma nello stadio 2 con le istruzioni per procurarsele.
+
+GDAL>=3.4
+pyproj>=3.4
+numpy>=1.21
