@@ -2,7 +2,48 @@
 
 Da GeoTIFF TINITALY 1.1 a piramide di tile di quote, pronta per il runtime.
 
-## Prerequisiti
+## Installazione su Windows
+
+Su Windows **usa conda** (Miniforge o Miniconda). Non e' preferenza stilistica:
+`pip install gdal` non ha rotelle ufficiali su PyPI per Windows, quindi
+proverebbe a compilare GDAL da sorgente, cosa che richiede il toolchain C++ e le
+librerie di sistema. Con conda arriva tutto compilato e, soprattutto, con le
+variabili `GDAL_DATA` e `PROJ_DATA` gia' impostate correttamente.
+
+```bat
+conda create -n geoworld python=3.11
+conda activate geoworld
+conda install -c conda-forge gdal pyproj numpy proj-data
+```
+
+`proj-data` e' il pacchetto che contiene la griglia geoidica EGM2008. Senza,
+la pipeline si ferma allo stadio 2.
+
+**Prima cosa da lanciare, sempre:**
+
+```bat
+cd Pipeline
+python run.py check-env
+```
+
+Stampa versione di GDAL e PROJ, dove PROJ cerca i suoi dati, quali griglie
+geoidiche trova e — soprattutto — se la trasformazione verticale **funziona
+davvero**, provandola su punti italiani noti. Se qualcosa manca, dice cosa
+installare. Su Windows capita spesso di avere piu' installazioni di PROJ
+contemporaneamente (conda, OSGeo4W, quella dentro pyproj): `check-env` dice
+quale sta vincendo.
+
+Note specifiche Windows:
+
+* si lancia `python run.py ...`, non `./run.py`;
+* virgolette attorno ai pattern: `-i "tinitaly/*.tif"`;
+* `--jobs` avvia processi separati, e su Windows ognuno reimporta GDAL: con
+  poche tile conviene `--jobs 1`, il parallelismo ripaga sui livelli fini;
+* l'antivirus che scansiona in tempo reale rallenta molto la scrittura di
+  centinaia di migliaia di file piccoli. Vale la pena escludere la cartella di
+  output.
+
+## Installazione su Linux / macOS
 
 ```bash
 conda install -c conda-forge gdal pyproj numpy proj-data
@@ -10,26 +51,18 @@ conda install -c conda-forge gdal pyproj numpy proj-data
 apt install gdal-bin python3-gdal python3-pyproj python3-numpy proj-data
 ```
 
-`proj-data` contiene la griglia geoidica EGM2008. Verifica prima di partire:
-
-```bash
-./run.py check-geoid
-```
-
-Deve stampare valori di N fra 42 e 52 m per i punti italiani. Se fallisce, il
-messaggio dice esattamente cosa installare.
-
 ## Uso
 
 ```bash
-./run.py build -i 'tinitaly/*.tif' -o /dati/geoworld/italia
+python run.py check-env                              # sempre per primo
+python run.py build -i "tinitaly/*.tif" -o /dati/geoworld/italia
 ```
 
 Il livello massimo viene scelto da solo in base alla risoluzione del sorgente
 (per TINITALY a 10 m: livello 14, passo ~9.5 m). Per una prova rapida:
 
 ```bash
-./run.py build -i 'tinitaly/*.tif' -o /dati/prova --max-level 11
+python run.py build -i "tinitaly/*.tif" -o /dati/prova --max-level 11
 ```
 
 Rilanciare lo stesso comando riprende da dove si era interrotto: ogni stadio
@@ -50,9 +83,10 @@ concluso viene saltato, e le tile gia' scritte non si riscrivono.
 ### Altri comandi
 
 ```bash
-./run.py check-geoid                  # verifica la griglia geoidica
-./run.py inspect dataset/14/17525/4389.ght
-./run.py test-vectors -o vettori.json # valori di riferimento per il C++
+python run.py check-env               # diagnosi completa dell'ambiente
+python run.py check-geoid             # solo la griglia geoidica
+python run.py inspect dataset/14/17525/4389.ght
+python run.py test-vectors -o vettori.json   # riferimento per il C++
 ```
 
 ## Stadi
@@ -71,10 +105,17 @@ per riprendere un'elaborazione interrotta.
 
 ## Test
 
+Dalla cartella `Pipeline/`:
+
 ```bash
-PYTHONPATH=. python -m unittest discover -s tests -v
+python -m unittest discover -s tests -v
 ```
 
-I test di `test_dataset.py` generano un sorgente sintetico, ci fanno girare la
-pipeline completa e verificano il risultato. Usano EGM96 perche' e' inclusa in
-quasi tutte le distribuzioni di PROJ.
+I test di `test_dataset.py` generano un TINITALY sintetico, ci fanno girare la
+pipeline completa e verificano il risultato. Scelgono da soli il datum verticale
+disponibile (EGM2008 se c'e', altrimenti EGM96).
+
+Se nessuna griglia geoidica e' installata, i test **saltano** con un messaggio
+che lo dice, invece di fallire. Se un passo della pipeline fallisce davvero, il
+messaggio riporta il comando e lo stderr completo: se vedi un traceback che
+finisce in `setUpClass` senza altro, stai usando una versione vecchia dei test.

@@ -71,10 +71,13 @@ cmake --build build
 
 ```bash
 cd Pipeline
-./run.py check-geoid                              # verifica la griglia geoidica
-./run.py build -i 'tinitaly/*.tif' -o dataset/italia
-PYTHONPATH=. python -m unittest discover -s tests # 26 test, sorgente sintetico
+python run.py check-env                           # diagnosi: GDAL, PROJ, griglie
+python run.py build -i "tinitaly/*.tif" -o dataset/italia
+python -m unittest discover -s tests              # 26 test, sorgente sintetico
 ```
+
+Su Windows serve conda: vedi `Pipeline/README.md`.
+Per il quadro d'insieme delle sei fasi: `docs/programma.md`.
 
 ## Verifica in Unreal
 

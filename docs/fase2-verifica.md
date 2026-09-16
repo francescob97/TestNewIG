@@ -7,7 +7,8 @@ risultato. Non serve scaricare niente.
 
 ```bash
 cd Pipeline
-PYTHONPATH=. python -m unittest discover -s tests -v
+python run.py check-env                      # prima di tutto: diagnosi ambiente
+python -m unittest discover -s tests -v
 ```
 
 Attesi **26 test verdi** (15 di schema e formato, 11 di integrazione).
@@ -30,7 +31,7 @@ distribuzioni di PROJ. Il dataset di produzione usa EGM2008.
 
 ```bash
 cd Pipeline
-./run.py check-geoid
+python run.py check-env
 ```
 
 Deve stampare N fra 42 e 52 m per i cinque punti italiani. **Se questo comando
@@ -41,7 +42,7 @@ installare.
 ## C. Sui dati veri
 
 ```bash
-./run.py build -i '/dati/tinitaly/*.tif' -o /dati/geoworld/italia
+python run.py build -i "/dati/tinitaly/*.tif" -o /dati/geoworld/italia
 ```
 
 Cose da guardare nell'output:
@@ -60,7 +61,7 @@ Cose da guardare nell'output:
 Ispezione a campione:
 
 ```bash
-./run.py inspect /dati/geoworld/italia/14/17525/4389.ght
+python run.py inspect /dati/geoworld/italia/14/17525/4389.ght
 ```
 
 Stampa bbox della tile, passo, quote e i quattro angoli.

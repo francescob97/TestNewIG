@@ -18,7 +18,32 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from geoworld import tiling, tileformat, geoid, manifest as manifest_module
 
 PIPELINE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-VERTICAL_CRS = "EPSG:5773"
+
+#: Scelto a tempo di esecuzione fra quelli disponibili: si preferisce EGM2008,
+#: si ripiega su EGM96. Fissarne uno a priori faceva fallire la suite su
+#: macchine dove quella griglia non c'e', con un errore che non lo diceva.
+VERTICAL_CRS: str | None = None
+
+
+def run_step(arguments: list[str], what: str) -> subprocess.CompletedProcess:
+    """
+    Esegue un passo della pipeline RIPORTANDO l'errore vero se fallisce.
+
+    Prima questa funzione buttava via stdout e stderr con DEVNULL: qualunque
+    problema (GDAL assente, griglia geoidica mancante, percorso sbagliato)
+    arrivava come un CalledProcessError nudo dentro setUpClass, cioe' un
+    traceback che non diceva niente sulla causa. Un test che nasconde il motivo
+    del fallimento e' peggio di un test assente, perche' fa perdere tempo.
+    """
+    result = subprocess.run(arguments, env=dict(os.environ, PYTHONPATH=PIPELINE_DIR),
+                            capture_output=True, text=True)
+    if result.returncode != 0:
+        raise AssertionError(
+            f"{what} e' fallito (codice {result.returncode}).\n"
+            f"--- comando ---\n{' '.join(arguments)}\n"
+            f"--- stderr ---\n{result.stderr.strip()}\n"
+            f"--- stdout ---\n{result.stdout.strip()}")
+    return result
 
 
 def build_once(directory: str) -> tuple[str, str]:
@@ -26,16 +51,14 @@ def build_once(directory: str) -> tuple[str, str]:
     source = os.path.join(directory, "synth")
     dataset = os.path.join(directory, "dataset")
 
-    environment = dict(os.environ, PYTHONPATH=PIPELINE_DIR)
-    subprocess.run([sys.executable, os.path.join(PIPELINE_DIR, "make_synthetic_source.py"),
-                    "-o", source], check=True, env=environment,
-                   stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-    subprocess.run([sys.executable, os.path.join(PIPELINE_DIR, "run.py"), "build",
-                    "-i", os.path.join(source, "*.tif"), "-o", dataset,
-                    "--vertical-crs", VERTICAL_CRS,
-                    "--min-level", "9", "--max-level", "13", "--jobs", "1"],
-                   check=True, env=environment,
-                   stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    run_step([sys.executable, os.path.join(PIPELINE_DIR, "make_synthetic_source.py"),
+              "-o", source], "la generazione del sorgente sintetico")
+
+    run_step([sys.executable, os.path.join(PIPELINE_DIR, "run.py"), "build",
+              "-i", os.path.join(source, "*.tif"), "-o", dataset,
+              "--vertical-crs", VERTICAL_CRS,
+              "--min-level", "9", "--max-level", "13", "--jobs", "1"],
+             "la pipeline")
     return source, dataset
 
 
@@ -43,6 +66,23 @@ class TestGeneratedDataset(unittest.TestCase):
 
     @classmethod
     def setUpClass(cls):
+        # Prerequisiti: se mancano si SALTA con un messaggio che dice cosa
+        # installare, invece di fallire come se il codice fosse rotto.
+        try:
+            from osgeo import gdal            # noqa: F401
+            import pyproj                     # noqa: F401
+        except ImportError as error:
+            raise unittest.SkipTest(
+                f"manca una dipendenza ({error}). Lancia:  python run.py check-env")
+
+        global VERTICAL_CRS
+        from geoworld import environment
+        VERTICAL_CRS = environment.best_available_vertical_crs()
+        if VERTICAL_CRS is None:
+            raise unittest.SkipTest(
+                "nessuna griglia geoidica utilizzabile (ne' EGM2008 ne' EGM96). "
+                "Lancia:  python run.py check-env")
+
         cls._temporary = tempfile.TemporaryDirectory()
         cls.source_dir, cls.dataset_dir = build_once(cls._temporary.name)
         cls.manifest = manifest_module.read_manifest(cls.dataset_dir)
@@ -283,13 +323,12 @@ class TestGeneratedDataset(unittest.TestCase):
         esplicito di riavviabilita': su un dataset vero uno stadio dura ore, e
         ripartire da zero dopo un'interruzione non e' accettabile.
         """
-        environment = dict(os.environ, PYTHONPATH=PIPELINE_DIR)
-        result = subprocess.run(
+        result = run_step(
             [sys.executable, os.path.join(PIPELINE_DIR, "run.py"), "build",
              "-i", os.path.join(self.source_dir, "*.tif"), "-o", self.dataset_dir,
              "--vertical-crs", VERTICAL_CRS,
              "--min-level", "9", "--max-level", "13", "--jobs", "1"],
-            check=True, env=environment, capture_output=True, text=True)
+            "il secondo lancio della pipeline")
 
         output = result.stderr
         for stage in ("inventory", "geoid", "warp", "pyramid", "tiles"):
@@ -312,14 +351,13 @@ class TestGeneratedDataset(unittest.TestCase):
             os.remove(os.path.join(self.dataset_dir,
                                    tileformat.tile_relative_path(level, x, y)))
 
-        environment = dict(os.environ, PYTHONPATH=PIPELINE_DIR)
-        result = subprocess.run(
+        result = run_step(
             [sys.executable, os.path.join(PIPELINE_DIR, "run.py"), "build",
              "-i", os.path.join(self.source_dir, "*.tif"), "-o", self.dataset_dir,
              "--vertical-crs", VERTICAL_CRS,
              "--min-level", "9", "--max-level", "13", "--jobs", "1",
              "--redo", "tiles"],
-            check=True, env=environment, capture_output=True, text=True)
+            "il rilancio dopo la cancellazione delle tile")
 
         for (x, y) in tiles:
             self.assertTrue(os.path.exists(os.path.join(

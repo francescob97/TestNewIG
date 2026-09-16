@@ -27,7 +27,7 @@ import time
 
 import numpy as np
 
-from . import __version__, tiling, tileformat, geoid, manifest as manifest_module
+from . import __version__, tiling, tileformat, geoid, environment, manifest as manifest_module
 from .raster import (LevelGrid, level_grid_for_bbox, build_source_vrt, source_bounds_wgs84,
                      warp_and_convert_heights, reduce_level,
                      write_undulation_geotiff, read_undulation_geotiff)
@@ -73,6 +73,16 @@ def human_bytes(count: float) -> str:
 # --- comando principale ----------------------------------------------------
 
 def command_build(args: argparse.Namespace) -> int:
+    # Fallire subito e con un messaggio utile, invece di un ImportError nudo
+    # dopo che l'utente ha gia' lanciato un'elaborazione da ore.
+    try:
+        from osgeo import gdal  # noqa: F401
+        import pyproj           # noqa: F401
+    except ImportError as error:
+        log(f"Dipendenza mancante: {error}")
+        log("Lancia 'python run.py check-env' per la diagnosi e le istruzioni.")
+        return 4
+
     inputs = sorted({path for pattern in args.input for path in glob.glob(pattern)})
     if not inputs:
         log(f"Nessun file corrisponde a {args.input}")
@@ -299,6 +309,13 @@ def command_build(args: argparse.Namespace) -> int:
 
 # --- comandi accessori -----------------------------------------------------
 
+def command_check_env(args: argparse.Namespace) -> int:
+    """Diagnostica completa dell'ambiente. E' il primo comando da lanciare."""
+    report = environment.collect()
+    print(environment.format_report(report))
+    return 0 if report.ready else 3
+
+
 def command_check_geoid(args: argparse.Namespace) -> int:
     try:
         info = geoid.check_vertical_transform(args.vertical_crs)
@@ -367,6 +384,11 @@ def build_parser() -> argparse.ArgumentParser:
     build.add_argument("--redo", nargs="*", default=[], choices=STAGES,
                        help="invalida gli stadi indicati e li riesegue")
     build.set_defaults(func=command_build)
+
+    subparsers.add_parser(
+        "check-env",
+        help="diagnostica l'ambiente (GDAL, PROJ, griglie geoidiche)"
+    ).set_defaults(func=command_check_env)
 
     check = subparsers.add_parser("check-geoid",
                                   help="verifica che la griglia geoidica sia disponibile")

@@ -1,6 +1,12 @@
 """Schema di tiling: proprieta' geometriche. Nessuna dipendenza esterna."""
 import unittest
 
+import os
+import sys
+
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+
 from geoworld import tiling
 
 
