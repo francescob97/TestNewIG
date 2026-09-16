@@ -46,7 +46,14 @@ def main() -> int:
     parser.add_argument("--tiles-y", type=int, default=2)
     parser.add_argument("--tile-pixels", type=int, default=1000)
     parser.add_argument("--pixel-size", type=float, default=10.0)
+    # Un sorgente GEOGRAFICO (EPSG:4326) ha il pixel in GRADI, non in metri:
+    # e' il caso del Copernicus DEM, ed e' quello che ha fatto emergere il bug
+    # della risoluzione interpretata nelle unita' sbagliate.
+    parser.add_argument("--epsg", type=int, default=32632, choices=[32632, 4326])
     args = parser.parse_args()
+
+    if args.epsg == 4326:
+        return write_geographic(args)
 
     os.makedirs(args.output, exist_ok=True)
 
@@ -97,6 +104,56 @@ def main() -> int:
     total_km = (args.tiles_x * span / 1000.0, args.tiles_y * span / 1000.0)
     print(f"{len(written)} file in {args.output}/  "
           f"({total_km[0]:.0f} x {total_km[1]:.0f} km a {args.pixel_size:.0f} m)")
+    return 0
+
+
+def write_geographic(args) -> int:
+    """
+    Variante geografica: stesso terreno, CRS EPSG:4326, pixel in gradi.
+
+    Riproduce la caratteristica del Copernicus DEM che conta per i test: il
+    numero nel geotransform (1/3600 di grado) e' quattro ordini di grandezza
+    piu' piccolo della risoluzione reale sul terreno (~30 m).
+    """
+    os.makedirs(args.output, exist_ok=True)
+
+    pixel_degrees = 1.0 / 3600.0            # 1 arcosecondo, come il Copernicus
+    origin_lon, origin_lat = 12.0, 42.0     # angolo nord-ovest
+
+    srs = osr.SpatialReference()
+    srs.ImportFromEPSG(4326)
+    srs.SetAxisMappingStrategy(osr.OAMS_TRADITIONAL_GIS_ORDER)
+
+    written = []
+    for ty in range(args.tiles_y):
+        for tx in range(args.tiles_x):
+            west = origin_lon + tx * args.tile_pixels * pixel_degrees
+            north = origin_lat - ty * args.tile_pixels * pixel_degrees
+
+            columns = np.arange(args.tile_pixels) + 0.5
+            rows = np.arange(args.tile_pixels) + 0.5
+            lon = west + columns * pixel_degrees
+            lat = north - rows * pixel_degrees
+
+            # Stesso terreno, espresso in km approssimativi dall'origine locale.
+            easting = 780000.0 + (lon - origin_lon) * 111320.0 * np.cos(np.radians(41.7))
+            northing = 4650000.0 + (lat - origin_lat) * 111132.0
+            heights = synthetic_height(easting[np.newaxis, :], northing[:, np.newaxis])
+
+            path = os.path.join(args.output, f"geo_fake_{tx}_{ty}.tif")
+            dataset = gdal.GetDriverByName("GTiff").Create(
+                path, args.tile_pixels, args.tile_pixels, 1, gdal.GDT_Float32,
+                options=["TILED=YES", "COMPRESS=DEFLATE", "PREDICTOR=3"])
+            dataset.SetGeoTransform((west, pixel_degrees, 0.0,
+                                     north, 0.0, -pixel_degrees))
+            dataset.SetProjection(srs.ExportToWkt())
+            dataset.GetRasterBand(1).WriteArray(heights.astype(np.float32))
+            dataset.FlushCache()
+            dataset = None
+            written.append(path)
+
+    print(f"{len(written)} file EPSG:4326 in {args.output}/  "
+          f"(pixel {pixel_degrees:.8f} gradi = ~30 m)")
     return 0
 
 

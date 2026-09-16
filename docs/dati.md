@@ -39,6 +39,13 @@ python run.py fetch --area italia --dry-run -o dati/copernicus
 
 che elenca le tile e quanto pesano senza scaricare niente.
 
+**Nota sul livello massimo.** Il Copernicus e' in EPSG:4326, quindi il suo
+pixel e' in **gradi** (1/3600 = 0.000277), non in metri. La pipeline misura la
+risoluzione vera sul terreno (~23 m in longitudine, ~31 m in latitudine alle
+latitudini italiane) e sceglie il **livello 13**. Se vedi `livello nativo
+consigliato: 20`, qualcosa non va nel riconoscimento del CRS: fermati e
+segnalalo, non forzare il livello a mano.
+
 **Nota sul mare.** Il Copernicus DEM non usa un valore di nodata: il mare vale
 `0.000` (ortometrico), che la pipeline converte correttamente in ~48 m
 ellissoidici, cioe' il livello medio del mare. Conseguenza pratica: **non ci

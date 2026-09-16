@@ -11,7 +11,7 @@ python run.py check-env                      # prima di tutto: diagnosi ambiente
 python -m unittest discover -s tests -v
 ```
 
-Attesi **26 test verdi** (15 di schema e formato, 11 di integrazione).
+Attesi **32 test verdi** (15 di schema e formato, 11 di integrazione, 6 di risoluzione).
 
 | Test | Cosa dimostra | Misurato |
 |---|---|---|
@@ -23,6 +23,8 @@ Attesi **26 test verdi** (15 di schema e formato, 11 di integrazione).
 | `index_matches_files_on_disk` | l'indice non cita tile inesistenti e i min/max coincidono | — |
 | `second_run_rewrites_nothing` | idempotenza per stadio | tutti gli stadi saltati |
 | `deleted_tiles_are_regenerated_and_the_others_are_not` | riavviabilita' vera | cancellate 5, riscritte 5 |
+| `level_choice_is_sane_for_both_crs` | la risoluzione e' misurata in metri sul terreno, non nelle unita' del CRS | UTM -> livello 14, geografico -> livello 13 |
+| `infeasible_level_is_refused_with_a_useful_message` | un livello irrealizzabile si ferma prima di GDAL | — |
 
 I test usano EGM96 (`EPSG:5773`) perche' e' inclusa in quasi tutte le
 distribuzioni di PROJ. Il dataset di produzione usa EGM2008.
@@ -48,8 +50,17 @@ python run.py build -i "/dati/tinitaly/*.tif" -o /dati/geoworld/italia
 Cose da guardare nell'output:
 
 1. **Stadio 1** — `bbox` deve coprire l'Italia (circa `6.6 35.4 18.6 47.1`) e
-   `livello nativo consigliato` deve dire **14**. Se dice un numero diverso, il
-   pixel del sorgente non e' quello che ci si aspetta.
+   la riga **`risoluzione sul terreno`** deve dire circa **10 m** per TINITALY
+   o **23 x 31 m** per il Copernicus DEM. E' la riga da guardare: il `pixel`
+   riportato sopra e' nelle unita' del CRS sorgente (metri per TINITALY, gradi
+   per il Copernicus) e non e' confrontabile fra le due fonti.
+   `livello nativo consigliato` deve poi dire **14** per TINITALY, **13** per
+   il Copernicus. Se dice 20, la risoluzione e' stata misurata male: fermati.
+
+   Subito dopo viene stampata una tabella con la dimensione di ogni raster
+   intermedio e il numero di tile candidate per livello. Serve a vedere a colpo
+   d'occhio, prima che parta l'elaborazione, se si sta per chiedere qualcosa di
+   assurdo.
 2. **Stadio 2** — `N(Colosseo)` deve valere ~48 m. Se vale 0, la griglia
    geoidica non sta funzionando (ma il preflight avrebbe gia' fermato tutto).
 3. **Stadio 3** — `post con dato` dice quale frazione del bbox e' terraferma:

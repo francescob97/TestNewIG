@@ -29,6 +29,7 @@ import numpy as np
 
 from . import __version__, tiling, tileformat, geoid, environment, fetch as fetch_module, manifest as manifest_module
 from .raster import (LevelGrid, level_grid_for_bbox, build_source_vrt, source_bounds_wgs84,
+                     source_ground_resolution, check_level_is_feasible,
                      warp_and_convert_heights, reduce_level,
                      write_undulation_geotiff, read_undulation_geotiff)
 from .tilecut import cut_level
@@ -109,12 +110,21 @@ def command_build(args: argparse.Namespace) -> int:
         log(f"      {len(inputs)} file sorgente")
         source_info = build_source_vrt(inputs, vrt_path, source_crs=args.source_crs)
         source_info["boundsWgs84"] = source_bounds_wgs84(vrt_path)
+        source_info["resolution"] = source_ground_resolution(vrt_path)
         source_info["files"] = [os.path.basename(path) for path in inputs[:20]]
         state.mark_complete("inventory", fingerprint, [vrt_path], source_info)
 
     west, south, east, north = source_info["boundsWgs84"]
     centre_latitude = (south + north) / 2.0
-    source_resolution = max(source_info["pixelSizeX"], source_info["pixelSizeY"])
+
+    # ------------------------------------------------------------------
+    #  La risoluzione va misurata SUL TERRENO, non letta dal geotransform.
+    #  Il geotransform e' nelle unita' del CRS sorgente: metri per TINITALY
+    #  (UTM 32N), GRADI per il Copernicus DEM (EPSG:4326). Confondere le due
+    #  cose fa scegliere un livello di piramide centomila volte troppo fine.
+    # ------------------------------------------------------------------
+    resolution = source_info["resolution"]
+    source_resolution = resolution["finestMetres"]
 
     log(f"      mosaico  : {source_info['width']} x {source_info['height']} px, "
         f"{source_info['dataType']}, nodata={source_info['nodata']}")
@@ -129,11 +139,18 @@ def command_build(args: argparse.Namespace) -> int:
         log("            li legge, ma convertirli in GeoTIFF prima e' molto piu' veloce:")
         log('            gdal_translate -of GTiff -co COMPRESS=DEFLATE -co PREDICTOR=3 in.asc out.tif')
     log(f"      bbox     : {west:.5f} {south:.5f} {east:.5f} {north:.5f}")
-    log(f"      pixel    : {source_resolution:.2f} (unita' del CRS sorgente)")
+    log(f"      pixel    : {resolution['nativePixelX']:.8g} {resolution['nativeUnits']} "
+        f"(unita' del CRS sorgente)")
+    log(f"      risoluzione sul terreno: {resolution['groundResolutionXMetres']:.2f} m "
+        f"(lon) x {resolution['groundResolutionYMetres']:.2f} m (lat)")
 
     native_level = tiling.recommended_max_level(source_resolution, centre_latitude)
     max_level = args.max_level if args.max_level is not None else native_level
     min_level = args.min_level
+
+    if min_level > max_level:
+        log(f"      --min-level {min_level} e' maggiore di --max-level {max_level}.")
+        return 2
 
     spacing_lon, spacing_lat = tiling.post_spacing_metres(max_level, centre_latitude)
     log(f"      livello nativo consigliato: {native_level}"
@@ -141,7 +158,14 @@ def command_build(args: argparse.Namespace) -> int:
     log(f"      passo post al livello {max_level}: "
         f"{spacing_lat:.2f} m in latitudine, {spacing_lon:.2f} m in longitudine")
 
-    if max_level < native_level:
+    if native_level >= tiling.MAX_SUPPORTED_LEVEL:
+        log("")
+        log(f"      ATTENZIONE: il livello consigliato ha toccato il tetto "
+            f"({tiling.MAX_SUPPORTED_LEVEL}).")
+        log(f"      Significa che la risoluzione misurata ({source_resolution:.4g} m) e'")
+        log("      implausibilmente fine. Controlla il CRS dei file sorgente, oppure")
+        log("      imponi il livello a mano con --max-level.")
+    elif max_level < native_level:
         log(f"      NOTA: al livello {max_level} si perde risoluzione rispetto al "
             f"dato sorgente (nativo: livello {native_level}).")
 
@@ -185,6 +209,34 @@ def command_build(args: argparse.Namespace) -> int:
     # ---------------------------------------------------------------- 3 ----
     grids = {level: level_grid_for_bbox(level, (west, south, east, north))
              for level in range(min_level, max_level + 1)}
+
+    # Riepilogo PRIMA di muovere un byte: dimensione di ogni raster intermedio e
+    # numero di tile candidate. E' qui che un livello massimo sbagliato si vede
+    # a colpo d'occhio, invece di manifestarsi come un errore di GDAL dopo
+    # minuti di elaborazione.
+    log("")
+    log("      livello      raster (post)        intermedio    tile candidate")
+    total_intermediate = 0
+    total_candidates = 0
+    for level in range(max_level, min_level - 1, -1):
+        grid = grids[level]
+        intermediate = grid.width * grid.height * 4
+        total_intermediate += intermediate
+        x0, y0, x1, y1 = tiling.tile_range_for_bbox(level, west, south, east, north)
+        candidates = (x1 - x0 + 1) * (y1 - y0 + 1)
+        total_candidates += candidates
+        log(f"      {level:>7}   {grid.width:>8,} x {grid.height:<8,}  "
+            f"{human_bytes(intermediate):>10}    {candidates:>12,}")
+    log(f"      totale intermedi ~{human_bytes(total_intermediate)} "
+        f"(compressi: molto meno), fino a {total_candidates:,} tile "
+        f"= {human_bytes(total_candidates * tileformat.TILE_BYTES)}")
+    log("")
+
+    try:
+        check_level_is_feasible(grids[max_level])
+    except RuntimeError as error:
+        log(str(error))
+        return 5
 
     def level_raster(level: int) -> str:
         return os.path.join(work_dir, f"height_L{level:02d}.tif")

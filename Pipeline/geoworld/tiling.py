@@ -74,6 +74,29 @@ TILE_CELLS = TILE_POSTS - 1
 LON_MIN, LON_MAX = -180.0, 180.0
 LAT_MIN, LAT_MAX = -90.0, 90.0
 
+#: Conversione gradi -> metri, approssimazione sferica. Serve solo a
+#: DIMENSIONARE (scegliere un livello, stimare uno spazio su disco): non entra
+#: mai in un calcolo di posizione, dove si usa l'ellissoide vero di GeoCore.
+#: Sta qui, in un punto solo, perche' confrontare la risoluzione del sorgente
+#: con il passo di un livello usando due approssimazioni diverse darebbe
+#: risposte incoerenti.
+METRES_PER_DEGREE_LAT = 111132.0
+METRES_PER_DEGREE_LON_AT_EQUATOR = 111320.0
+
+#: Livello oltre il quale non ha senso spingersi. Al livello 20 il passo fra
+#: post e' ~16 cm: sotto la risoluzione di qualunque DEM esistente, e con
+#: raster che nessun formato raster gestisce. Serve a trasformare un errore di
+#: unita' di misura in un messaggio comprensibile invece che in un crash di GDAL
+#: quattro stadi piu' avanti.
+MAX_SUPPORTED_LEVEL = 20
+
+
+def metres_per_degree(latitude_deg: float) -> tuple[float, float]:
+    """(metri per grado di longitudine, metri per grado di latitudine)."""
+    import math
+    return (METRES_PER_DEGREE_LON_AT_EQUATOR * math.cos(math.radians(latitude_deg)),
+            METRES_PER_DEGREE_LAT)
+
 
 # --- Geometria dei livelli ------------------------------------------------
 
@@ -105,11 +128,9 @@ def post_spacing_metres(level: int, latitude_deg: float = 0.0) -> tuple[float, f
     cui il passo eguaglia la risoluzione nativa del dato sorgente, non oltre.
     Usa l'approssimazione sferica: e' una stima per dimensionare, non una misura.
     """
-    import math
-    metres_per_degree_lat = 111132.0
-    metres_per_degree_lon = 111320.0 * math.cos(math.radians(latitude_deg))
+    lon_metres, lat_metres = metres_per_degree(latitude_deg)
     spacing = post_spacing_deg(level)
-    return spacing * metres_per_degree_lon, spacing * metres_per_degree_lat
+    return spacing * lon_metres, spacing * lat_metres
 
 
 # --- Geometria della singola tile -----------------------------------------
@@ -221,6 +242,13 @@ def recommended_max_level(source_resolution_m: float, latitude_deg: float) -> in
     Livello il cui passo fra post eguaglia (senza superarla) la risoluzione
     nativa del dato sorgente alla latitudine indicata.
 
+    ATTENZIONE: `source_resolution_m` deve essere in METRI SUL TERRENO. Non e'
+    la dimensione del pixel letta dal geotransform, che e' nelle unita' del CRS
+    sorgente: per un raster geografico (EPSG:4326) sono GRADI, e passare 0.00028
+    al posto di 31 fa chiedere una risoluzione centomila volte piu' fine.
+    Usa raster.source_ground_resolution(), che misura la distanza vera fra due
+    pixel adiacenti qualunque sia il CRS.
+
     Si sceglie il primo livello il cui passo in LATITUDINE scende sotto la
     risoluzione sorgente. In longitudine il passo e' gia' piu' fine, perche' un
     grado di longitudine vale meno metri: alle latitudini italiane si finisce
@@ -228,11 +256,14 @@ def recommended_max_level(source_resolution_m: float, latitude_deg: float) -> in
     conservativa giusta: sovracampionare non inventa dettaglio, mentre fermarsi
     al livello precedente butterebbe via meta' della risoluzione del dato.
     """
-    for level in range(0, 25):
+    if not (source_resolution_m > 0.0):
+        raise ValueError(f"risoluzione sorgente non valida: {source_resolution_m}")
+
+    for level in range(0, MAX_SUPPORTED_LEVEL + 1):
         _, spacing_lat = post_spacing_metres(level, latitude_deg)
         if spacing_lat <= source_resolution_m:
             return level
-    return 24
+    return MAX_SUPPORTED_LEVEL
 
 
 # --- Vettori di prova per l'implementazione C++ ---------------------------

@@ -129,6 +129,10 @@ Dalla cartella `Pipeline/`:
 python -m unittest discover -s tests -v
 ```
 
+I test di `test_resolution.py` verificano che la risoluzione del sorgente sia
+misurata in metri sul terreno e non nelle unita' del CRS: e' la regressione di
+un bug che portava la pipeline a chiedere il livello 24.
+
 I test di `test_dataset.py` generano un TINITALY sintetico, ci fanno girare la
 pipeline completa e verificano il risultato. Scelgono da soli il datum verticale
 disponibile (EGM2008 se c'e', altrimenti EGM96).

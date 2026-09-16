@@ -234,6 +234,100 @@ def source_bounds_wgs84(vrt_path: str) -> tuple[float, float, float, float]:
     return (min(lons), min(lats), max(lons), max(lats))
 
 
+def source_ground_resolution(vrt_path: str) -> dict:
+    """
+    Risoluzione del sorgente in METRI SUL TERRENO, qualunque sia il suo CRS.
+
+    PERCHE' NON BASTA IL GEOTRANSFORM: la dimensione del pixel che GDAL riporta
+    e' nelle unita' del sistema di riferimento del file. Per TINITALY (UTM 32N)
+    sono metri e si puo' usare direttamente; per il Copernicus DEM (EPSG:4326)
+    sono GRADI, e 0.000277 gradi valgono ~31 metri. Usare il numero grezzo fa
+    credere al codice di avere un dato mille volte piu' fine del vero, con la
+    conseguenza di chiedere un livello di piramide assurdo.
+
+    Qui si misura invece la distanza vera fra il centro di un pixel e quello dei
+    suoi vicini, portando entrambi in coordinate geografiche. Funziona per
+    qualunque CRS sorgente, comprese le proiezioni con rotazione, e non richiede
+    di sapere in che unita' sia il file.
+    """
+    from osgeo import gdal, osr
+    gdal.UseExceptions()
+
+    dataset = gdal.Open(vrt_path)
+    geotransform = dataset.GetGeoTransform()
+
+    source_srs = osr.SpatialReference(wkt=dataset.GetProjection())
+    target_srs = osr.SpatialReference()
+    target_srs.ImportFromEPSG(4326)
+    for srs in (source_srs, target_srs):
+        srs.SetAxisMappingStrategy(osr.OAMS_TRADITIONAL_GIS_ORDER)
+    transform = osr.CoordinateTransformation(source_srs, target_srs)
+
+    def to_lonlat(pixel_x: float, pixel_y: float) -> tuple[float, float]:
+        x = geotransform[0] + pixel_x * geotransform[1] + pixel_y * geotransform[2]
+        y = geotransform[3] + pixel_x * geotransform[4] + pixel_y * geotransform[5]
+        lon, lat, _ = transform.TransformPoint(x, y)
+        return lon, lat
+
+    # Si misura al CENTRO del raster: e' il punto meno soggetto alle
+    # deformazioni di bordo di una proiezione.
+    centre_x = dataset.RasterXSize / 2.0
+    centre_y = dataset.RasterYSize / 2.0
+
+    lon0, lat0 = to_lonlat(centre_x + 0.5, centre_y + 0.5)
+    lon_east, lat_east = to_lonlat(centre_x + 1.5, centre_y + 0.5)
+    lon_south, lat_south = to_lonlat(centre_x + 0.5, centre_y + 1.5)
+
+    lon_metres, lat_metres = tiling.metres_per_degree(lat0)
+
+    def distance(lon_a, lat_a, lon_b, lat_b) -> float:
+        return math.hypot((lon_b - lon_a) * lon_metres, (lat_b - lat_a) * lat_metres)
+
+    resolution_x = distance(lon0, lat0, lon_east, lat_east)
+    resolution_y = distance(lon0, lat0, lon_south, lat_south)
+
+    units = source_srs.GetAttrValue("UNIT") or "sconosciute"
+    dataset = None
+
+    return {
+        "groundResolutionXMetres": resolution_x,
+        "groundResolutionYMetres": resolution_y,
+        "finestMetres": min(resolution_x, resolution_y),
+        "nativePixelX": abs(geotransform[1]),
+        "nativePixelY": abs(geotransform[5]),
+        "nativeUnits": units,
+        "centreLatitude": lat0,
+    }
+
+
+def check_level_is_feasible(grid: "LevelGrid") -> None:
+    """
+    Si ferma PRIMA di provare a creare un raster impossibile.
+
+    GDAL, davanti a un raster smisurato, fallisce con
+    'File too large regarding tile size. This would result in a file with tile
+    arrays larger than 2GB' - un messaggio che descrive un dettaglio interno del
+    formato TIFF e non dice niente sulla causa vera, che e' quasi sempre un
+    livello massimo sbagliato. Meglio intercettarlo qui.
+    """
+    pixels = grid.width * grid.height
+    blocks = (math.ceil(grid.width / 256.0) * math.ceil(grid.height / 256.0))
+
+    # Il limite reale di GDAL riguarda gli array di offset dei blocchi TIFF.
+    # Si taglia molto prima: oltre questa soglia il raster e' comunque
+    # inutilizzabile in pratica.
+    if blocks > 100_000_000 or pixels > 5e11:
+        raise RuntimeError(
+            f"Il raster del livello {grid.level} sarebbe {grid.width:,} x "
+            f"{grid.height:,} post ({pixels * 4 / 1e12:.1f} TB non compressi).\n"
+            "Non e' realizzabile, e quasi sempre significa che il livello massimo\n"
+            "e' stato scelto su una risoluzione sorgente sbagliata.\n\n"
+            "Cosa fare:\n"
+            "  - controlla la riga 'risoluzione' nello stadio 1: deve essere in metri\n"
+            "    e corrispondere al tuo dato (10 m per TINITALY, ~30 m per Copernicus);\n"
+            "  - oppure imponi il livello a mano, per esempio --max-level 13.")
+
+
 # ---------------------------------------------------------------------------
 #  Stadio 2: riproiezione orizzontale + quote ellissoidiche
 # ---------------------------------------------------------------------------
@@ -263,6 +357,8 @@ def warp_and_convert_heights(vrt_path: str, grid: LevelGrid, output_path: str,
     """
     from osgeo import gdal
     gdal.UseExceptions()
+
+    check_level_is_feasible(grid)
 
     warped = gdal.Warp("", vrt_path, options=gdal.WarpOptions(
         format="VRT",
