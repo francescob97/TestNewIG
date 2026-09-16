@@ -118,7 +118,8 @@ def level_grid_for_bbox(level: int, bbox: tuple[float, float, float, float],
 #  Stadio 1: inventario e mosaico virtuale
 # ---------------------------------------------------------------------------
 
-def build_source_vrt(inputs: list[str], vrt_path: str) -> dict:
+def build_source_vrt(inputs: list[str], vrt_path: str,
+                     source_crs: str | None = None) -> dict:
     """
     Mette tutti i GeoTIFF sorgente dietro un unico raster virtuale.
 
@@ -141,13 +142,47 @@ def build_source_vrt(inputs: list[str], vrt_path: str) -> dict:
     if vrt is None:
         raise RuntimeError(f"gdal.BuildVRT ha fallito su {len(inputs)} input")
 
+    projection = vrt.GetProjection()
+
+    # ------------------------------------------------------------------
+    #  Sorgenti senza proiezione dichiarata.
+    #
+    #  Capita davvero: i grid ESRI ASCII (.asc) non portano il CRS dentro il
+    #  file, sta in un .prj a fianco che spesso manca. Senza CRS la
+    #  riproiezione non puo' partire, e GDAL non se ne lamenta finche' non e'
+    #  troppo tardi. Meglio fermarsi qui dicendo cosa fare.
+    # ------------------------------------------------------------------
+    if not projection:
+        if not source_crs:
+            vrt = None
+            raise RuntimeError(
+                "I file sorgente non dichiarano nessun sistema di riferimento.\n"
+                "Succede tipicamente con i grid ESRI ASCII (.asc) privi del file .prj.\n"
+                "Indica il CRS esplicitamente, per esempio:\n"
+                "    --source-crs EPSG:32632      (TINITALY: UTM 32N WGS84)")
+
+        from osgeo import osr
+        srs = osr.SpatialReference()
+        srs.SetFromUserInput(source_crs)
+        srs.SetAxisMappingStrategy(osr.OAMS_TRADITIONAL_GIS_ORDER)
+        projection = srs.ExportToWkt()
+        vrt.SetProjection(projection)
+        vrt.FlushCache()
+
     geotransform = vrt.GetGeoTransform()
     band = vrt.GetRasterBand(1)
+
+    # Il driver del primo file: serve a segnalare i formati lenti da leggere.
+    first = gdal.Open(inputs[0])
+    driver_name = first.GetDriver().ShortName
+    first = None
+
     info = {
+        "driver": driver_name,
         "fileCount": len(inputs),
         "width": vrt.RasterXSize,
         "height": vrt.RasterYSize,
-        "crs": vrt.GetProjection(),
+        "crs": projection,
         "pixelSizeX": abs(geotransform[1]),
         "pixelSizeY": abs(geotransform[5]),
         "nodata": band.GetNoDataValue(),

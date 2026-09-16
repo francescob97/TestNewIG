@@ -51,11 +51,26 @@ conda install -c conda-forge gdal pyproj numpy proj-data
 apt install gdal-bin python3-gdal python3-pyproj python3-numpy proj-data
 ```
 
+## Non hai ancora i dati?
+
+```bat
+python run.py fetch --area test -o dati/copernicus
+```
+
+Scarica il Copernicus DEM GLO-30 (30 m, globale, libero, nessuna credenziale)
+per l'area indicata. `--area test` e' una sola tile su Roma, 19 MB. Le altre
+aree sono `roma`, `alpi`, `sicilia`, `italia`; oppure `--bbox OVEST SUD EST NORD`.
+Con `--dry-run` elenca cosa scaricherebbe e quanto pesa, senza scaricare.
+
+TINITALY (10 m, solo Italia) si scarica a mano dal sito INGV: vedi `docs/dati.md`.
+
 ## Uso
 
-```bash
-python run.py check-env                              # sempre per primo
-python run.py build -i "tinitaly/*.tif" -o /dati/geoworld/italia
+```bat
+python run.py check-env                              :: sempre per primo
+python run.py fetch --area test -o dati/copernicus   :: se non hai dati
+python run.py build -i "dati/copernicus/*.tif" -o dataset/test
+python run.py verify -o dataset/test                 :: controlla il risultato
 ```
 
 Il livello massimo viene scelto da solo in base alla risoluzione del sorgente
@@ -77,16 +92,19 @@ concluso viene saltato, e le tile gia' scritte non si riscrivono.
 | `--vertical-crs` | `EPSG:3855` (EGM2008) | datum verticale del sorgente; `EPSG:5773` = EGM96 |
 | `--resampling` | `bilinear` | ricampionamento della riproiezione orizzontale |
 | `--jobs N` | meta' dei core | processi per il ritaglio delle tile |
+| `--source-crs` | dal file | CRS del sorgente se i file non lo dichiarano (grid ESRI ASCII) |
 | `--redo STADIO...` | — | invalida e riesegue gli stadi indicati |
 | `--force-tiles` | off | riscrive tutte le tile anche se presenti |
 
 ### Altri comandi
 
-```bash
-python run.py check-env               # diagnosi completa dell'ambiente
-python run.py check-geoid             # solo la griglia geoidica
+```bat
+python run.py check-env               :: diagnosi completa dell'ambiente
+python run.py check-geoid             :: solo la griglia geoidica
+python run.py fetch --area italia --dry-run -o dati    :: cosa scaricherei
+python run.py verify -o dataset/italia                 :: controlla un dataset
 python run.py inspect dataset/14/17525/4389.ght
-python run.py test-vectors -o vettori.json   # riferimento per il C++
+python run.py test-vectors -o vettori.json   :: riferimento per il C++
 ```
 
 ## Stadi

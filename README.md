@@ -69,15 +69,18 @@ cmake --build build
 
 ## Pipeline dati
 
-```bash
+```bat
 cd Pipeline
-python run.py check-env                           # diagnosi: GDAL, PROJ, griglie
-python run.py build -i "tinitaly/*.tif" -o dataset/italia
-python -m unittest discover -s tests              # 26 test, sorgente sintetico
+python run.py check-env                            :: diagnosi: GDAL, PROJ, griglie
+python run.py fetch --area test -o dati/copernicus :: scarica un DEM libero
+python run.py build -i "dati/copernicus/*.tif" -o dataset/test
+python run.py verify -o dataset/test
+python -m unittest discover -s tests               :: 26 test, sorgente sintetico
 ```
 
 Su Windows serve conda: vedi `Pipeline/README.md`.
-Per il quadro d'insieme delle sei fasi: `docs/programma.md`.
+Da dove vengono i dati (DEM e ortofoto): `docs/dati.md`.
+Quadro d'insieme delle sei fasi: `docs/programma.md`.
 
 ## Verifica in Unreal
 

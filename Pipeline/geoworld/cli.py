@@ -27,7 +27,7 @@ import time
 
 import numpy as np
 
-from . import __version__, tiling, tileformat, geoid, environment, manifest as manifest_module
+from . import __version__, tiling, tileformat, geoid, environment, fetch as fetch_module, manifest as manifest_module
 from .raster import (LevelGrid, level_grid_for_bbox, build_source_vrt, source_bounds_wgs84,
                      warp_and_convert_heights, reduce_level,
                      write_undulation_geotiff, read_undulation_geotiff)
@@ -107,7 +107,7 @@ def command_build(args: argparse.Namespace) -> int:
     else:
         stage_header(1, "inventory")
         log(f"      {len(inputs)} file sorgente")
-        source_info = build_source_vrt(inputs, vrt_path)
+        source_info = build_source_vrt(inputs, vrt_path, source_crs=args.source_crs)
         source_info["boundsWgs84"] = source_bounds_wgs84(vrt_path)
         source_info["files"] = [os.path.basename(path) for path in inputs[:20]]
         state.mark_complete("inventory", fingerprint, [vrt_path], source_info)
@@ -118,6 +118,16 @@ def command_build(args: argparse.Namespace) -> int:
 
     log(f"      mosaico  : {source_info['width']} x {source_info['height']} px, "
         f"{source_info['dataType']}, nodata={source_info['nodata']}")
+    log(f"      formato  : {source_info.get('driver', '?')}")
+
+    # AAIGrid e' il driver dei grid ESRI ASCII. Sono file di TESTO: occupano
+    # circa dieci volte un GeoTIFF equivalente e si leggono molto piu' lentamente,
+    # perche' ogni valore va convertito da stringa. Su TINITALY intero la
+    # differenza e' fra minuti e ore.
+    if source_info.get("driver") == "AAIGrid":
+        log("      NOTA: i sorgenti sono grid ESRI ASCII (file di testo). La pipeline")
+        log("            li legge, ma convertirli in GeoTIFF prima e' molto piu' veloce:")
+        log('            gdal_translate -of GTiff -co COMPRESS=DEFLATE -co PREDICTOR=3 in.asc out.tif')
     log(f"      bbox     : {west:.5f} {south:.5f} {east:.5f} {north:.5f}")
     log(f"      pixel    : {source_resolution:.2f} (unita' del CRS sorgente)")
 
@@ -309,6 +319,27 @@ def command_build(args: argparse.Namespace) -> int:
 
 # --- comandi accessori -----------------------------------------------------
 
+def command_fetch(args: argparse.Namespace) -> int:
+    if args.bbox:
+        bbox = tuple(args.bbox)
+    else:
+        bbox = fetch_module.NAMED_AREAS[args.area]
+
+    result = fetch_module.fetch_copernicus(
+        bbox=bbox, directory=args.output, resolution=args.resolution,
+        jobs=args.jobs, dry_run=args.dry_run, log=log)
+
+    if not args.dry_run and result.get("tiles"):
+        log("")
+        name = args.area if not args.bbox else "area"
+        log("Prossimo passo:")
+        log(f'    python run.py build -i "{os.path.join(args.output, "*.tif")}" \\')
+        log(f'        -o dataset/{name} --name "Copernicus DEM GLO-{args.resolution}" \\')
+        log(f'        --source-description "Copernicus DEM GLO-{args.resolution}, '
+            f'EPSG:4326, quote EGM2008"')
+    return 0 if not result.get("failures") else 1
+
+
 def command_check_env(args: argparse.Namespace) -> int:
     """Diagnostica completa dell'ambiente. E' il primo comando da lanciare."""
     report = environment.collect()
@@ -345,6 +376,113 @@ def command_inspect(args: argparse.Namespace) -> int:
     return 0
 
 
+def command_verify(args: argparse.Namespace) -> int:
+    """
+    Controlla un dataset gia' generato.
+
+    I test automatici girano su un sorgente sintetico. Questo comando gira sul
+    dataset VERO, che e' quello che poi finisce nel motore: prima di fidarsi di
+    35 GB conviene controllarli. Campiona invece di leggere tutto, perche' su
+    centinaia di migliaia di tile la lettura completa durerebbe troppo per
+    essere una cosa che si fa davvero.
+    """
+    import random
+
+    root = args.output
+    try:
+        document = manifest_module.read_manifest(root)
+    except FileNotFoundError:
+        log(f"Nessun manifest.json in {root}: non e' un dataset GeoWorld.")
+        return 2
+
+    log(f"Dataset   : {document.get('datasetName')}")
+    log(f"Generato da: {document.get('generator')}")
+    vertical = document.get("verticalDatum", {})
+    log(f"Datum verticale: {vertical.get('verticalCrs', '?')}")
+    box = document["boundingBox"]
+    log(f"Bbox      : {box['west']:.5f} {box['south']:.5f} {box['east']:.5f} {box['north']:.5f}")
+    log("")
+
+    random.seed(args.seed)
+    problems: list[str] = []
+    total_tiles = 0
+    checked_tiles = 0
+    checked_seams = 0
+
+    for entry in document["levels"]:
+        level = entry["level"]
+        try:
+            index = manifest_module.read_level_index(root, level)
+        except (FileNotFoundError, ValueError) as error:
+            problems.append(f"livello {level}: indice illeggibile ({error})")
+            continue
+
+        total_tiles += len(index)
+        if entry["tile_count"] != len(index):
+            problems.append(f"livello {level}: il manifest dichiara {entry['tile_count']} "
+                            f"tile, l'indice ne ha {len(index)}")
+
+        present = {(item.x, item.y): item for item in index}
+        sample = random.sample(index, min(args.sample, len(index)))
+
+        for item in sample:
+            path = os.path.join(root, tileformat.tile_relative_path(level, item.x, item.y))
+            if not os.path.exists(path):
+                problems.append(f"{level}/{item.x}/{item.y}: nell'indice ma non su disco")
+                continue
+            try:
+                header, heights = tileformat.read_tile(path)
+            except (ValueError, OSError) as error:
+                problems.append(f"{level}/{item.x}/{item.y}: illeggibile ({error})")
+                continue
+
+            checked_tiles += 1
+
+            if (header.level, header.tile_x, header.tile_y) != (level, item.x, item.y):
+                problems.append(f"{level}/{item.x}/{item.y}: l'header dichiara "
+                                f"{header.level}/{header.tile_x}/{header.tile_y}")
+            if abs(header.min_height - item.min_height) > 1e-3:
+                problems.append(f"{level}/{item.x}/{item.y}: min nell'indice "
+                                f"{item.min_height:.3f}, nell'header {header.min_height:.3f}")
+            if not np.isfinite(heights).all():
+                problems.append(f"{level}/{item.x}/{item.y}: contiene valori non finiti")
+
+            # Giunzione con la tile a est, se esiste: e' la proprieta' che in
+            # Fase 5 decide se il terreno ha crepe o no.
+            neighbour = (item.x + 1, item.y)
+            if neighbour in present:
+                neighbour_path = os.path.join(
+                    root, tileformat.tile_relative_path(level, *neighbour))
+                if os.path.exists(neighbour_path):
+                    _, right = tileformat.read_tile(neighbour_path)
+                    checked_seams += 1
+                    if not np.array_equal(heights[:, tiling.TILE_CELLS], right[:, 0]):
+                        problems.append(
+                            f"GIUNZIONE ROTTA fra {level}/{item.x}/{item.y} e "
+                            f"{level}/{neighbour[0]}/{neighbour[1]}")
+
+        log(f"  livello {level:2d}: {len(index):>8,} tile, {len(sample)} campionate, "
+            f"quote {entry['min_height']:.1f}..{entry['max_height']:.1f} m")
+
+    log("")
+    log(f"Totale: {total_tiles:,} tile, {checked_tiles} verificate, "
+        f"{checked_seams} giunzioni controllate.")
+    log(f"Spazio stimato: {human_bytes(total_tiles * tileformat.TILE_BYTES)}")
+
+    if problems:
+        log("")
+        log(f"{len(problems)} PROBLEMI:")
+        for problem in problems[:30]:
+            log(f"  {problem}")
+        if len(problems) > 30:
+            log(f"  ... e altri {len(problems) - 30}")
+        return 1
+
+    log("")
+    log("Nessun problema rilevato.")
+    return 0
+
+
 def command_test_vectors(args: argparse.Namespace) -> int:
     tiling.dump_test_vectors(args.output)
     log(f"Vettori di prova dello schema di tiling scritti in {args.output}")
@@ -364,8 +502,10 @@ def build_parser() -> argparse.ArgumentParser:
                        help="GeoTIFF sorgente (accetta glob, es. 'tinitaly/*.tif')")
     build.add_argument("-o", "--output", required=True, help="cartella radice del dataset")
     build.add_argument("--work", help="cartella degli intermedi (default: <output>/_work)")
-    build.add_argument("--name", default="TINITALY 1.1", help="nome del dataset nel manifest")
-    build.add_argument("--source-description", default="TINITALY 1.1 (INGV), EPSG:32632, quote ortometriche")
+    build.add_argument("--name", default="senza nome",
+                       help="nome del dataset, finisce nel manifest")
+    build.add_argument("--source-description", default="non dichiarata",
+                       help="provenienza dei dati, finisce nel manifest")
     build.add_argument("--min-level", type=int, default=0)
     build.add_argument("--max-level", type=int, default=None,
                        help="default: il livello che eguaglia la risoluzione nativa del sorgente")
@@ -376,6 +516,9 @@ def build_parser() -> argparse.ArgumentParser:
                        help="passo della griglia di ondulazione, in gradi (default 0.01)")
     build.add_argument("--max-geoid-error", type=float, default=0.01,
                        help="errore massimo tollerato sull'interpolazione di N, in metri")
+    build.add_argument("--source-crs", default=None,
+                       help="CRS del sorgente, se i file non lo dichiarano "
+                            "(es. EPSG:32632 per i grid ESRI ASCII di TINITALY)")
     build.add_argument("--resampling", default="bilinear",
                        choices=["near", "bilinear", "cubic", "cubicspline", "lanczos", "average"])
     build.add_argument("--jobs", type=int, default=max(1, (os.cpu_count() or 2) // 2))
@@ -384,6 +527,21 @@ def build_parser() -> argparse.ArgumentParser:
     build.add_argument("--redo", nargs="*", default=[], choices=STAGES,
                        help="invalida gli stadi indicati e li riesegue")
     build.set_defaults(func=command_build)
+
+    fetch = subparsers.add_parser(
+        "fetch", help="scarica un DEM pubblico (Copernicus GLO-30) per un'area")
+    area_group = fetch.add_mutually_exclusive_group()
+    area_group.add_argument("--area", default="test",
+                            choices=sorted(fetch_module.NAMED_AREAS),
+                            help="area predefinita (default: test, una sola tile su Roma)")
+    area_group.add_argument("--bbox", nargs=4, type=float,
+                            metavar=("OVEST", "SUD", "EST", "NORD"))
+    fetch.add_argument("-o", "--output", required=True, help="cartella di destinazione")
+    fetch.add_argument("--resolution", type=int, default=30, choices=[30, 90])
+    fetch.add_argument("--jobs", type=int, default=6)
+    fetch.add_argument("--dry-run", action="store_true",
+                       help="elenca le tile e quanto pesano, senza scaricare")
+    fetch.set_defaults(func=command_fetch)
 
     subparsers.add_parser(
         "check-env",
@@ -394,6 +552,14 @@ def build_parser() -> argparse.ArgumentParser:
                                   help="verifica che la griglia geoidica sia disponibile")
     check.add_argument("--vertical-crs", default=geoid.VERTICAL_CRS_EGM2008)
     check.set_defaults(func=command_check_geoid)
+
+    verify = subparsers.add_parser(
+        "verify", help="controlla un dataset gia' generato (indici, header, giunzioni)")
+    verify.add_argument("-o", "--output", required=True, help="cartella radice del dataset")
+    verify.add_argument("--sample", type=int, default=150,
+                        help="tile da campionare per livello (default 150)")
+    verify.add_argument("--seed", type=int, default=0)
+    verify.set_defaults(func=command_verify)
 
     inspect = subparsers.add_parser("inspect", help="stampa il contenuto di una tile")
     inspect.add_argument("tile")
