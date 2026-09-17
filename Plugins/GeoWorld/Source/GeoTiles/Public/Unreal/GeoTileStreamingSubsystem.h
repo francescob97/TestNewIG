@@ -128,6 +128,26 @@ public:
 	FGeoTileStreamingStats GetStats() const;
 	void ResetStats();
 
+	// --- Visualizzazione di debug ------------------------------------------
+	//
+	// Senza il quadtree (Fase 4) nessuno chiede tile: la Fase 3 da sola non
+	// produrrebbe niente da guardare. Questi due strumenti servono proprio a
+	// renderla osservabile prima che esista chi la usa davvero.
+
+	void SetDebugOverlayEnabled(bool bEnabled) { bShowDebugOverlay = bEnabled; }
+	bool IsDebugOverlayEnabled() const { return bShowDebugOverlay; }
+
+	void SetDebugDrawTiles(bool bEnabled) { bDrawTileBounds = bEnabled; }
+	bool IsDebugDrawTilesEnabled() const { return bDrawTileBounds; }
+
+	/**
+	 * Chiede tutte le tile in un quadrato di (2*Radius+1) tile attorno al punto
+	 * geografico dato. E' il sostituto provvisorio del quadtree: serve a vedere
+	 * lo streaming al lavoro e a mettere sotto pressione la cache.
+	 * Ritorna il numero di richieste avviate.
+	 */
+	int32 RequestTilesAround(double Latitude, double Longitude, int32 Level, int32 Radius);
+
 	/** Segnalato sul GAME THREAD quando una tile diventa disponibile. */
 	DECLARE_MULTICAST_DELEGATE_TwoParams(FOnTileLoaded, const FTileKey&, bool /*bSuccess*/);
 	FOnTileLoaded OnTileLoaded;
@@ -162,6 +182,12 @@ private:
 	FQueuedThreadPool* LoadPool = nullptr;
 	TArray<FGeoTileLoadWork*> PendingWork;
 	mutable FCriticalSection PendingWorkLock;
+
+	void DrawDebugOverlay();
+	void DrawTileBounds() const;
+
+	bool bShowDebugOverlay = false;
+	bool bDrawTileBounds = false;
 
 	// Statistiche
 	int32 ErrorCount = 0;

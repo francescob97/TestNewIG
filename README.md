@@ -85,4 +85,4 @@ Quadro d'insieme delle sei fasi: `docs/programma.md`.
 
 ## Verifica in Unreal
 
-Vedi `docs/fase1-verifica.md` e `docs/fase2-verifica.md`.
+Vedi `docs/fase1-verifica.md`, `docs/fase2-verifica.md` e `docs/fase3-verifica.md`.

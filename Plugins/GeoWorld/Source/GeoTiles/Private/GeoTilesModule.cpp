@@ -7,6 +7,7 @@
 #include "GeoCoreModule.h"
 #include "Unreal/GeoTileStreamingSubsystem.h"
 #include "Unreal/GeoreferenceSubsystem.h"
+#include "Unreal/GeoWorldTypes.h"
 #include "Tiles/TilingScheme.h"
 
 #include "Engine/Engine.h"
@@ -202,4 +203,138 @@ static FAutoConsoleCommandWithWorld GeoTilesClearCommand(
 			Streaming->ResetStats();
 			GeoTilesConsole::Report(TEXT("Cache svuotata."));
 		}
+	}));
+
+// --- geo.Tiles.Debug --------------------------------------------------------
+static FAutoConsoleCommandWithWorldAndArgs GeoTilesDebugCommand(
+	TEXT("geo.Tiles.Debug"),
+	TEXT("geo.Tiles.Debug <0|1> - overlay con statistiche di streaming e cache."),
+	FConsoleCommandWithWorldAndArgsDelegate::CreateStatic(
+		[](const TArray<FString>& Args, UWorld* World)
+	{
+		UGeoTileStreamingSubsystem* Streaming = GeoTilesConsole::Get(World);
+		if (!Streaming) { return; }
+
+		const bool bEnabled = (Args.Num() >= 1) ? (FCString::Atoi(*Args[0]) != 0)
+		                                        : !Streaming->IsDebugOverlayEnabled();
+		Streaming->SetDebugOverlayEnabled(bEnabled);
+		if (!bEnabled && GEngine) { GEngine->ClearOnScreenDebugMessages(); }
+
+		GeoTilesConsole::Report(FString::Printf(TEXT("Overlay streaming: %s"),
+			bEnabled ? TEXT("ON") : TEXT("OFF")));
+	}));
+
+// --- geo.Tiles.Draw ---------------------------------------------------------
+static FAutoConsoleCommandWithWorldAndArgs GeoTilesDrawCommand(
+	TEXT("geo.Tiles.Draw"),
+	TEXT("geo.Tiles.Draw <0|1> - disegna nel mondo il volume delle tile in cache."),
+	FConsoleCommandWithWorldAndArgsDelegate::CreateStatic(
+		[](const TArray<FString>& Args, UWorld* World)
+	{
+		UGeoTileStreamingSubsystem* Streaming = GeoTilesConsole::Get(World);
+		if (!Streaming) { return; }
+
+		const bool bEnabled = (Args.Num() >= 1) ? (FCString::Atoi(*Args[0]) != 0)
+		                                        : !Streaming->IsDebugDrawTilesEnabled();
+		Streaming->SetDebugDrawTiles(bEnabled);
+
+		GeoTilesConsole::Report(FString::Printf(
+			TEXT("Disegno delle tile: %s  (un colore per livello, spesse = pinnate)"),
+			bEnabled ? TEXT("ON") : TEXT("OFF")));
+	}));
+
+// --- geo.Tiles.LoadAround ---------------------------------------------------
+static FAutoConsoleCommandWithWorldAndArgs GeoTilesLoadAroundCommand(
+	TEXT("geo.Tiles.LoadAround"),
+	TEXT("geo.Tiles.LoadAround [livello] [raggio] - carica un riquadro di tile attorno alla camera."),
+	FConsoleCommandWithWorldAndArgsDelegate::CreateStatic(
+		[](const TArray<FString>& Args, UWorld* World)
+	{
+		UGeoTileStreamingSubsystem* Streaming = GeoTilesConsole::Get(World);
+		if (!Streaming || !Streaming->IsDatasetOpen())
+		{
+			GeoTilesConsole::Report(TEXT("Nessun dataset aperto. Usa geo.Tiles.Open"), FColor::Red);
+			return;
+		}
+
+		UGeoreferenceSubsystem* Georeference = World->GetSubsystem<UGeoreferenceSubsystem>();
+		if (!Georeference) { return; }
+
+		FVector ViewLocation;
+		if (!Georeference->GetActiveViewLocation(ViewLocation))
+		{
+			GeoTilesConsole::Report(TEXT("Nessuna camera attiva."), FColor::Red);
+			return;
+		}
+
+		const FGeoCoordinate Where = FGeoCoordinate::FromGeodetic(
+			Georeference->GetSnapshot().UnrealToGeodetic(ViewLocation));
+
+		const int32 Level = (Args.Num() >= 1) ? FCString::Atoi(*Args[0])
+		                                      : Streaming->GetDataset().GetMaxLevel();
+		const int32 Radius = (Args.Num() >= 2) ? FMath::Clamp(FCString::Atoi(*Args[1]), 0, 32) : 3;
+
+		const int32 Requested = Streaming->RequestTilesAround(
+			Where.Latitude, Where.Longitude, Level, Radius);
+
+		const int32 Side = Radius * 2 + 1;
+		GeoTilesConsole::Report(FString::Printf(
+			TEXT("Livello %d, riquadro %dx%d attorno a %s: %d caricamenti avviati"),
+			Level, Side, Side, *Where.ToDisplayString(), Requested));
+	}));
+
+// --- geo.Tiles.Demo ---------------------------------------------------------
+static FAutoConsoleCommandWithWorldAndArgs GeoTilesDemoCommand(
+	TEXT("geo.Tiles.Demo"),
+	TEXT("geo.Tiles.Demo <cartella> [livello] - apre un dataset, ci va sopra e mostra tutto."),
+	FConsoleCommandWithWorldAndArgsDelegate::CreateStatic(
+		[](const TArray<FString>& Args, UWorld* World)
+	{
+		UGeoTileStreamingSubsystem* Streaming = GeoTilesConsole::Get(World);
+		UGeoreferenceSubsystem* Georeference = World ? World->GetSubsystem<UGeoreferenceSubsystem>() : nullptr;
+		if (!Streaming || !Georeference) { return; }
+
+		if (Args.Num() < 1)
+		{
+			GeoTilesConsole::Report(TEXT("Uso: geo.Tiles.Demo <cartella del dataset> [livello]"), FColor::Red);
+			return;
+		}
+
+		FString Error;
+		if (!Streaming->OpenDataset(Args[0], Error))
+		{
+			GeoTilesConsole::Report(FString::Printf(TEXT("Errore: %s"), *Error), FColor::Red);
+			return;
+		}
+
+		const FGeoTileDataset& Dataset = Streaming->GetDataset();
+
+		// Ci si porta al centro del dataset, a una quota da cui si vede
+		// l'insieme: senza, si resterebbe dall'altra parte del pianeta e non si
+		// vedrebbe assolutamente niente, che e' il modo piu' rapido di
+		// concludere erroneamente che non funziona.
+		double West, South, East, North;
+		Dataset.GetBoundingBox(West, South, East, North);
+		const double CentreLat = (South + North) * 0.5;
+		const double CentreLon = (West + East) * 0.5;
+
+		const double SpanKm = FMath::Max(North - South, East - West) * 111.0;
+		const double AltitudeM = FMath::Max(3000.0, SpanKm * 1000.0);
+
+		Georeference->TeleportViewTo(
+			GeoWorld::Core::FGeodetic::FromDegrees(CentreLat, CentreLon, AltitudeM));
+
+		// Livello grossolano: poche tile grandi, visibili tutte insieme.
+		const int32 Level = (Args.Num() >= 2) ? FCString::Atoi(*Args[1])
+		                                      : FMath::Min(Dataset.GetMinLevel() + 2,
+		                                                   Dataset.GetMaxLevel());
+		const int32 Requested = Streaming->RequestTilesAround(CentreLat, CentreLon, Level, 4);
+
+		Streaming->SetDebugOverlayEnabled(true);
+		Streaming->SetDebugDrawTiles(true);
+
+		GeoTilesConsole::Report(FString::Printf(
+			TEXT("Demo: '%s', centro %.4f %.4f, quota %.0f m, livello %d, %d tile richieste."),
+			*Dataset.GetDatasetName(), CentreLat, CentreLon, AltitudeM, Level, Requested));
+		GeoTilesConsole::Report(TEXT("Overlay e disegno attivati. Prova geo.Tiles.LoadAround 12 4"));
 	}));

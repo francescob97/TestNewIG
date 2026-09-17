@@ -155,6 +155,24 @@ namespace GeoWorld::Tiles
 
 		void ResetStatistics() { Stats.Hits = Stats.Misses = Stats.Evictions = 0; }
 
+		/**
+		 * Scorre le tile residenti, dalla piu' usata di recente alla meno.
+		 *
+		 * Serve al disegno di debug e alle statistiche. NON aggiorna l'ordine
+		 * LRU di proposito: ispezionare la cache non deve cambiarne il
+		 * comportamento, altrimenti accendere l'overlay modificherebbe quali
+		 * tile vengono sfrattate e si finirebbe per osservare un sistema
+		 * diverso da quello che si voleva osservare.
+		 */
+		template <typename FuncType>
+		void ForEachResident(FuncType&& Function) const
+		{
+			for (const FEntry& Entry : Entries)
+			{
+				Function(Entry.Key, Entry.Tile, Entry.bPinned);
+			}
+		}
+
 	private:
 		struct FEntry
 		{

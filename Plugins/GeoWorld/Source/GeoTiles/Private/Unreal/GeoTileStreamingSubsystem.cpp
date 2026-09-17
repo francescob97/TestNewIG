@@ -2,6 +2,10 @@
 
 #include "GeoCoreModule.h"
 
+#include "Unreal/GeoreferenceSubsystem.h"
+
+#include "DrawDebugHelpers.h"
+#include "Engine/Engine.h"
 #include "Engine/World.h"
 #include "HAL/RunnableThread.h"
 #include "Misc/FileHelper.h"
@@ -145,6 +149,11 @@ void UGeoTileStreamingSubsystem::Tick(float DeltaTime)
 {
 	Super::Tick(DeltaTime);
 	DrainCompletedLoads();
+
+	// Il disegno viene DOPO lo svuotamento della coda: cosi' l'overlay mostra
+	// lo stato di questo frame e non quello del precedente.
+	if (bShowDebugOverlay) { DrawDebugOverlay(); }
+	if (bDrawTileBounds)   { DrawTileBounds(); }
 }
 
 void UGeoTileStreamingSubsystem::DrainCompletedLoads()
@@ -308,4 +317,191 @@ void UGeoTileStreamingSubsystem::ResetStats()
 	CompletedCount = 0;
 	TotalLoadSeconds = 0.0;
 	Cache.ResetStatistics();
+}
+
+// ============================================================================
+//  Visualizzazione di debug
+//
+//  La Fase 3 non ha un output visivo suo: carica tile e le tiene in memoria.
+//  Chi le chiedera' davvero e' il quadtree della Fase 4. Questi strumenti
+//  esistono per poterla comunque OSSERVARE: se non si vede cosa sta caricando
+//  e cosa sta sfrattando, un problema di streaming si manifesta solo come
+//  "ogni tanto scatta", che e' il tipo di sintomo che non si diagnostica.
+// ============================================================================
+
+int32 UGeoTileStreamingSubsystem::RequestTilesAround(double Latitude, double Longitude,
+                                                     int32 Level, int32 Radius)
+{
+	if (!Dataset.IsOpen()) { return 0; }
+
+	Level = FMath::Clamp(Level, Dataset.GetMinLevel(), Dataset.GetMaxLevel());
+
+	FString IndexError;
+	if (!Dataset.EnsureLevelIndex(Level, IndexError))
+	{
+		UE_LOG(LogGeoWorld, Warning, TEXT("[GeoTiles] %s"), *IndexError);
+		return 0;
+	}
+
+	uint32 CentreX = 0, CentreY = 0;
+	TileForLonLat(static_cast<uint32>(Level), Longitude, Latitude, CentreX, CentreY);
+
+	const uint32 MaxX = TilesX(static_cast<uint32>(Level)) - 1;
+	const uint32 MaxY = TilesY(static_cast<uint32>(Level)) - 1;
+
+	int32 Requested = 0;
+	for (int32 OffsetY = -Radius; OffsetY <= Radius; ++OffsetY)
+	{
+		for (int32 OffsetX = -Radius; OffsetX <= Radius; ++OffsetX)
+		{
+			const int64 X = static_cast<int64>(CentreX) + OffsetX;
+			const int64 Y = static_cast<int64>(CentreY) + OffsetY;
+			if (X < 0 || Y < 0 || X > MaxX || Y > MaxY) { continue; }
+
+			const FTileKey Key{ static_cast<uint32>(Level),
+			                    static_cast<uint32>(X), static_cast<uint32>(Y) };
+
+			// Priorita' decrescente con la distanza dal centro: le tile sotto
+			// la camera arrivano prima di quelle ai bordi. E' la stessa regola
+			// che in Fase 4 sara' guidata dall'errore su schermo.
+			const int32 Distance = FMath::Max(FMath::Abs(OffsetX), FMath::Abs(OffsetY));
+			const EGeoTileState State = RequestTile(Key, FMath::Max(0, 3 - Distance));
+
+			if (State == EGeoTileState::InCaricamento) { ++Requested; }
+		}
+	}
+	return Requested;
+}
+
+void UGeoTileStreamingSubsystem::DrawDebugOverlay()
+{
+	if (!GEngine) { return; }
+
+	const FGeoTileStreamingStats Stats = GetStats();
+
+	// Chiavi stabili: le righe si aggiornano in posto invece di accumularsi.
+	int32 Key = 0x6E70;
+	auto Line = [&Key](const FColor& Colour, const FString& Text)
+	{
+		GEngine->AddOnScreenDebugMessage(Key++, 0.0f, Colour, Text);
+	};
+
+	Line(FColor::Cyan, TEXT("--- GeoWorld | Fase 3: streaming delle tile ---"));
+
+	if (!Dataset.IsOpen())
+	{
+		Line(FColor::Yellow, TEXT("Nessun dataset aperto. Usa: geo.Tiles.Open <cartella>"));
+		return;
+	}
+
+	Line(FColor::White, FString::Printf(TEXT("Dataset    : %s   livelli %d..%d"),
+		*Dataset.GetDatasetName(), Dataset.GetMinLevel(), Dataset.GetMaxLevel()));
+
+	Line(FColor::Green, FString::Printf(TEXT("Tile in cache : %d   (pinnate %d)"),
+		Stats.TileCaricate, Stats.TileVisibili));
+
+	// Il colore passa a giallo quando la cache e' quasi piena: e' il momento in
+	// cui cominciano gli sfratti, e quindi i ricaricamenti.
+	const float Fill = (Stats.BudgetCacheMB > 0.0f) ? Stats.MemoriaCacheMB / Stats.BudgetCacheMB : 0.0f;
+	Line(Fill > 0.9f ? FColor::Yellow : FColor::White,
+		FString::Printf(TEXT("Memoria cache : %.1f / %.0f MB   (%.0f%%)"),
+			Stats.MemoriaCacheMB, Stats.BudgetCacheMB, Fill * 100.0f));   // non-unita: frazione -> percentuale
+
+	// Un tasso di hit basso con molte evizioni significa che il budget e'
+	// troppo piccolo per quello che si sta guardando: si ricarica in continuazione.
+	Line(Stats.TassoHit < 0.5f && Stats.Evizioni > 0 ? FColor::Yellow : FColor::White,
+		FString::Printf(TEXT("Tasso di hit  : %.1f%%   evizioni %d"),
+			Stats.TassoHit * 100.0f, Stats.Evizioni));   // non-unita: frazione -> percentuale
+
+	Line(Stats.RichiesteInCorso > 0 ? FColor::Cyan : FColor::White,
+		FString::Printf(TEXT("In caricamento: %d"), Stats.RichiesteInCorso));
+
+	Line(FColor::White, FString::Printf(TEXT("Tempo medio   : %.2f ms per tile"),
+		Stats.TempoMedioCaricamentoMs));
+
+	if (Stats.Errori > 0)
+	{
+		Line(FColor::Red, FString::Printf(TEXT("ERRORI        : %d  (vedi Output Log)"), Stats.Errori));
+	}
+}
+
+void UGeoTileStreamingSubsystem::DrawTileBounds() const
+{
+	const UWorld* World = GetWorld();
+	if (!World) { return; }
+
+	const UGeoreferenceSubsystem* Georeference = World->GetSubsystem<UGeoreferenceSubsystem>();
+	if (!Georeference) { return; }
+
+	const FGeoreferenceSnapshot Snapshot = Georeference->GetSnapshot();
+
+	// Un colore per livello: si vede a colpo d'occhio quale risoluzione e'
+	// residente in quale zona.
+	static const FColor LevelColours[] = {
+		FColor::White, FColor(180, 180, 180), FColor::Silver, FColor::Emerald,
+		FColor::Green, FColor::Cyan, FColor::Blue, FColor::Purple,
+		FColor::Magenta, FColor::Orange, FColor::Yellow, FColor::Red };
+
+	// Ogni lato si suddivide, altrimenti un box disegnato con quattro segmenti
+	// rettilinei attraverserebbe la superficie invece di seguirla: su una tile
+	// di livello 8, larga centinaia di km, la differenza e' di chilometri.
+	constexpr int32 SegmentsPerEdge = 8;
+	constexpr int32 MaxTilesToDraw = 400;
+
+	int32 Drawn = 0;
+	Cache.ForEachResident(
+		[&](const FTileKey& Key, const FTileCache::FTilePtr& Tile, bool bPinned)
+	{
+		if (Drawn >= MaxTilesToDraw || !Tile) { return; }
+		++Drawn;
+
+		const FTileBounds Bounds = GetTileBounds(Key.Level, Key.X, Key.Y);
+		const FColor Colour = LevelColours[Key.Level % UE_ARRAY_COUNT(LevelColours)];
+		const float Thickness = bPinned ? 40.0f : 12.0f;
+
+		// I quattro spigoli in senso orario, per costruire il perimetro.
+		const double CornerLons[4] = { Bounds.West, Bounds.East, Bounds.East, Bounds.West };
+		const double CornerLats[4] = { Bounds.North, Bounds.North, Bounds.South, Bounds.South };
+
+		auto ToWorld = [&](double Lon, double Lat, double Height)
+		{
+			return Snapshot.GeodeticToUnreal(
+				GeoWorld::Core::FGeodetic::FromDegrees(Lat, Lon, Height));
+		};
+
+		// Anello inferiore (quota minima) e superiore (quota massima): insieme
+		// mostrano il volume che in Fase 4 servira' per il frustum culling.
+		for (int32 Edge = 0; Edge < 4; ++Edge)
+		{
+			const int32 Next = (Edge + 1) % 4;
+			for (int32 Step = 0; Step < SegmentsPerEdge; ++Step)
+			{
+				const double T0 = static_cast<double>(Step) / SegmentsPerEdge;
+				const double T1 = static_cast<double>(Step + 1) / SegmentsPerEdge;
+
+				const double Lon0 = FMath::Lerp(CornerLons[Edge], CornerLons[Next], T0);
+				const double Lat0 = FMath::Lerp(CornerLats[Edge], CornerLats[Next], T0);
+				const double Lon1 = FMath::Lerp(CornerLons[Edge], CornerLons[Next], T1);
+				const double Lat1 = FMath::Lerp(CornerLats[Edge], CornerLats[Next], T1);
+
+				DrawDebugLine(World, ToWorld(Lon0, Lat0, Tile->MinHeight),
+					ToWorld(Lon1, Lat1, Tile->MinHeight), Colour, false, -1.f, 0, Thickness);
+				DrawDebugLine(World, ToWorld(Lon0, Lat0, Tile->MaxHeight),
+					ToWorld(Lon1, Lat1, Tile->MaxHeight), Colour, false, -1.f, 0, Thickness);
+			}
+
+			// Montante verticale sullo spigolo: chiude il volume.
+			DrawDebugLine(World, ToWorld(CornerLons[Edge], CornerLats[Edge], Tile->MinHeight),
+				ToWorld(CornerLons[Edge], CornerLats[Edge], Tile->MaxHeight),
+				Colour, false, -1.f, 0, Thickness);
+		}
+
+		// Etichetta al centro, sopra la quota massima. DrawDebugString e' sempre
+		// rivolta verso la camera, quindi leggibile da qualunque angolo.
+		DrawDebugString(const_cast<UWorld*>(World),
+			ToWorld(Bounds.CentreLon(), Bounds.CentreLat(), Tile->MaxHeight),
+			FString::Printf(TEXT("L%u  %u/%u\n%.0f..%.0f m"),
+				Key.Level, Key.X, Key.Y, Tile->MinHeight, Tile->MaxHeight),
+			nullptr, Colour, 0.0f, true);
+	});
 }

@@ -70,10 +70,14 @@ geo.Debug 1                    overlay
 geo.SpawnMarkers               cubi di verifica sull'Italia
 geo.Goto <lat> <lon> [quota]   teletrasporto
 
+geo.Tiles.Demo <cartella>      fa tutto in un colpo: apri, vai, carica, mostra
 geo.Tiles.Open <cartella>      apre un dataset
 geo.Tiles.Info                 livelli, quote, indici in memoria
 geo.Tiles.Stats                cache, hit rate, tempi di caricamento
+geo.Tiles.LoadAround [liv] [r] carica un riquadro di tile attorno alla camera
 geo.Tiles.Load <livello>       carica la tile sotto la camera
+geo.Tiles.Debug <0|1>          overlay con le statistiche di streaming
+geo.Tiles.Draw <0|1>           volumi delle tile disegnati nel mondo
 geo.Tiles.Budget <MB>          budget della cache a caldo
 geo.Tiles.Clear                svuota
 ```
@@ -322,6 +326,8 @@ calcolabile con `PostSpacingDeg(Level) * 111132`.
 | Verifica Fase 1 | `docs/fase1-verifica.md` |
 | Design e motivazioni Fase 2 | `docs/fase2-design.md` |
 | Verifica Fase 2 | `docs/fase2-verifica.md` |
+| Design e motivazioni Fase 3 | `docs/fase3-design.md` |
+| Verifica Fase 3, con la demo visiva | `docs/fase3-verifica.md` |
 | Issue aperte | `docs/issues-aperte.md` |
 | Uso della pipeline, installazione Windows | `Pipeline/README.md` |
 
