@@ -28,7 +28,7 @@ Il progetto `TestNewIG` e' un guscio vuoto: tutto il codice vive in
 - [x] **Fase 1** — geodesia, georeferenziazione, origin rebasing, test
       *(nota: resta aperta la issue #1 sul jitter, vedi `docs/issues-aperte.md`)*
 - [x] **Fase 2** — pipeline dati offline (Python + GDAL, TINITALY -> piramide di tile)
-- [ ] Fase 3 — loader asincrono e cache LRU
+- [x] **Fase 3** — loader asincrono, cache LRU, lettura dataset *(mai compilata in UE)*
 - [ ] Fase 4 — quadtree, selezione LOD, culling
 - [ ] Fase 5 — generazione mesh e skirt
 - [ ] Fase 6 — imagery drappeggiata
@@ -81,6 +81,7 @@ python -m unittest discover -s tests               :: 26 test, sorgente sintetic
 Su Windows serve conda: vedi `Pipeline/README.md`.
 Da dove vengono i dati (DEM e ortofoto): `docs/dati.md`.
 Quadro d'insieme delle sei fasi: `docs/programma.md`.
+**Per riprendere il lavoro: `docs/consegna.md`.**
 
 ## Verifica in Unreal
 

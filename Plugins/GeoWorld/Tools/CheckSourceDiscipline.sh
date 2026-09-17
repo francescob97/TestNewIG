@@ -5,11 +5,17 @@
 #  Verifica due regole di progetto che nessun compilatore puo' imporre:
 #
 #   REGOLA 1 - Lo strato puro e' davvero puro.
-#     Niente include di Unreal Engine sotto Public/Geo e Private/Geo.
+#     Niente include di Unreal Engine negli strati puri di GeoCore (Geo/) e
+#     GeoTiles (Tiles/).
 #
 #   REGOLA 2 - La conversione metri <-> unita' Unreal avviene in un punto solo.
 #     Il fattore 100 puo' comparire solo in GeoUnits.h (dove e' definito) e
 #     dentro FGeoreference (dove viene applicato).
+#
+#     Un 100 che NON e' una conversione di unita' (una percentuale, per esempio)
+#     si annota con il marcatore "non-unita" sulla stessa riga. La regola resta
+#     stretta e le eccezioni restano visibili con un grep, invece di allentare
+#     il controllo fino a renderlo inutile.
 #
 #  Una regola che nessuno controlla decade in tre settimane. Questo script gira
 #  in un decimo di secondo: mettilo in CI.
@@ -22,15 +28,19 @@ SRC="$(cd "$(dirname "${BASH_SOURCE[0]}")/../Source" && pwd)"
 FAILURES=0
 
 echo "== Regola 1: lo strato puro non deve conoscere Unreal =="
-PURE_VIOLATIONS=$(grep -rn -E '#include[[:space:]]*"(CoreMinimal|Engine/|UObject/|Components/|GameFramework/|Misc/|HAL/|Containers/|Math/)' \
-	"$SRC/GeoCore/Public/Geo" "$SRC/GeoCore/Private/Geo" 2>/dev/null || true)
+PURE_DIRS=(
+	"$SRC/GeoCore/Public/Geo"   "$SRC/GeoCore/Private/Geo"
+	"$SRC/GeoTiles/Public/Tiles" "$SRC/GeoTiles/Private/Tiles"
+)
+PURE_VIOLATIONS=$(grep -rn -E '#include[[:space:]]*"(CoreMinimal|Engine/|UObject/|Components/|GameFramework/|Misc/|HAL/|Containers/|Math/|Modules/|Subsystems/)' \
+	"${PURE_DIRS[@]}" 2>/dev/null || true)
 
 if [ -n "$PURE_VIOLATIONS" ]; then
 	echo "  FALLITO - include di Unreal nello strato puro:"
 	echo "$PURE_VIOLATIONS" | sed 's/^/    /'
 	FAILURES=$((FAILURES + 1))
 else
-	echo "  ok - nessun include di Unreal sotto Public/Geo e Private/Geo"
+	echo "  ok - nessun include di Unreal negli strati puri di GeoCore e GeoTiles"
 fi
 
 echo
@@ -42,6 +52,7 @@ UNIT_VIOLATIONS=$(grep -rn -E '(\*[[:space:]]*100\.0*[^0-9]|100\.0*[[:space:]]*\
 	| grep -v 'GeoUnits\.h' \
 	| grep -v 'Georeference\.h' \
 	| grep -v '//' \
+	| grep -v 'non-unita' \
 	|| true)
 
 if [ -n "$UNIT_VIOLATIONS" ]; then

@@ -30,3 +30,18 @@ spostare la camera sono diversi e vanno verificati separatamente.
 rendering. Il jitter va risolto prima della Fase 5 (mesh), dove diventerebbe
 impossibile distinguere un problema di precisione da un problema di generazione
 della geometria.
+
+
+## #2 — `build` "non funziona ancora bene" — APERTA, non diagnosticata
+
+Segnalato senza dettagli. Per riprenderla servono: il comando esatto, l'output
+completo dello stadio 1 (bbox, formato, **risoluzione sul terreno**, livello
+consigliato) e l'output di `python run.py check-env`.
+
+Gia' viste e corrette, da escludere per prime:
+
+* risoluzione letta nelle unita' del CRS invece che in metri, che dava livello
+  24 e un raster da 518 TB (corretto, commit `b869e0b`);
+* `_work/` di un tentativo fallito che lascia uno stato incoerente: va
+  **cancellata prima di rilanciare** dopo un errore;
+* griglia geoidica assente, che fa fallire lo stadio 2.

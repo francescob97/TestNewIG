@@ -12,7 +12,9 @@ public class GeoTiles : ModuleRules
 		});
 		PrivateDependencyModuleNames.AddRange(new string[]
 		{
-			// Json/JsonUtilities serviranno per il manifest dei tile (Fase 2).
+			// Json serve per manifest.json. L'indice per livello e gli heightmap
+			// sono invece binari, letti a mano: un formato binario si parsa in
+			// microsecondi, un JSON da 18 MB no.
 			"Json", "JsonUtilities",
 		});
 	}

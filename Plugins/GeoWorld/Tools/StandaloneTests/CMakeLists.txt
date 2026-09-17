@@ -42,5 +42,23 @@ else()
 	target_compile_options(geocore_tests PRIVATE -Wall -Wextra -O2)
 endif()
 
+# --- GeoTiles (Fase 3): formato delle tile, schema, cache LRU ---------------
+set(GEOTILES_DIR ${CMAKE_CURRENT_SOURCE_DIR}/../../Source/GeoTiles)
+
+add_executable(geotiles_tests
+	geotiles_main.cpp
+	${GEOTILES_DIR}/Private/Tiles/TilingScheme.cpp
+	${GEOTILES_DIR}/Private/Tiles/TileFormat.cpp
+)
+target_include_directories(geotiles_tests PRIVATE
+	${GEOTILES_DIR}/Public ${GEOCORE_DIR}/Public)
+
+if (MSVC)
+	target_compile_options(geotiles_tests PRIVATE /W4)
+else()
+	target_compile_options(geotiles_tests PRIVATE -Wall -Wextra -O2)
+endif()
+
 enable_testing()
 add_test(NAME geocore COMMAND geocore_tests)
+add_test(NAME geotiles COMMAND geotiles_tests)

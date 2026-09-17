@@ -316,6 +316,29 @@ def build_test_vectors() -> dict:
 
 
 def dump_test_vectors(path: str) -> None:
+    """
+    Scrive i vettori in JSON e, a fianco, in un formato di testo piatto.
+
+    Il .txt esiste per un motivo pratico: i test C++ dello strato puro di
+    GeoTiles non devono tirarsi dentro un parser JSON solo per leggere dei
+    numeri di riferimento. Una riga per record, campi separati da spazi, si
+    legge con due righe di iostream.
+    """
     with open(path, "w", encoding="utf-8") as handle:
         json.dump(build_test_vectors(), handle, indent="\t")
         handle.write("\n")
+
+    vectors = build_test_vectors()
+    text_path = path[:-5] + ".txt" if path.endswith(".json") else path + ".txt"
+    with open(text_path, "w", encoding="utf-8") as handle:
+        handle.write("# vettori di riferimento dello schema di tiling GeoWorld\n")
+        handle.write(f"# generati da geoworld/tiling.py -- non modificare a mano\n")
+        handle.write(f"SCHEMA {TILE_POSTS} {TILE_CELLS} {tiles_x(0)} {tiles_y(0)}\n")
+        for entry in vectors["levels"]:
+            handle.write("LEVEL {level} {tilesX} {tilesY} {tileSpanDeg!r} "
+                         "{postSpacingDeg!r}\n".format(**entry))
+        for entry in vectors["tileBounds"]:
+            handle.write("BOUNDS {level} {x} {y} {west!r} {south!r} {east!r} "
+                         "{north!r}\n".format(**entry))
+        for entry in vectors["lookups"]:
+            handle.write("LOOKUP {level} {lon!r} {lat!r} {x} {y}\n".format(**entry))
