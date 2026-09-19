@@ -7,6 +7,7 @@
 #include "GeoMarkerActor.h"
 #include "Georeference/GeoTransformComponent.h"
 #include "Lod/GeoQuadtreeSubsystem.h"
+#include "Terrain/GeoTerrainSubsystem.h"
 #include "Streaming/GeoTileStreamingSubsystem.h"
 #include "Georeference/GeoreferenceSubsystem.h"
 #include "Georeference/GeoWorldTypes.h"
@@ -491,4 +492,164 @@ static FAutoConsoleCommandWithWorldAndArgs GeoLodDemoCommand(
 			*Dataset.GetDatasetName(), Altitude, Quadtree->GetMaxScreenSpaceError()));
 		GeoLodConsole::Report(TEXT("Scendi di quota: le tile devono suddividersi da sole."));
 		GeoLodConsole::Report(TEXT("Prova geo.Lod.Error 1 (piu' dettaglio) e geo.Lod.Freeze 1."));
+	}));
+
+// ============================================================================
+//  FASE 5 -- comandi del terreno
+// ============================================================================
+
+namespace GeoTerrainConsole
+{
+	static UGeoTerrainSubsystem* Get(UWorld* World)
+	{
+		return World ? World->GetSubsystem<UGeoTerrainSubsystem>() : nullptr;
+	}
+
+	static void Report(const FString& Message, const FColor& Colour = FColor::Cyan)
+	{
+		UE_LOG(LogGeoWorld, Log, TEXT("%s"), *Message);
+		if (GEngine) { GEngine->AddOnScreenDebugMessage(-1, 10.0f, Colour, Message); }
+	}
+
+	template <typename SetterType, typename GetterType>
+	static void Toggle(const TArray<FString>& Args, UWorld* World, const TCHAR* Label,
+	                   SetterType Setter, GetterType Getter)
+	{
+		UGeoTerrainSubsystem* Terrain = Get(World);
+		if (!Terrain) { return; }
+		const bool bValue = (Args.Num() >= 1) ? (FCString::Atoi(*Args[0]) != 0) : !Getter(Terrain);
+		Setter(Terrain, bValue);
+		Report(FString::Printf(TEXT("%s: %s"), Label, bValue ? TEXT("ON") : TEXT("OFF")));
+	}
+}
+
+static FAutoConsoleCommandWithWorldAndArgs GeoTerrainEnableCommand(
+	TEXT("geo.Terrain.Enable"),
+	TEXT("geo.Terrain.Enable <0|1> - costruisce la geometria delle tile selezionate."),
+	FConsoleCommandWithWorldAndArgsDelegate::CreateStatic(
+		[](const TArray<FString>& Args, UWorld* World)
+	{
+		GeoTerrainConsole::Toggle(Args, World, TEXT("Terreno"),
+			[](UGeoTerrainSubsystem* T, bool b) { T->SetEnabled(b); },
+			[](UGeoTerrainSubsystem* T) { return T->IsEnabled(); });
+	}));
+
+static FAutoConsoleCommandWithWorldAndArgs GeoTerrainWireframeCommand(
+	TEXT("geo.Terrain.Wireframe"),
+	TEXT("geo.Terrain.Wireframe <0|1> - mostra il reticolo dei triangoli."),
+	FConsoleCommandWithWorldAndArgsDelegate::CreateStatic(
+		[](const TArray<FString>& Args, UWorld* World)
+	{
+		GeoTerrainConsole::Toggle(Args, World, TEXT("Wireframe"),
+			[](UGeoTerrainSubsystem* T, bool b) { T->SetWireframe(b); },
+			[](UGeoTerrainSubsystem* T) { return T->IsWireframe(); });
+	}));
+
+static FAutoConsoleCommandWithWorldAndArgs GeoTerrainSkirtCommand(
+	TEXT("geo.Terrain.Skirt"),
+	TEXT("geo.Terrain.Skirt <0|1> - gonne ai bordi. Spegnile per VEDERE le crepe."),
+	FConsoleCommandWithWorldAndArgsDelegate::CreateStatic(
+		[](const TArray<FString>& Args, UWorld* World)
+	{
+		GeoTerrainConsole::Toggle(Args, World, TEXT("Gonne"),
+			[](UGeoTerrainSubsystem* T, bool b) { T->SetSkirtEnabled(b); },
+			[](UGeoTerrainSubsystem* T) { return T->IsSkirtEnabled(); });
+		GeoTerrainConsole::Report(
+			TEXT("  (spente, le crepe fra livelli diversi diventano visibili: e' la prova"), FColor::White);
+		GeoTerrainConsole::Report(
+			TEXT("   che le gonne servono, e che servono SOLO fra livelli diversi)"), FColor::White);
+	}));
+
+static FAutoConsoleCommandWithWorldAndArgs GeoTerrainFlipCommand(
+	TEXT("geo.Terrain.FlipWinding"),
+	TEXT("geo.Terrain.FlipWinding <0|1> - inverte l'orientamento dei triangoli."),
+	FConsoleCommandWithWorldAndArgsDelegate::CreateStatic(
+		[](const TArray<FString>& Args, UWorld* World)
+	{
+		GeoTerrainConsole::Toggle(Args, World, TEXT("Orientamento invertito"),
+			[](UGeoTerrainSubsystem* T, bool b) { T->SetFlipWinding(b); },
+			[](UGeoTerrainSubsystem* T) { return T->IsFlipWinding(); });
+		GeoTerrainConsole::Report(
+			TEXT("  (usalo se il terreno e' invisibile dall'alto e visibile da sotto)"), FColor::White);
+	}));
+
+static FAutoConsoleCommandWithWorldAndArgs GeoTerrainBudgetCommand(
+	TEXT("geo.Terrain.Budget"),
+	TEXT("geo.Terrain.Budget <N> - tile di cui costruire la geometria per frame."),
+	FConsoleCommandWithWorldAndArgsDelegate::CreateStatic(
+		[](const TArray<FString>& Args, UWorld* World)
+	{
+		UGeoTerrainSubsystem* Terrain = GeoTerrainConsole::Get(World);
+		if (!Terrain) { return; }
+		if (Args.Num() >= 1) { Terrain->SetMaxTilesPerFrame(FCString::Atoi(*Args[0])); }
+		GeoTerrainConsole::Report(FString::Printf(
+			TEXT("Budget: %d tile per frame (alzandolo il terreno si riempie prima, ma puo' scattare)"),
+			Terrain->GetMaxTilesPerFrame()));
+	}));
+
+static FAutoConsoleCommandWithWorld GeoTerrainStatsCommand(
+	TEXT("geo.Terrain.Stats"),
+	TEXT("Statistiche della geometria."),
+	FConsoleCommandWithWorldDelegate::CreateStatic([](UWorld* World)
+	{
+		UGeoTerrainSubsystem* Terrain = GeoTerrainConsole::Get(World);
+		if (!Terrain) { return; }
+		const FGeoTerrainStats Stats = Terrain->GetStats();
+		GeoTerrainConsole::Report(FString::Printf(TEXT("Provider     : %s"), *Terrain->GetProviderName()));
+		GeoTerrainConsole::Report(FString::Printf(TEXT("Tile con mesh: %d   triangoli %d"),
+			Stats.TileConGeometria, Stats.TriangoliTotali));
+		GeoTerrainConsole::Report(FString::Printf(TEXT("In attesa    : %d"), Stats.TileInAttesa));
+		GeoTerrainConsole::Report(FString::Printf(TEXT("Costruzione  : %.2f ms per tile"),
+			Stats.TempoCostruzioneMediaMs));
+		GeoTerrainConsole::Report(FString::Printf(TEXT("Rebase gestiti: %d  (nessun vertice rigenerato)"),
+			Stats.Rebase));
+	}));
+
+// --- geo.Terrain.Demo -------------------------------------------------------
+static FAutoConsoleCommandWithWorldAndArgs GeoTerrainDemoCommand(
+	TEXT("geo.Terrain.Demo"),
+	TEXT("geo.Terrain.Demo <cartella> - apre un dataset e disegna il terreno."),
+	FConsoleCommandWithWorldAndArgsDelegate::CreateStatic(
+		[](const TArray<FString>& Args, UWorld* World)
+	{
+		UGeoTerrainSubsystem* Terrain = GeoTerrainConsole::Get(World);
+		UGeoTileStreamingSubsystem* Streaming = World ? World->GetSubsystem<UGeoTileStreamingSubsystem>() : nullptr;
+		UGeoreferenceSubsystem* Georeference = World ? World->GetSubsystem<UGeoreferenceSubsystem>() : nullptr;
+		UGeoQuadtreeSubsystem* Quadtree = World ? World->GetSubsystem<UGeoQuadtreeSubsystem>() : nullptr;
+		if (!Terrain || !Streaming || !Georeference || !Quadtree) { return; }
+
+		if (Args.Num() >= 1)
+		{
+			FString Error;
+			if (!Streaming->OpenDataset(Args[0], Error))
+			{
+				GeoTerrainConsole::Report(FString::Printf(TEXT("Errore: %s"), *Error), FColor::Red);
+				return;
+			}
+		}
+		else if (!Streaming->IsDatasetOpen())
+		{
+			GeoTerrainConsole::Report(TEXT("Uso: geo.Terrain.Demo <cartella del dataset>"), FColor::Red);
+			return;
+		}
+
+		const FGeoTileDataset& Dataset = Streaming->GetDataset();
+		double West, South, East, North;
+		Dataset.GetBoundingBox(West, South, East, North);
+
+		// Una quota da cui si vede un pezzo di terreno con del rilievo, non
+		// l'intero dataset schiacciato: a 15 km si distinguono le valli.
+		Georeference->TeleportViewTo(GeoWorld::Core::FGeodetic::FromDegrees(
+			(South + North) * 0.5, (West + East) * 0.5, 15000.0));
+
+		Quadtree->SetEnabled(true);
+		Terrain->SetEnabled(true);
+		Terrain->SetDebugOverlayEnabled(true);
+
+		GeoTerrainConsole::Report(FString::Printf(
+			TEXT("Terreno attivo su '%s'. Quota 15 km sul centro del dataset."),
+			*Dataset.GetDatasetName()));
+		GeoTerrainConsole::Report(TEXT("Scendi di quota: la geometria si raffina da sola."));
+		GeoTerrainConsole::Report(TEXT("Se non vedi niente dall'alto: geo.Terrain.FlipWinding"));
+		GeoTerrainConsole::Report(TEXT("Per capire cosa fanno le gonne: geo.Terrain.Skirt 0"));
 	}));

@@ -27,9 +27,17 @@ guardando in PIE o nel viewport dell'editor: i due percorsi per leggere e
 spostare la camera sono diversi e vanno verificati separatamente.
 
 **Impatto sulla Fase 2.** Nessuno. La pipeline dati e' offline e non dipende dal
-rendering. Il jitter va risolto prima della Fase 5 (mesh), dove diventerebbe
-impossibile distinguere un problema di precisione da un problema di generazione
-della geometria.
+rendering.
+
+**Impatto sulla Fase 5 (aggiornato il 2026-09-19).** La Fase 5 e' stata scritta
+senza aspettare questa issue: bloccarla su una segnalazione senza dati non
+avrebbe prodotto informazione, e se la causa e' TSR riguarda qualunque
+geometria, non la mesh del terreno. Resta pero' vero che **finche' non e' chiusa
+non si possono valutare le finiture visive**: un bordo che balla puo' essere
+antialiasing o precisione, e i due casi si correggono in posti opposti. La mesh
+della Fase 5 fornisce per contro un test migliore dei cubi — una superficie
+testurizzata e continua e' molto meno soggetta al falso positivo dell'aliasing
+temporale di uno spigolo netto contro il cielo.
 
 
 ## #2 — `build` "non funziona ancora bene" — CHIUSA il 2026-09-19

@@ -1,0 +1,190 @@
+#include "Terrain/DynamicMeshTerrainProvider.h"
+
+#include "GeoCoreModule.h"
+#include "Geo/GeoUnits.h"
+
+#include "Components/DynamicMeshComponent.h"
+#include "DynamicMesh/DynamicMesh3.h"
+#include "DynamicMesh/DynamicMeshAttributeSet.h"
+#include "Engine/World.h"
+#include "GameFramework/Actor.h"
+#include "Materials/MaterialInterface.h"
+#include "UObject/ConstructorHelpers.h"
+
+using namespace GeoWorld;
+
+void FDynamicMeshTerrainProvider::Initialize(UWorld* World)
+{
+	if (!World) { return; }
+
+	// Un attore contenitore, cosi' tutte le tile stanno sotto un solo nodo del
+	// World Outliner e si cancellano insieme.
+	FActorSpawnParameters Parameters;
+	Parameters.Name = TEXT("GeoTerrainContainer");
+	Parameters.ObjectFlags |= RF_Transient;   // non finisce nel livello salvato
+
+	AActor* Actor = World->SpawnActor<AActor>(AActor::StaticClass(), Parameters);
+	if (!Actor) { return; }
+
+	Actor->SetRootComponent(NewObject<USceneComponent>(Actor, TEXT("Root")));
+	Actor->GetRootComponent()->SetMobility(EComponentMobility::Movable);
+	Actor->GetRootComponent()->RegisterComponent();
+#if WITH_EDITOR
+	Actor->SetActorLabel(TEXT("GeoWorld Terrain"));
+#endif
+	Container = Actor;
+
+	// Materiale di base del motore: serve solo a vedere la geometria. Il
+	// materiale vero arriva in Fase 6, quando ci sara' l'imagery da mostrare.
+	Material = LoadObject<UMaterialInterface>(
+		nullptr, TEXT("/Engine/BasicShapes/BasicShapeMaterial.BasicShapeMaterial"));
+
+	UE_LOG(LogGeoWorld, Log, TEXT("[GeoTerrain] Provider '%s' pronto."), *GetName());
+}
+
+void FDynamicMeshTerrainProvider::Shutdown()
+{
+	RemoveAllTiles();
+	if (AActor* Actor = Container.Get()) { Actor->Destroy(); }
+	Container = nullptr;
+}
+
+bool FDynamicMeshTerrainProvider::CreateOrUpdateTile(
+	const Tiles::FTileKey& Key, const Mesh::FTileMeshData& MeshData, const FTransform& Transform)
+{
+	AActor* Actor = Container.Get();
+	if (!Actor || !MeshData.IsValid()) { return false; }
+
+	const uint64 Packed = PackKey(Key);
+	FTileEntry& Entry = Tiles.FindOrAdd(Packed);
+	Entry.Origin = MeshData.Origin;
+
+	UDynamicMeshComponent* Component = Entry.Component.Get();
+	if (!Component)
+	{
+		Component = NewObject<UDynamicMeshComponent>(Actor);
+		Component->SetupAttachment(Actor->GetRootComponent());
+		Component->SetMobility(EComponentMobility::Movable);
+		// Niente collisione: il terreno serve a essere guardato. Generarla per
+		// 33.000 triangoli per tile costerebbe piu' della geometria stessa.
+		Component->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+		Component->SetComplexAsSimpleCollisionEnabled(false);
+		if (UMaterialInterface* BaseMaterial = Material.Get())
+		{
+			Component->SetMaterial(0, BaseMaterial);
+		}
+		Component->SetWireframe(bWireframe);
+		Component->RegisterComponent();
+		Entry.Component = Component;
+	}
+
+	// ------------------------------------------------------------------
+	//  NOTA UE: EditMesh prende una lambda che riceve la FDynamicMesh3 vera e
+	//  propria. E' il modo corretto di modificarla: il componente sa cosi'
+	//  quando deve invalidare il proprio proxy di scena. Modificare la mesh
+	//  fuori da qui lascerebbe il renderer con la versione vecchia.
+	// ------------------------------------------------------------------
+	Component->EditMesh([&MeshData](UE::Geometry::FDynamicMesh3& Mesh)
+	{
+		using namespace UE::Geometry;
+
+		Mesh.Clear();
+		Mesh.EnableAttributes();
+
+		FDynamicMeshNormalOverlay* Normals = Mesh.Attributes()->PrimaryNormals();
+		FDynamicMeshUVOverlay* UVs = Mesh.Attributes()->PrimaryUV();
+
+		const int32 VertexCount = static_cast<int32>(MeshData.Positions.size() / 3);
+
+		for (int32 Index = 0; Index < VertexCount; ++Index)
+		{
+			// I vertici arrivano in METRI. La conversione in unita' Unreal non
+			// si fa qui: e' nella SCALA della trasformazione del componente,
+			// cosi' i float restano piccoli e la regola del punto unico di
+			// conversione resta valida.
+			Mesh.AppendVertex(FVector3d(MeshData.Positions[Index * 3 + 0],
+			                            MeshData.Positions[Index * 3 + 1],
+			                            MeshData.Positions[Index * 3 + 2]));
+
+			Normals->AppendElement(FVector3f(MeshData.Normals[Index * 3 + 0],
+			                                 MeshData.Normals[Index * 3 + 1],
+			                                 MeshData.Normals[Index * 3 + 2]));
+
+			UVs->AppendElement(FVector2f(MeshData.UVs[Index * 2 + 0],
+			                             MeshData.UVs[Index * 2 + 1]));
+		}
+
+		const int32 TriangleCount = static_cast<int32>(MeshData.Indices.size() / 3);
+		for (int32 Index = 0; Index < TriangleCount; ++Index)
+		{
+			const int32 A = static_cast<int32>(MeshData.Indices[Index * 3 + 0]);
+			const int32 B = static_cast<int32>(MeshData.Indices[Index * 3 + 1]);
+			const int32 C = static_cast<int32>(MeshData.Indices[Index * 3 + 2]);
+
+			const int32 TriangleId = Mesh.AppendTriangle(A, B, C);
+			if (TriangleId >= 0)
+			{
+				// Normali e UV usano gli stessi indici dei vertici: ogni post ha
+				// una normale sola, quindi non servono elementi separati.
+				Normals->SetTriangle(TriangleId, FIndex3i(A, B, C));
+				UVs->SetTriangle(TriangleId, FIndex3i(A, B, C));
+			}
+		}
+	});
+
+	Component->NotifyMeshUpdated();
+	Component->SetWorldTransform(Transform);
+	return true;
+}
+
+void FDynamicMeshTerrainProvider::RemoveTile(const Tiles::FTileKey& Key)
+{
+	FTileEntry Entry;
+	if (Tiles.RemoveAndCopyValue(PackKey(Key), Entry))
+	{
+		if (UDynamicMeshComponent* Component = Entry.Component.Get())
+		{
+			Component->DestroyComponent();
+		}
+	}
+}
+
+void FDynamicMeshTerrainProvider::RemoveAllTiles()
+{
+	for (TPair<uint64, FTileEntry>& Pair : Tiles)
+	{
+		if (UDynamicMeshComponent* Component = Pair.Value.Component.Get())
+		{
+			Component->DestroyComponent();
+		}
+	}
+	Tiles.Empty();
+}
+
+void FDynamicMeshTerrainProvider::RefreshTransforms(const FGeoreferenceSnapshot& Snapshot)
+{
+	// IL punto della fase: dopo un rebase si ricalcolano solo le trasformazioni.
+	// Nessun vertice viene toccato, perche' i vertici sono relativi al centro
+	// della propria tile e quello non e' cambiato.
+	for (TPair<uint64, FTileEntry>& Pair : Tiles)
+	{
+		UDynamicMeshComponent* Component = Pair.Value.Component.Get();
+		if (!Component) { continue; }
+
+		FTransform Transform = Snapshot.GetLocalNeuTransform(Pair.Value.Origin);
+		Transform.SetScale3D(FVector(GeoWorld::Units::MetersToUu));
+		Component->SetWorldTransform(Transform);
+	}
+}
+
+void FDynamicMeshTerrainProvider::SetWireframe(bool bInWireframe)
+{
+	bWireframe = bInWireframe;
+	for (TPair<uint64, FTileEntry>& Pair : Tiles)
+	{
+		if (UDynamicMeshComponent* Component = Pair.Value.Component.Get())
+		{
+			Component->SetWireframe(bWireframe);
+		}
+	}
+}

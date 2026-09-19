@@ -1,7 +1,7 @@
 # GeoWorld — documento di consegna
 
 Tutto quello che serve per riprendere il lavoro da solo.
-Ultimo aggiornamento: 2026-09-17. Branch: `claude/charming-goodall-xd2r3g`.
+Ultimo aggiornamento: 2026-09-19. Branch: `claude/charming-goodall-xd2r3g`.
 
 ---
 
@@ -13,15 +13,15 @@ Ultimo aggiornamento: 2026-09-17. Branch: `claude/charming-goodall-xd2r3g`.
 | 2 | Pipeline dati offline (Python + GDAL) | completa, gira su dati veri |
 | 3 | Loader asincrono, cache LRU, lettura dataset | **codice completo, mai compilato in UE** |
 | 4 | Quadtree, selezione LOD, culling | **codice completo, mai compilato in UE** |
-| 5 | Mesh e skirt — **primo terreno visibile** | da fare |
+| 5 | Mesh, gonne, terreno a schermo | **codice completo, mai compilato in UE** |
 | 6 | Imagery drappeggiata | da fare |
 
 **Avvertenza sul C++:** nessuna riga di C++ di questo progetto e' mai stata
 compilata con Unreal Engine. L'ambiente in cui e' stato scritto e' Linux senza
 il motore. Quello che **e'** stato verificato:
 
-* tutta la matematica pura, con test numerici eseguiti (37 test Fase 1 +
-  23 test Fase 3);
+* tutta la matematica pura, con test numerici eseguiti: **125 test C++** in
+  totale (37 Fase 1 + 23 Fase 3 + 37 Fase 4 + 28 Fase 5), piu' 41 test Python;
 * le convenzioni UE controllate staticamente (bilanciamento parentesi,
   posizione dei `.generated.h`, guardie `WITH_EDITOR`, macro di export);
 * il formato dei file, letto dal codice C++ vero contro un dataset vero.
@@ -64,8 +64,10 @@ sta vincendo.
 ```bat
 cmake -S Plugins/GeoWorld/Tools/StandaloneTests -B build
 cmake --build build
-build\Debug\geocore_tests.exe
-build\Debug\geotiles_tests.exe dataset\test
+build\Debug\geocore_tests.exe                       :: 37 test
+build\Debug\geotiles_tests.exe dataset\test         :: 23 test
+build\Debug\geoquadtree_tests.exe                   :: 37 test
+build\Debug\geomesh_tests.exe                       :: 28 test
 Plugins\GeoWorld\Tools\CheckSourceDiscipline.sh      :: serve bash (Git Bash)
 ```
 
@@ -97,7 +99,19 @@ geo.Lod.Error <pixel>          soglia dell'errore su schermo (la manopola del LO
 geo.Lod.Freeze <0|1>           congela la vista: mostra cosa il culling ha scartato
 geo.Lod.Draw <0|1>             tassellatura scelta, un colore per livello
 geo.Lod.Stats                  nodi visitati, scarti, tempo di selezione
+
+geo.Terrain.Demo <cartella>    apre un dataset e disegna il terreno vero
+geo.Terrain.Enable <0|1>       costruzione della geometria
+geo.Terrain.Wireframe <0|1>    reticolo dei triangoli
+geo.Terrain.Skirt <0|1>        gonne ai bordi: spegnile per VEDERE le crepe
+geo.Terrain.FlipWinding <0|1>  se il terreno e' invisibile dall'alto, e' questo
+geo.Terrain.Budget <N>         tile costruite per frame (default 4)
+geo.Terrain.Stats              tile in scena, triangoli, tempo di costruzione
 ```
+
+Se hai un dataset e vuoi vedere subito qualcosa, il comando e'
+`geo.Terrain.Demo <cartella>`: fa tutto, dalla apertura del dataset al terreno
+a schermo.
 
 ---
 
@@ -200,9 +214,12 @@ strumento per distinguere le tre cause possibili:
    produce esattamente questo sintomo. Verifica in cinque secondi con
    `r.AntiAliasingMethod 0`: se sparisce, la geodesia non c'entra.
 
-La mia ipotesi, non verificata, e' la 3. Va risolta **prima della Fase 5**,
-altrimenti sara' impossibile distinguere un problema di precisione da un
-problema di generazione della geometria.
+La mia ipotesi, non verificata, e' la 3. La Fase 5 e' stata scritta comunque,
+perche' bloccarla su una issue senza dati non avrebbe prodotto informazione: se
+il jitter e' TSR, riguarda ogni geometria e non la mesh. Resta pero' vero che
+**finche' non e' chiusa non si possono valutare le finiture visive** del
+terreno: un bordo che balla puo' essere antialiasing o precisione, e i due casi
+si correggono in posti opposti.
 
 ### #2 — `build` "non funziona ancora bene"
 
@@ -234,7 +251,8 @@ piu' fasi contemporaneamente.
 | **Assi North->X, East->Y, Up->Z** | ENU e' destrorso, Unreal sinistrorso: serve una riflessione. Scambiare North/Est la fornisce e in piu' fa coincidere lo yaw con l'azimuth della bussola |
 | **Tile 129x129 registrate sui nodi** | Il post 128 E' il post 0 della tile adiacente: le giunzioni sono esatte per costruzione, non "quasi" |
 | **Quote ellissoidiche ovunque** | Il motore lavora sull'ellissoide. Le quote ortometriche del sorgente sono convertite una volta sola, nella pipeline |
-| **I vertici delle mesh in frame locale al tile** (Fase 5) | Tiene i float piccoli: entro 10 km l'ULP e' 0.6 mm, a distanza del geocentro 64 cm |
+| **I vertici delle mesh in frame NEU locale alla tile, in metri** (Fase 5) | Tiene i float piccoli: misurato 0.0001 m al livello 14, contro i 64 cm che si avrebbero in coordinate mondo. NEU e non ENU perche' ENU e' destrorso e `ToQuat()` su una riflessione restituisce spazzatura **senza errore** |
+| **Un rebase non rigenera geometria**, cambia solo le trasformazioni | E' la ragione per cui il frame locale esiste. Un provider che ricostruisse le mesh a ogni rebase vanificherebbe la Fase 1 |
 | **Nessun I/O sul game thread** | Una lettura sfortunata costa piu' di un frame intero |
 | **La cache e' solo del game thread** | Niente lock nel percorso caldo. I worker consegnano via coda MPSC |
 
@@ -251,7 +269,11 @@ Plugins/GeoWorld/Source/
     Public/Tiles/     C++ PURO: TileKey, TilingScheme, TileFormat, TileCache
     Public/Streaming/     FGeoTileDataset, UGeoTileStreamingSubsystem
     TestData/         vettori di riferimento generati da Python
-  GeoRender/      quadtree, LOD, mesh                           [Fasi 4-5]
+  GeoRender/      quadtree, LOD, mesh, terreno                  [Fasi 4-5]
+    Public/Quadtree/  C++ PURO: bounding volume, frustum, orizzonte, selezione
+    Public/Mesh/      C++ PURO: TileMesh.h, da 129x129 quote a vertici e gonne
+    Public/Lod/       UGeoQuadtreeSubsystem, overlay e disegno della selezione
+    Public/Terrain/   IGeoTerrainMeshProvider, provider DynamicMesh, subsystem
   GeoWorldEditor/ strumenti di editor                           [vuoto]
 
   Tools/StandaloneTests/   test C++ senza Unreal (CMake)
@@ -272,8 +294,8 @@ IntelliSense ci si perde: e' costato un giro di compilazione.
 
 **La regola dei due strati**, in due parti:
 
-1. sotto `Public/Geo`, `Public/Tiles` e `Public/Quadtree` non entra **nessun**
-   include di Unreal;
+1. sotto `Public/Geo`, `Public/Tiles`, `Public/Quadtree` e `Public/Mesh` non
+   entra **nessun** include di Unreal;
 2. quegli strati sono **header-only**. Non e' stile: in Unreal ogni modulo e'
    una DLL, e un simbolo definito in un `.cpp` non e' visibile agli altri moduli
    se non viene esportato con la macro API del modulo. Esportarlo
@@ -289,63 +311,76 @@ essendo mai state compilate nel motore. `CheckSourceDiscipline.sh` lo impone.
 
 ---
 
-## 7. Come continuare: Fase 4 (quadtree e LOD)
+## 7. Come continuare: Fase 6 (imagery drappeggiata)
 
 Quello che c'e' gia' e che serve:
 
-* `FTileKey::GetParent()` / `GetChild(i)` — la struttura ad albero;
-* `FGeoTileDataset::TileExists()` — se raffinare e' possibile, **senza toccare
-  il disco**;
-* `FGeoTileDataset::GetTileHeightRange()` — min/max quota **senza caricare la
-  tile**: e' cio' che serve per costruire il bounding volume e fare culling
-  prima di decidere;
-* `UGeoTileStreamingSubsystem::RequestTile(Key, Priority)` — la priorita' va
-  derivata dall'errore su schermo, cosi' le tile guardate arrivano per prime.
+* le **UV** della mesh sono gia' generate e coprono esattamente `[0,1]` sulla
+  tile (`Mesh/TileMesh.h`). Una texture per tile si applica senza toccare la
+  geometria;
+* `IGeoTerrainMeshProvider::CreateOrUpdateTile()` riceve gia' la tile e la sua
+  trasformazione: e' il punto dove assegnare il materiale con la texture;
+* la pipeline della Fase 2 sa gia' tagliare una piramide di tile allineata a
+  questo tiling: l'imagery usa lo stesso schema, cambia il payload (RGB
+  compresso invece di float32);
+* `docs/dati.md` elenca le sorgenti raggiungibili. La piu' pratica e'
+  **Sentinel-2** dal bucket pubblico `sentinel-cogs` su AWS: COG, nessuna
+  registrazione, 10 m di risoluzione.
 
-Lo scheletro dell'algoritmo:
+Le decisioni da prendere, con la mia opinione:
 
-```
-per ogni nodo, partendo dalle radici (livello minimo):
-    bounds = tile bounds + [minH, maxH] dall'indice
-    se fuori dal frustum            -> scarta
-    se oltre l'orizzonte            -> scarta        (culling sull'ellissoide)
-    errore = ErroreGeometrico(livello) / DistanzaDallaCamera
-    se errore < soglia  oppure  sono al livello massimo:
-        richiedi la tile, disegnala
-    altrimenti:
-        se i 4 figli sono gia' in cache -> ricorri
-        altrimenti -> richiedili e intanto disegna questo
-```
+1. **Piramide separata o stessa tile?** Separata. L'imagery ha una risoluzione
+   nativa diversa dalle quote (10 m Sentinel-2 contro 10 m TINITALY oggi, ma
+   domani 25 cm di ortofoto AGEA su quote a 30 m) e legarle costringerebbe a
+   ridimensionare una delle due per sempre. Due dataset indipendenti, ognuno con
+   il proprio livello massimo, e il terreno prende la texture del livello
+   disponibile piu' vicino.
+2. **Formato del payload.** Non float32: DXT/BC1 compresso in fase di pipeline.
+   Una texture 256x256 BC1 sta in 32 KB contro i 196 KB di RGB grezzo, e la GPU
+   la consuma senza decomprimere.
+3. **Chi tiene la texture.** La cache della Fase 3 e' gia' generica sul byte
+   budget: serve una seconda istanza, non una seconda implementazione.
 
-Tre cose da non sbagliare:
+La trappola che mi aspetto: **il livello dell'imagery non coincidera' con il
+livello del terreno.** Una tile di terreno al livello 12 puo' dover campionare
+una texture del livello 14. Le UV vanno quindi rimappate su un sottorettangolo
+della texture, non lasciate a `[0,1]`. Conviene prevederlo dal primo giorno:
+un `FVector4` di offset/scala nel materiale, non una texture per tile di
+terreno.
 
-1. **Non aspettare i figli.** Se il nodo corrente e' caricato, disegnalo e
-   chiedi i figli per i frame successivi. Aspettare significa buchi visibili.
-2. **Il bounding volume deve usare min/max veri**, non una quota costante:
-   sull'Etna la differenza fra 0 e 3357 m decide se il tile e' visibile.
-3. **Il horizon culling** sull'ellissoide e' cio' che evita di considerare meta'
-   pianeta a ogni frame. La normale geodetica e il raggio ellissoidico sono gia'
-   in `GeoCore/Public/Geo/Ellipsoid.h`.
+---
 
-L'errore geometrico di un livello e' il passo fra post in metri: e' gia'
-calcolabile con `PostSpacingDeg(Level) * 111132`.
+## 8. Cosa e' stato deciso in Fase 5, in breve
 
-## 8. Fase 5 (mesh), le trappole note
+Se riapri il codice fra sei mesi, questi sono i tre punti che sembrano
+arbitrari e non lo sono. Le motivazioni estese sono in `docs/fase5-design.md`.
 
-* I vertici vanno generati in un **frame ENU centrato sul tile**
-  (`GeoCore/Public/Geo/EnuFrame.h`). Solo la trasformazione del componente
-  cambia a ogni rebase: **nessun vertice va rigenerato**.
-* Le **skirt** sono bordi verticali che scendono dal perimetro del tile. Servono
-  contro le crepe fra livelli **diversi**, dove i post non coincidono. Fra tile
-  dello stesso livello le crepe non esistono per costruzione (overlap di 1
-  post), ed e' verificato.
-* Profondita' della skirt: proporzionale al passo dei post del livello, non
-  costante. Troppo corta lascia crepe visibili in lontananza, troppo lunga
-  produce pareti visibili sulle pendenze.
-* Isola la generazione dietro un'interfaccia: si comincia con
-  `UDynamicMeshComponent` (semplice, modulo `GeometryFramework` da aggiungere a
-  `GeoRender.Build.cs`) ma si finira' con un `FPrimitiveSceneProxy` custom.
-* **Risolvi la issue #1 prima di questa fase.**
+* **I vertici sono in un frame NEU locale alla tile, in metri — non ENU.** ENU
+  e' destrorso, Unreal e' sinistrorso: una mesh in ENU richiederebbe una
+  trasformazione del componente con determinante -1, e `FMatrix::ToQuat()` su
+  una riflessione non fallisce, restituisce silenziosamente spazzatura. Il
+  terreno comparirebbe specchiato. *(La versione precedente di questo documento
+  suggeriva ENU: era sbagliato, e questa e' la correzione.)*
+* **Un rebase non rigenera nessun vertice**, cambia solo le trasformazioni dei
+  componenti (`RefreshTransforms`). E' l'incasso di tutto il lavoro della
+  Fase 1, ed e' verificabile a video: dopo `geo.Rebase`, `Questo frame` resta
+  `+0 -0`.
+* **Le gonne servono solo fra livelli diversi.** Fra tile dello stesso livello
+  le crepe non esistono per costruzione (overlap di 1 post), e i test lo
+  misurano: 129 vertici di bordo coincidenti a 0.0001 m in ECEF, pur essendo le
+  due tile costruite in frame locali diversi. Profondita' = passo del livello x
+  111132 x 8, cioe' 152.6 m al livello 13, raddoppiando per livello.
+
+Limitazioni note, lasciate aperte di proposito:
+
+* la mesh si costruisce **sul game thread** con un budget di 4 tile per frame.
+  `BuildTileMesh` e' puro e senza stato: spostarlo sul pool della Fase 3 e' una
+  modifica localizzata, da fare quando `Costruzione` nell'overlay lo chiedera';
+* le normali ai bordi usano differenze unilaterali: possibile cucitura di
+  illuminazione, geometria comunque continua;
+* `bFlipWinding` ha un default scelto senza mai aver visto lo schermo. Se il
+  terreno e' invisibile dall'alto, `geo.Terrain.FlipWinding 1` e poi si cambia
+  il default in `FTileMeshParameters`.
 
 ---
 
@@ -363,6 +398,8 @@ calcolabile con `PostSpacingDeg(Level) * 111132`.
 | Verifica Fase 3, con la demo visiva | `docs/fase3-verifica.md` |
 | Design e motivazioni Fase 4 | `docs/fase4-design.md` |
 | Verifica Fase 4, con la demo visiva | `docs/fase4-verifica.md` |
+| Design e motivazioni Fase 5 | `docs/fase5-design.md` |
+| Verifica Fase 5, con la demo visiva | `docs/fase5-verifica.md` |
 | Issue aperte | `docs/issues-aperte.md` |
 | Uso della pipeline, installazione Windows | `Pipeline/README.md` |
 
@@ -377,3 +414,5 @@ Numeri utili da tenere a mente:
 | Livello nativo TINITALY (10 m) | 14 |
 | Livello nativo DTED2 / Copernicus (30 m) | 13 |
 | Italia a livello 14 | ~4x10^5 tile, ~35 GB |
+| Una mesh di tile | 17.157 vertici, 33.792 triangoli, 0.91 MB |
+| Profondita' della gonna al livello 13 | 152.6 m (raddoppia per livello) |

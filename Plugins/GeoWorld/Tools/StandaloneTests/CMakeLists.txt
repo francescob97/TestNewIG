@@ -67,7 +67,19 @@ else()
 	target_compile_options(geoquadtree_tests PRIVATE -Wall -Wextra -O2)
 endif()
 
+# --- Mesh (Fase 5): generazione della geometria e gonne --------------------
+add_executable(geomesh_tests geomesh_main.cpp)
+target_include_directories(geomesh_tests PRIVATE
+	${GEORENDER_DIR}/Public ${GEOTILES_DIR}/Public ${GEOCORE_DIR}/Public)
+
+if (MSVC)
+	target_compile_options(geomesh_tests PRIVATE /W4)
+else()
+	target_compile_options(geomesh_tests PRIVATE -Wall -Wextra -O2)
+endif()
+
 enable_testing()
 add_test(NAME geocore COMMAND geocore_tests)
 add_test(NAME geotiles COMMAND geotiles_tests)
 add_test(NAME geoquadtree COMMAND geoquadtree_tests)
+add_test(NAME geomesh COMMAND geomesh_tests)

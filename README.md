@@ -13,7 +13,7 @@ Il progetto `TestNewIG` e' un guscio vuoto: tutto il codice vive in
 |---|---|---|
 | `GeoCore` | Runtime | Geodesia, georeferenziazione, origin rebasing |
 | `GeoTiles` | Runtime | Formato tile, loader asincrono, cache LRU *(Fase 2/3)* |
-| `GeoRender` | Runtime | Quadtree, LOD, generazione mesh *(Fase 4/5)* |
+| `GeoRender` | Runtime | Quadtree, LOD, generazione mesh, terreno *(Fase 4/5)* |
 | `GeoWorldEditor` | Editor | Strumenti di editor *(piu' avanti)* |
 
 `GeoCore` e' diviso in due strati fisicamente separati:
@@ -30,7 +30,7 @@ Il progetto `TestNewIG` e' un guscio vuoto: tutto il codice vive in
 - [x] **Fase 2** — pipeline dati offline (Python + GDAL, TINITALY -> piramide di tile)
 - [x] **Fase 3** — loader asincrono, cache LRU, lettura dataset *(mai compilata in UE)*
 - [x] **Fase 4** — quadtree, selezione LOD, culling *(mai compilata in UE)*
-- [ ] Fase 5 — generazione mesh e skirt
+- [x] **Fase 5** — generazione mesh, gonne, terreno a schermo *(mai compilata in UE)*
 - [ ] Fase 6 — imagery drappeggiata
 
 ## Formato dei dati
@@ -62,10 +62,15 @@ Dettagli e motivazioni in `docs/fase2-design.md`.
 ```bash
 cmake -S Plugins/GeoWorld/Tools/StandaloneTests -B build
 cmake --build build
-./build/geocore_tests
+./build/geocore_tests        # 37 test  -- geodesia, rebasing
+./build/geotiles_tests       # 23 test  -- formato tile, cache
+./build/geoquadtree_tests    # 37 test  -- LOD, culling
+./build/geomesh_tests        # 28 test  -- mesh, gonne, giunzioni
 
 ./Plugins/GeoWorld/Tools/CheckSourceDiscipline.sh
 ```
+
+125 test C++ in totale, piu' 41 test Python della pipeline.
 
 ## Pipeline dati
 
@@ -85,5 +90,7 @@ Quadro d'insieme delle sei fasi: `docs/programma.md`.
 
 ## Verifica in Unreal
 
-Vedi `docs/fase1-verifica.md`, `docs/fase2-verifica.md`, `docs/fase3-verifica.md`
-e `docs/fase4-verifica.md`.
+Vedi `docs/fase1-verifica.md`, `docs/fase2-verifica.md`, `docs/fase3-verifica.md`,
+`docs/fase4-verifica.md` e `docs/fase5-verifica.md`.
+
+Scorciatoia per vedere il terreno: `geo.Terrain.Demo <cartella del dataset>`.

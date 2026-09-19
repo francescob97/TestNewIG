@@ -10,9 +10,13 @@ public class GeoRender : ModuleRules
 		PublicDependencyModuleNames.AddRange(new string[]
 		{
 			"Core", "CoreUObject", "Engine", "GeoCore", "GeoTiles",
-			// NOTA: GeometryFramework (UDynamicMeshComponent) verra' aggiunto in
-			// Fase 5. Non lo mettiamo ora per non pagare tempo di compilazione
-			// per un modulo che ancora non usiamo.
+
+			// Fase 5: GeometryFramework porta UDynamicMeshComponent,
+			// GeometryCore la FDynamicMesh3 che il componente contiene.
+			// Sono il provider di PARTENZA: l'interfaccia in
+			// Terrain/GeoTerrainMeshProvider.h esiste per poterlo sostituire
+			// con un FPrimitiveSceneProxy custom senza toccare il resto.
+			"GeometryFramework", "GeometryCore",
 		});
 	}
 }
