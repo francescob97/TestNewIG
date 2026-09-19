@@ -266,14 +266,33 @@ static FAutoConsoleCommand GeoPlacesCommand(
 //  Se sei nel Play e non nel viewport, questo comando non c'entra: li' la
 //  camera e' un attore e la risposta e' geo.Fly.
 #if WITH_EDITOR
-static FAutoConsoleCommandWithArgs GeoViewSpeedCommand(
+// NOTA UE: il tipo e' FAutoConsoleCommandWithWorldAndArgs anche se il mondo qui
+// non servirebbe. Non e' pigrizia: FAutoConsoleCommandWithArgs NON ESISTE nel
+// motore. I tipi disponibili sono FAutoConsoleCommand (che accetta anche un
+// delegato con argomenti), ...WithWorld, ...WithWorldAndArgs,
+// ...WithOutputDevice, ...WithArgsAndOutputDevice e
+// ...WithWorldArgsAndOutputDevice. Lo impone ora la regola 5 di
+// CheckSourceDiscipline.sh, perche' il compilatore non e' disponibile qui.
+// Il mondo, gia' che c'e', serve a dare un messaggio migliore.
+static FAutoConsoleCommandWithWorldAndArgs GeoViewSpeedCommand(
 	TEXT("geo.ViewSpeed"),
 	TEXT("geo.ViewSpeed <1..8> [moltiplicatore] - velocita' della camera del viewport dell'editor."),
-	FConsoleCommandWithArgsDelegate::CreateStatic([](const TArray<FString>& Args)
+	FConsoleCommandWithWorldAndArgsDelegate::CreateStatic(
+		[](const TArray<FString>& Args, UWorld* World)
 	{
 		if (!GEditor)
 		{
 			GeoConsole::Report(TEXT("Nessun editor."), FColor::Red);
+			return;
+		}
+
+		// Se si sta giocando, la camera non e' quella del viewport: e' un
+		// attore, e questo comando non la toccherebbe. Meglio dirlo che
+		// lasciar credere di aver cambiato qualcosa.
+		if (World && World->WorldType == EWorldType::PIE)
+		{
+			GeoConsole::Report(
+				TEXT("Sei nel Play: qui la camera e' un attore. Usa geo.Fly e geo.Fly.Speed."), FColor::Yellow);
 			return;
 		}
 

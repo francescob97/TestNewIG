@@ -34,6 +34,7 @@ gia' incontrati e corretti, per riconoscerli se tornano:
 | `cannot open source file "Unreal/..."` | tre moduli avevano tutti una cartella `Public/Unreal`. Ora si chiamano `Georeference`, `Streaming`, `Lod`. Se compare su file nuovi: **rigenera i project file di Visual Studio** |
 | errore su un parametro chiamato come un membro | Unreal tratta lo shadowing come ERRORE. Convenzione: prefisso `In` (`bInEnabled`). Lo intercetta `Tools/CheckShadowedParameters.py` |
 | errori di `std::max`, `std::numeric_limits` | include della standard library che gcc tira dentro da solo e MSVC no |
+| `missing type specifier` su una riga `static FAutoConsoleCommand...` | il tipo non esiste. **`FAutoConsoleCommandWithArgs` NON esiste**: i validi sono `FAutoConsoleCommand` (che accetta anche un delegato con argomenti), `...WithWorld`, `...WithWorldAndArgs`, `...WithOutputDevice`, `...WithArgsAndOutputDevice`, `...WithWorldArgsAndOutputDevice`. Lo intercetta la regola 5 di `CheckSourceDiscipline.sh` |
 | `unresolved external symbol` su una funzione dello strato puro | in Unreal ogni modulo e' una DLL: un simbolo definito in un `.cpp` non e' visibile fuori se non esportato. **Lo strato puro e' header-only**, appunto per non doverlo esportare. Lo intercetta `Tools/CheckModuleExports.py` |
 
 Dopo aver aggiunto file o cartelle: tasto destro sul `.uproject` ->

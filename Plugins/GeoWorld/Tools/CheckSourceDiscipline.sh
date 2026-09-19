@@ -91,6 +91,54 @@ else
 	echo "  ok - nessuna conversione di unita' sparsa nel codice"
 fi
 
+# =============================================================================
+#  Regola 5: i tipi di comando console devono esistere davvero
+#
+#  PERCHE'. Qui non c'e' Unreal e non si compila: un nome di tipo inventato
+#  arriva fino alla macchina Windows e costa un giro intero. E' gia' successo
+#  con FAutoConsoleCommandWithArgs, che sembra ovvio che esista e invece no.
+#  Questi sono i sei tipi che il motore definisce in IConsoleManager.h.
+# =============================================================================
+echo
+echo "== Regola 5: i tipi FAutoConsoleCommand* esistono nel motore =="
+
+KNOWN_COMMANDS='FAutoConsoleCommand|FAutoConsoleCommandWithWorld|FAutoConsoleCommandWithWorldAndArgs|FAutoConsoleCommandWithOutputDevice|FAutoConsoleCommandWithArgsAndOutputDevice|FAutoConsoleCommandWithWorldArgsAndOutputDevice'
+
+# I commenti sono esclusi prima di estrarre i nomi: questa stessa regola cita
+# per nome il tipo inesistente, e una regola che fallisce sulla propria
+# spiegazione e' una regola che si finisce per disattivare.
+BAD_COMMANDS=$(grep -rh -E 'FAutoConsoleCommand[A-Za-z]*' \
+	--include='*.h' --include='*.cpp' "$SRC" 2>/dev/null \
+	| grep -v -E '^[[:space:]]*(//|\*|/\*)' \
+	| grep -o -E 'FAutoConsoleCommand[A-Za-z]*' \
+	| sort -u \
+	| grep -v -x -E "$KNOWN_COMMANDS" \
+	|| true)
+
+# Stessa trappola, altro nome: i delegati devono corrispondere al tipo scelto.
+KNOWN_DELEGATES='FConsoleCommandDelegate|FConsoleCommandWithArgsDelegate|FConsoleCommandWithWorldDelegate|FConsoleCommandWithWorldAndArgsDelegate|FConsoleCommandWithOutputDeviceDelegate|FConsoleCommandWithArgsAndOutputDeviceDelegate|FConsoleCommandWithWorldArgsAndOutputDeviceDelegate'
+
+BAD_DELEGATES=$(grep -rh -E 'FConsoleCommand[A-Za-z]*Delegate' \
+	--include='*.h' --include='*.cpp' "$SRC" 2>/dev/null \
+	| grep -v -E '^[[:space:]]*(//|\*|/\*)' \
+	| grep -o -E 'FConsoleCommand[A-Za-z]*Delegate' \
+	| sort -u \
+	| grep -v -x -E "$KNOWN_DELEGATES" \
+	|| true)
+
+if [ -n "$BAD_COMMANDS" ] || [ -n "$BAD_DELEGATES" ]; then
+	echo "  FALLITO - tipi di comando o delegato console inesistenti:"
+	[ -n "$BAD_COMMANDS" ] && echo "$BAD_COMMANDS" | sed 's/^/    /'
+	[ -n "$BAD_DELEGATES" ] && echo "$BAD_DELEGATES" | sed 's/^/    /'
+	echo "    -> comandi validi:"
+	echo "$KNOWN_COMMANDS" | tr '|' '\n' | sed 's/^/       /'
+	echo "    -> delegati validi:"
+	echo "$KNOWN_DELEGATES" | tr '|' '\n' | sed 's/^/       /'
+	FAILURES=$((FAILURES + 1))
+else
+	echo "  ok - tutti i tipi di comando e delegato console sono quelli del motore"
+fi
+
 echo
 if [ "$FAILURES" -eq 0 ]; then
 	echo "TUTTI I CONTROLLI SUPERATI"
