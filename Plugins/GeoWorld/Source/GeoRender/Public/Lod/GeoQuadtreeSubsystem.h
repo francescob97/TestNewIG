@@ -82,9 +82,9 @@ public:
 	void SetFrozen(bool bInFrozen) { bFrozen = bInFrozen; }
 	bool IsFrozen() const { return bFrozen; }
 
-	void SetDebugOverlayEnabled(bool bEnabled) { bShowDebugOverlay = bEnabled; }
+	void SetDebugOverlayEnabled(bool bInEnabled) { bShowDebugOverlay = bInEnabled; }
 	bool IsDebugOverlayEnabled() const { return bShowDebugOverlay; }
-	void SetDebugDrawEnabled(bool bEnabled) { bDrawSelection = bEnabled; }
+	void SetDebugDrawEnabled(bool bInEnabled) { bDrawSelection = bInEnabled; }
 	bool IsDebugDrawEnabled() const { return bDrawSelection; }
 
 	FGeoQuadtreeStats GetStats() const { return Stats; }

@@ -12,7 +12,7 @@ Per la procedura di verifica vedi `fase1-verifica.md`.
 | Strato | Cartelle | Include ammessi |
 |---|---|---|
 | Matematica pura | `Public/Geo`, `Private/Geo` | solo `<cmath>`, `<cstdint>` |
-| Ponte Unreal | `Public/Unreal`, `Private/Unreal` | `CoreMinimal.h`, `Engine`, … |
+| Ponte Unreal | `Public/Georeference`, `Private/Georeference` | `CoreMinimal.h`, `Engine`, … |
 
 Non e' purismo. Lo strato puro viene compilato **anche** da
 `Tools/StandaloneTests` con un normale `g++`/`clang`, senza Unreal: la

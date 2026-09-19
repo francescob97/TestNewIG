@@ -5,9 +5,9 @@
 #include "Modules/ModuleManager.h"
 
 #include "GeoCoreModule.h"
-#include "Unreal/GeoTileStreamingSubsystem.h"
-#include "Unreal/GeoreferenceSubsystem.h"
-#include "Unreal/GeoWorldTypes.h"
+#include "Streaming/GeoTileStreamingSubsystem.h"
+#include "Georeference/GeoreferenceSubsystem.h"
+#include "Georeference/GeoWorldTypes.h"
 #include "Tiles/TilingScheme.h"
 
 #include "Engine/Engine.h"

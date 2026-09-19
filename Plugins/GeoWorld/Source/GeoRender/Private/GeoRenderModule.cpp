@@ -5,11 +5,11 @@
 #include "Modules/ModuleManager.h"
 
 #include "GeoMarkerActor.h"
-#include "Unreal/GeoTransformComponent.h"
-#include "Unreal/GeoQuadtreeSubsystem.h"
-#include "Unreal/GeoTileStreamingSubsystem.h"
-#include "Unreal/GeoreferenceSubsystem.h"
-#include "Unreal/GeoWorldTypes.h"
+#include "Georeference/GeoTransformComponent.h"
+#include "Lod/GeoQuadtreeSubsystem.h"
+#include "Streaming/GeoTileStreamingSubsystem.h"
+#include "Georeference/GeoreferenceSubsystem.h"
+#include "Georeference/GeoWorldTypes.h"
 #include "GeoCoreModule.h"
 
 #include "Engine/Engine.h"

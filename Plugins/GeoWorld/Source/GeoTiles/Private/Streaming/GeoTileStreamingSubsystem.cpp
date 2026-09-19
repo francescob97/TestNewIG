@@ -1,8 +1,8 @@
-#include "Unreal/GeoTileStreamingSubsystem.h"
+#include "Streaming/GeoTileStreamingSubsystem.h"
 
 #include "GeoCoreModule.h"
 
-#include "Unreal/GeoreferenceSubsystem.h"
+#include "Georeference/GeoreferenceSubsystem.h"
 
 #include "DrawDebugHelpers.h"
 #include "Engine/Engine.h"
@@ -248,10 +248,18 @@ EGeoTileState UGeoTileStreamingSubsystem::RequestTile(const FTileKey& Key, int32
 
 	// NOTA UE: AddQueuedWork prende la PROPRIETA' dell'oggetto. Si distrugge da
 	// solo in DoThreadedWork o in Abandon: non va cancellato da qui.
-	// La priorita' alta = servito prima, quindi si passa il negato perche' il
-	// pool ordina per valore crescente.
+	//
+	// EQueuedWorkPriority va da Blocking(0) a Lowest(5), e il valore 6 e'
+	// Count, cioe' il conteggio dei valori e non una priorita'. Passarlo
+	// sarebbe un valore fuori dominio. Blocking si evita del tutto: blocca il
+	// pool finche' il lavoro non finisce, ed e' l'ultima cosa che si vuole per
+	// una lettura da disco. Si mappa quindi su High(2)..Lowest(5).
+	const int32 PriorityValue = FMath::Clamp(5 - FMath::Clamp(Priority, 0, 3),
+		static_cast<int32>(EQueuedWorkPriority::High),
+		static_cast<int32>(EQueuedWorkPriority::Lowest));
+
 	LoadPool->AddQueuedWork(new FGeoTileLoadWork(this, Key, Dataset.GetTileFilePath(Key)),
-		static_cast<EQueuedWorkPriority>(FMath::Clamp(3 - Priority, 0, 6)));
+		static_cast<EQueuedWorkPriority>(PriorityValue));
 
 	return EGeoTileState::InCaricamento;
 }

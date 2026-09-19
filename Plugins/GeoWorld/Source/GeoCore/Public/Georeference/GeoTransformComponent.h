@@ -6,7 +6,7 @@
 
 #include "CoreMinimal.h"
 #include "Components/SceneComponent.h"
-#include "Unreal/GeoWorldTypes.h"
+#include "Georeference/GeoWorldTypes.h"
 
 #include "GeoTransformComponent.generated.h"
 

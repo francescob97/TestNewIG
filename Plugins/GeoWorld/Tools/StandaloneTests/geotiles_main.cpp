@@ -16,7 +16,9 @@
 #include "Tiles/TileKey.h"
 #include "Tiles/TilingScheme.h"
 
+#include <algorithm>
 #include <cmath>
+#include <limits>
 #include <cstdio>
 #include <cstring>
 #include <fstream>

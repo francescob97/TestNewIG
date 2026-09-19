@@ -25,7 +25,7 @@ Come `GeoCore`, anche `GeoTiles` e' diviso in due parti che non si mescolano:
 | Strato | Cartelle | Include ammessi |
 |---|---|---|
 | Puro | `Public/Tiles`, `Private/Tiles` | solo standard library |
-| Ponte Unreal | `Public/Unreal`, `Private/Unreal` | `CoreMinimal.h`, `Engine`, … |
+| Ponte Unreal | `Public/Georeference`, `Private/Georeference` | `CoreMinimal.h`, `Engine`, … |
 
 Non e' purismo ripetuto per abitudine: e' il motivo per cui questa fase, pur non
 essendo **mai stata compilata dentro Unreal**, ha 23 test eseguiti — fra cui la

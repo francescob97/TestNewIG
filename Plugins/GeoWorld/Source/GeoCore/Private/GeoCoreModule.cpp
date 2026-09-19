@@ -1,7 +1,7 @@
 #include "GeoCoreModule.h"
 
-#include "Unreal/GeoreferenceSubsystem.h"
-#include "Unreal/GeoWorldTypes.h"
+#include "Georeference/GeoreferenceSubsystem.h"
+#include "Georeference/GeoWorldTypes.h"
 
 #include "Engine/Engine.h"
 #include "Engine/World.h"

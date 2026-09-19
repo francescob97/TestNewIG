@@ -22,6 +22,7 @@
 #include <cstdint>
 #include <list>
 #include <memory>
+#include <utility>
 #include <unordered_map>
 
 #include "Tiles/TileFormat.h"

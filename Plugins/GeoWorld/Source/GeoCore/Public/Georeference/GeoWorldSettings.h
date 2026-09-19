@@ -6,7 +6,7 @@
 
 #include "CoreMinimal.h"
 #include "Engine/DeveloperSettings.h"
-#include "Unreal/GeoWorldTypes.h"
+#include "Georeference/GeoWorldTypes.h"
 
 #include "GeoWorldSettings.generated.h"
 

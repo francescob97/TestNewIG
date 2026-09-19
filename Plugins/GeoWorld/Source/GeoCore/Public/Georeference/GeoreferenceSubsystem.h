@@ -9,8 +9,8 @@
 #include "Tickable.h"
 #include "Misc/ScopeRWLock.h"
 
-#include "Unreal/GeoreferenceSnapshot.h"
-#include "Unreal/GeoWorldTypes.h"
+#include "Georeference/GeoreferenceSnapshot.h"
+#include "Georeference/GeoWorldTypes.h"
 
 #include "GeoreferenceSubsystem.generated.h"
 
@@ -132,7 +132,7 @@ public:
 	void   SetRebaseThresholdMeters(double NewThresholdMeters);
 
 	bool IsAutoRebaseEnabled() const { return bAutoRebase; }
-	void SetAutoRebaseEnabled(bool bEnabled) { bAutoRebase = bEnabled; }
+	void SetAutoRebaseEnabled(bool bInEnabled) { bAutoRebase = bInEnabled; }
 
 	/** Invocato DOPO ogni rebase, a origine gia' aggiornata. */
 	FOnGeoreferenceRebased OnGeoreferenceRebased;
@@ -156,7 +156,7 @@ public:
 
 	// --- Debug -------------------------------------------------------------
 
-	void SetDebugOverlayEnabled(bool bEnabled) { bShowDebugOverlay = bEnabled; }
+	void SetDebugOverlayEnabled(bool bInEnabled) { bShowDebugOverlay = bInEnabled; }
 	bool IsDebugOverlayEnabled() const { return bShowDebugOverlay; }
 
 	/**

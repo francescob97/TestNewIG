@@ -1,4 +1,4 @@
-#include "Unreal/GeoTileDataset.h"
+#include "Streaming/GeoTileDataset.h"
 
 #include "GeoCoreModule.h"
 

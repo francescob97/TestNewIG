@@ -20,7 +20,7 @@ Il progetto `TestNewIG` e' un guscio vuoto: tutto il codice vive in
 
 * `Public/Geo`, `Private/Geo` — **C++ puro**, zero include di Unreal. Compilabile
   e testabile senza il motore.
-* `Public/Unreal`, `Private/Unreal` — il ponte verso `FVector`, `FQuat`, i
+* `Public/Georeference`, `Private/Georeference` — il ponte verso `FVector`, `FQuat`, i
   subsystem e i componenti.
 
 ## Stato

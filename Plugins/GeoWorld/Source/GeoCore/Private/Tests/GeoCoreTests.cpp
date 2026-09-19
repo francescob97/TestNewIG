@@ -24,8 +24,8 @@
 #include "Misc/AutomationTest.h"
 
 #include "Geo/Georeference.h"
-#include "Unreal/GeoreferenceSnapshot.h"
-#include "Unreal/GeoWorldTypes.h"
+#include "Georeference/GeoreferenceSnapshot.h"
+#include "Georeference/GeoWorldTypes.h"
 
 #if WITH_DEV_AUTOMATION_TESTS
 

@@ -1,7 +1,7 @@
 #include "GeoMarkerActor.h"
 
-#include "Unreal/GeoTransformComponent.h"
-#include "Unreal/GeoreferenceSubsystem.h"
+#include "Georeference/GeoTransformComponent.h"
+#include "Georeference/GeoreferenceSubsystem.h"
 
 #include "Components/StaticMeshComponent.h"
 #include "Engine/StaticMesh.h"

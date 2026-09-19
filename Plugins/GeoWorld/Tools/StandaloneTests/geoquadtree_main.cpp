@@ -5,6 +5,7 @@
 #include "Quadtree/TileSelector.h"
 #include "Tiles/TilingScheme.h"
 
+#include <algorithm>
 #include <cmath>
 #include <cstdio>
 #include <set>

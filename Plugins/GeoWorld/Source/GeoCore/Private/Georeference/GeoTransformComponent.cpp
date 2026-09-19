@@ -1,7 +1,7 @@
-#include "Unreal/GeoTransformComponent.h"
+#include "Georeference/GeoTransformComponent.h"
 
-#include "Unreal/GeoreferenceSubsystem.h"
-#include "Unreal/GeoreferenceSnapshot.h"
+#include "Georeference/GeoreferenceSubsystem.h"
+#include "Georeference/GeoreferenceSnapshot.h"
 
 #include "Engine/World.h"
 #include "GameFramework/Actor.h"

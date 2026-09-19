@@ -1,9 +1,9 @@
-#include "Unreal/GeoQuadtreeSubsystem.h"
+#include "Lod/GeoQuadtreeSubsystem.h"
 
 #include "GeoCoreModule.h"
 #include "Tiles/TilingScheme.h"
-#include "Unreal/GeoTileStreamingSubsystem.h"
-#include "Unreal/GeoreferenceSubsystem.h"
+#include "Streaming/GeoTileStreamingSubsystem.h"
+#include "Georeference/GeoreferenceSubsystem.h"
 
 #include "DrawDebugHelpers.h"
 #include "Engine/Engine.h"

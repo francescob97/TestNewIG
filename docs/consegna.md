@@ -26,8 +26,18 @@ il motore. Quello che **e'** stato verificato:
   posizione dei `.generated.h`, guardie `WITH_EDITOR`, macro di export);
 * il formato dei file, letto dal codice C++ vero contro un dataset vero.
 
-Al primo build su Windows aspettati errori di compilazione da sistemare. Sono
-quasi sempre include mancanti o nomi di API cambiati fra versioni di UE.
+Al primo build su Windows aspettati errori di compilazione da sistemare. Quelli
+gia' incontrati e corretti, per riconoscerli se tornano:
+
+| Sintomo | Causa |
+|---|---|
+| `cannot open source file "Unreal/..."` | tre moduli avevano tutti una cartella `Public/Unreal`. Ora si chiamano `Georeference`, `Streaming`, `Lod`. Se compare su file nuovi: **rigenera i project file di Visual Studio** |
+| errore su un parametro chiamato come un membro | Unreal tratta lo shadowing come ERRORE. Convenzione: prefisso `In` (`bInEnabled`). Lo intercetta `Tools/CheckShadowedParameters.py` |
+| errori di `std::max`, `std::numeric_limits` | include della standard library che gcc tira dentro da solo e MSVC no |
+
+Dopo aver aggiunto file o cartelle: tasto destro sul `.uproject` ->
+**Generate Visual Studio project files**. IntelliSense non li vede finche' non
+lo fai, e segnala include inesistenti che il compilatore invece risolve.
 
 ---
 
@@ -235,10 +245,10 @@ piu' fasi contemporaneamente.
 Plugins/GeoWorld/Source/
   GeoCore/        geodesia, georeferenziazione, rebasing        [Fase 1]
     Public/Geo/       C++ PURO, zero Unreal, testabile senza motore
-    Public/Unreal/    ponte verso FVector/FQuat, subsystem, componenti
+    Public/Georeference/  ponte verso FVector/FQuat, subsystem, componenti
   GeoTiles/       formato tile, dataset, loader, cache          [Fase 3]
     Public/Tiles/     C++ PURO: TileKey, TilingScheme, TileFormat, TileCache
-    Public/Unreal/    FGeoTileDataset, UGeoTileStreamingSubsystem
+    Public/Streaming/     FGeoTileDataset, UGeoTileStreamingSubsystem
     TestData/         vettori di riferimento generati da Python
   GeoRender/      quadtree, LOD, mesh                           [Fasi 4-5]
   GeoWorldEditor/ strumenti di editor                           [vuoto]
@@ -253,6 +263,11 @@ Pipeline/         pipeline dati Python + GDAL                   [Fase 2]
 docs/             programma.md, dati.md, consegna.md (questo),
                   fase1-*.md, fase2-*.md, issues-aperte.md
 ```
+
+**Le cartelle pubbliche hanno nomi univoci per modulo** (`Georeference`,
+`Streaming`, `Lod`) e non si chiamano tutte `Unreal`. Con tre cartelle omonime
+sui percorsi di inclusione, `#include "Unreal/X.h"` diventa ambiguo e
+IntelliSense ci si perde: e' costato un giro di compilazione.
 
 **La regola dei due strati**: sotto `Public/Geo` e `Public/Tiles` non entra
 **nessun** include di Unreal. Cosi' quel codice si compila e si testa in un

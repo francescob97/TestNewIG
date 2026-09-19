@@ -8,7 +8,12 @@
 #     Niente include di Unreal Engine negli strati puri di GeoCore (Geo/) e
 #     GeoTiles (Tiles/).
 #
-#   REGOLA 2 - La conversione metri <-> unita' Unreal avviene in un punto solo.
+#   REGOLA 2 - Nessun parametro nasconde un membro.
+#     Unreal compila con lo shadowing come ERRORE, non come avvertimento:
+#     e' un file che non compila, non uno stile discutibile. Il controllo sta
+#     in CheckShadowedParameters.py.
+#
+#   REGOLA 3 - La conversione metri <-> unita' Unreal avviene in un punto solo.
 #     Il fattore 100 puo' comparire solo in GeoUnits.h (dove e' definito) e
 #     dentro FGeoreference (dove viene applicato).
 #
@@ -45,7 +50,15 @@ else
 fi
 
 echo
-echo "== Regola 2: il fattore metri->unita' vive in un punto solo =="
+echo "== Regola 2: nessun parametro nasconde un membro =="
+if python3 "$(dirname "${BASH_SOURCE[0]}")/CheckShadowedParameters.py" "$SRC"; then
+	:
+else
+	FAILURES=$((FAILURES + 1))
+fi
+
+echo
+echo "== Regola 3: il fattore metri->unita' vive in un punto solo =="
 # Cerca il fattore 100 usato come conversione di unita', escludendo i due file
 # autorizzati. Le percentuali, gli indici e i "1000.0" (km->m) non ci interessano.
 UNIT_VIOLATIONS=$(grep -rn -E '(\*[[:space:]]*100\.0*[^0-9]|100\.0*[[:space:]]*\*|/[[:space:]]*100\.0*[^0-9])' \

@@ -1,7 +1,7 @@
-#include "Unreal/GeoreferenceSubsystem.h"
+#include "Georeference/GeoreferenceSubsystem.h"
 
-#include "Unreal/GeoTransformComponent.h"
-#include "Unreal/GeoWorldSettings.h"
+#include "Georeference/GeoTransformComponent.h"
+#include "Georeference/GeoWorldSettings.h"
 
 #include "Engine/Engine.h"
 #include "Engine/World.h"
@@ -524,15 +524,16 @@ bool UGeoreferenceSubsystem::GetActiveViewInfo(FActiveViewInfo& OutInfo) const
 
 	if (const APlayerController* PC = World->GetFirstPlayerController())
 	{
-		if (APlayerCameraManager* CameraManager = PC->PlayerCameraManager)
+		if (const APlayerCameraManager* CameraManager = PC->PlayerCameraManager)
 		{
-			// GetCameraCachePOV da' posizione, rotazione e FOV gia' passati per
-			// tutti i modificatori di camera: e' cio' che si sta davvero
-			// guardando, non cio' che il pawn avrebbe voluto inquadrare.
-			const FMinimalViewInfo View = CameraManager->GetCameraCacheView();
-			OutInfo.Location = View.Location;
-			OutInfo.Rotation = View.Rotation;
-			OutInfo.HorizontalFovDegrees = View.FOV;
+			// Si usano i tre accessori di base invece di leggere la struttura
+			// della cache della camera: sono stabili fra le versioni di Unreal
+			// e restituiscono comunque il risultato gia' passato per tutti i
+			// modificatori, cioe' cio' che si sta davvero guardando e non cio'
+			// che il pawn avrebbe voluto inquadrare.
+			OutInfo.Location = CameraManager->GetCameraLocation();
+			OutInfo.Rotation = CameraManager->GetCameraRotation();
+			OutInfo.HorizontalFovDegrees = CameraManager->GetFOVAngle();
 
 			if (GEngine && GEngine->GameViewport && GEngine->GameViewport->Viewport)
 			{

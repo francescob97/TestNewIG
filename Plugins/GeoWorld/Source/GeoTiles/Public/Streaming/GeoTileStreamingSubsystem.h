@@ -9,7 +9,7 @@
 
 #include "Tiles/TileCache.h"
 #include "Tiles/TileKey.h"
-#include "Unreal/GeoTileDataset.h"
+#include "Streaming/GeoTileDataset.h"
 
 #include "GeoTileStreamingSubsystem.generated.h"
 
@@ -134,10 +134,10 @@ public:
 	// produrrebbe niente da guardare. Questi due strumenti servono proprio a
 	// renderla osservabile prima che esista chi la usa davvero.
 
-	void SetDebugOverlayEnabled(bool bEnabled) { bShowDebugOverlay = bEnabled; }
+	void SetDebugOverlayEnabled(bool bInEnabled) { bShowDebugOverlay = bInEnabled; }
 	bool IsDebugOverlayEnabled() const { return bShowDebugOverlay; }
 
-	void SetDebugDrawTiles(bool bEnabled) { bDrawTileBounds = bEnabled; }
+	void SetDebugDrawTiles(bool bInEnabled) { bDrawTileBounds = bInEnabled; }
 	bool IsDebugDrawTilesEnabled() const { return bDrawTileBounds; }
 
 	/**
