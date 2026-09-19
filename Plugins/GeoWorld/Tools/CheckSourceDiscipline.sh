@@ -31,6 +31,7 @@ echo "== Regola 1: lo strato puro non deve conoscere Unreal =="
 PURE_DIRS=(
 	"$SRC/GeoCore/Public/Geo"   "$SRC/GeoCore/Private/Geo"
 	"$SRC/GeoTiles/Public/Tiles" "$SRC/GeoTiles/Private/Tiles"
+	"$SRC/GeoRender/Public/Quadtree" "$SRC/GeoRender/Private/Quadtree"
 )
 PURE_VIOLATIONS=$(grep -rn -E '#include[[:space:]]*"(CoreMinimal|Engine/|UObject/|Components/|GameFramework/|Misc/|HAL/|Containers/|Math/|Modules/|Subsystems/)' \
 	"${PURE_DIRS[@]}" 2>/dev/null || true)
@@ -40,7 +41,7 @@ if [ -n "$PURE_VIOLATIONS" ]; then
 	echo "$PURE_VIOLATIONS" | sed 's/^/    /'
 	FAILURES=$((FAILURES + 1))
 else
-	echo "  ok - nessun include di Unreal negli strati puri di GeoCore e GeoTiles"
+	echo "  ok - nessun include di Unreal negli strati puri (GeoCore, GeoTiles, Quadtree)"
 fi
 
 echo

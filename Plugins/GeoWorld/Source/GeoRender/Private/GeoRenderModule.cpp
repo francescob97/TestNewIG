@@ -6,6 +6,8 @@
 
 #include "GeoMarkerActor.h"
 #include "Unreal/GeoTransformComponent.h"
+#include "Unreal/GeoQuadtreeSubsystem.h"
+#include "Unreal/GeoTileStreamingSubsystem.h"
 #include "Unreal/GeoreferenceSubsystem.h"
 #include "Unreal/GeoWorldTypes.h"
 #include "GeoCoreModule.h"
@@ -310,4 +312,183 @@ static FAutoConsoleCommandWithWorld GeoDiagCommand(
 		}
 
 		GeoDiag::Line(TEXT("=========================================="), FColor::Cyan);
+	}));
+
+// ============================================================================
+//  FASE 4 -- comandi del quadtree e della selezione LOD
+// ============================================================================
+
+namespace GeoLodConsole
+{
+	static UGeoQuadtreeSubsystem* Get(UWorld* World)
+	{
+		return World ? World->GetSubsystem<UGeoQuadtreeSubsystem>() : nullptr;
+	}
+
+	static void Report(const FString& Message, const FColor& Colour = FColor::Cyan)
+	{
+		UE_LOG(LogGeoWorld, Log, TEXT("%s"), *Message);
+		if (GEngine) { GEngine->AddOnScreenDebugMessage(-1, 10.0f, Colour, Message); }
+	}
+}
+
+// --- geo.Lod.Enable ---------------------------------------------------------
+static FAutoConsoleCommandWithWorldAndArgs GeoLodEnableCommand(
+	TEXT("geo.Lod.Enable"),
+	TEXT("geo.Lod.Enable <0|1> - attiva la selezione LOD per frame."),
+	FConsoleCommandWithWorldAndArgsDelegate::CreateStatic(
+		[](const TArray<FString>& Args, UWorld* World)
+	{
+		UGeoQuadtreeSubsystem* Quadtree = GeoLodConsole::Get(World);
+		if (!Quadtree) { return; }
+
+		const bool bEnabled = (Args.Num() >= 1) ? (FCString::Atoi(*Args[0]) != 0)
+		                                        : !Quadtree->IsEnabled();
+		Quadtree->SetEnabled(bEnabled);
+		GeoLodConsole::Report(FString::Printf(TEXT("Selezione LOD: %s"),
+			bEnabled ? TEXT("ON") : TEXT("OFF")));
+	}));
+
+// --- geo.Lod.Error ----------------------------------------------------------
+static FAutoConsoleCommandWithWorldAndArgs GeoLodErrorCommand(
+	TEXT("geo.Lod.Error"),
+	TEXT("geo.Lod.Error <pixel> - errore su schermo tollerato. Piu' basso = piu' dettaglio."),
+	FConsoleCommandWithWorldAndArgsDelegate::CreateStatic(
+		[](const TArray<FString>& Args, UWorld* World)
+	{
+		UGeoQuadtreeSubsystem* Quadtree = GeoLodConsole::Get(World);
+		if (!Quadtree) { return; }
+
+		if (Args.Num() >= 1) { Quadtree->SetMaxScreenSpaceError(FCString::Atod(*Args[0])); }
+		GeoLodConsole::Report(FString::Printf(
+			TEXT("Soglia errore su schermo: %.2f px  (dimezzarla quadruplica le tile)"),
+			Quadtree->GetMaxScreenSpaceError()));
+	}));
+
+// --- geo.Lod.Freeze ---------------------------------------------------------
+static FAutoConsoleCommandWithWorldAndArgs GeoLodFreezeCommand(
+	TEXT("geo.Lod.Freeze"),
+	TEXT("geo.Lod.Freeze <0|1> - congela la vista usata dal LOD e lascia muovere la camera."),
+	FConsoleCommandWithWorldAndArgsDelegate::CreateStatic(
+		[](const TArray<FString>& Args, UWorld* World)
+	{
+		UGeoQuadtreeSubsystem* Quadtree = GeoLodConsole::Get(World);
+		if (!Quadtree) { return; }
+
+		const bool bFrozen = (Args.Num() >= 1) ? (FCString::Atoi(*Args[0]) != 0)
+		                                       : !Quadtree->IsFrozen();
+		Quadtree->SetFrozen(bFrozen);
+
+		// Congelare e poi allontanarsi e' il modo per VEDERE da fuori cosa il
+		// culling ha scartato: la selezione resta quella di prima, ma ora la si
+		// guarda dall'esterno.
+		GeoLodConsole::Report(FString::Printf(
+			TEXT("Vista del LOD: %s.%s"),
+			bFrozen ? TEXT("CONGELATA") : TEXT("libera"),
+			bFrozen ? TEXT(" Allontanati per vedere da fuori cosa e' stato scelto.") : TEXT("")));
+	}));
+
+// --- geo.Lod.Debug / geo.Lod.Draw -------------------------------------------
+static FAutoConsoleCommandWithWorldAndArgs GeoLodDebugCommand(
+	TEXT("geo.Lod.Debug"),
+	TEXT("geo.Lod.Debug <0|1> - overlay con le statistiche di selezione."),
+	FConsoleCommandWithWorldAndArgsDelegate::CreateStatic(
+		[](const TArray<FString>& Args, UWorld* World)
+	{
+		UGeoQuadtreeSubsystem* Quadtree = GeoLodConsole::Get(World);
+		if (!Quadtree) { return; }
+		const bool bEnabled = (Args.Num() >= 1) ? (FCString::Atoi(*Args[0]) != 0)
+		                                        : !Quadtree->IsDebugOverlayEnabled();
+		Quadtree->SetDebugOverlayEnabled(bEnabled);
+		if (!bEnabled && GEngine) { GEngine->ClearOnScreenDebugMessages(); }
+		GeoLodConsole::Report(FString::Printf(TEXT("Overlay LOD: %s"),
+			bEnabled ? TEXT("ON") : TEXT("OFF")));
+	}));
+
+static FAutoConsoleCommandWithWorldAndArgs GeoLodDrawCommand(
+	TEXT("geo.Lod.Draw"),
+	TEXT("geo.Lod.Draw <0|1> - disegna la tassellatura scelta, un colore per livello."),
+	FConsoleCommandWithWorldAndArgsDelegate::CreateStatic(
+		[](const TArray<FString>& Args, UWorld* World)
+	{
+		UGeoQuadtreeSubsystem* Quadtree = GeoLodConsole::Get(World);
+		if (!Quadtree) { return; }
+		const bool bEnabled = (Args.Num() >= 1) ? (FCString::Atoi(*Args[0]) != 0)
+		                                        : !Quadtree->IsDebugDrawEnabled();
+		Quadtree->SetDebugDrawEnabled(bEnabled);
+		GeoLodConsole::Report(FString::Printf(TEXT("Disegno della tassellatura: %s"),
+			bEnabled ? TEXT("ON") : TEXT("OFF")));
+	}));
+
+// --- geo.Lod.Stats ----------------------------------------------------------
+static FAutoConsoleCommandWithWorld GeoLodStatsCommand(
+	TEXT("geo.Lod.Stats"),
+	TEXT("Statistiche dell'ultima selezione."),
+	FConsoleCommandWithWorldDelegate::CreateStatic([](UWorld* World)
+	{
+		UGeoQuadtreeSubsystem* Quadtree = GeoLodConsole::Get(World);
+		if (!Quadtree) { return; }
+
+		const FGeoQuadtreeStats Stats = Quadtree->GetStats();
+		GeoLodConsole::Report(FString::Printf(TEXT("Soglia / peggiore : %.1f / %.1f px"),
+			Stats.SogliaErrorePx, Stats.ErrorePeggiorePx));
+		GeoLodConsole::Report(FString::Printf(TEXT("Tile disegnate    : %d   livelli %d..%d"),
+			Stats.TileDisegnate, Stats.LivelloMinimo, Stats.LivelloMassimo));
+		GeoLodConsole::Report(FString::Printf(TEXT("Da caricare       : %d"), Stats.TileRichieste));
+		GeoLodConsole::Report(FString::Printf(TEXT("Nodi visitati     : %d"), Stats.NodiVisitati));
+		GeoLodConsole::Report(FString::Printf(TEXT("  scartati frustum: %d"), Stats.ScartateFrustum));
+		GeoLodConsole::Report(FString::Printf(TEXT("  scartati orizzonte: %d"), Stats.ScartateOrizzonte));
+		GeoLodConsole::Report(FString::Printf(TEXT("  inesistenti     : %d"), Stats.ScartateAssenti));
+		GeoLodConsole::Report(FString::Printf(TEXT("Tempo selezione   : %.3f ms"), Stats.TempoSelezioneMs));
+	}));
+
+// --- geo.Lod.Demo -----------------------------------------------------------
+static FAutoConsoleCommandWithWorldAndArgs GeoLodDemoCommand(
+	TEXT("geo.Lod.Demo"),
+	TEXT("geo.Lod.Demo <cartella> - apre un dataset, ci si posiziona sopra e accende tutto."),
+	FConsoleCommandWithWorldAndArgsDelegate::CreateStatic(
+		[](const TArray<FString>& Args, UWorld* World)
+	{
+		UGeoQuadtreeSubsystem* Quadtree = GeoLodConsole::Get(World);
+		UGeoTileStreamingSubsystem* Streaming = World ? World->GetSubsystem<UGeoTileStreamingSubsystem>() : nullptr;
+		UGeoreferenceSubsystem* Georeference = World ? World->GetSubsystem<UGeoreferenceSubsystem>() : nullptr;
+		if (!Quadtree || !Streaming || !Georeference) { return; }
+
+		if (Args.Num() < 1 && !Streaming->IsDatasetOpen())
+		{
+			GeoLodConsole::Report(TEXT("Uso: geo.Lod.Demo <cartella del dataset>"), FColor::Red);
+			return;
+		}
+
+		if (Args.Num() >= 1)
+		{
+			FString Error;
+			if (!Streaming->OpenDataset(Args[0], Error))
+			{
+				GeoLodConsole::Report(FString::Printf(TEXT("Errore: %s"), *Error), FColor::Red);
+				return;
+			}
+		}
+
+		const FGeoTileDataset& Dataset = Streaming->GetDataset();
+		double West, South, East, North;
+		Dataset.GetBoundingBox(West, South, East, North);
+
+		// Quota da cui si inquadra tutto il dataset: senza, si resta lontani e
+		// non si vede niente, oppure si finisce dentro il terreno.
+		const double SpanDeg = FMath::Max(North - South, East - West);
+		const double Altitude = FMath::Max(5000.0, SpanDeg * 111000.0);
+
+		Georeference->TeleportViewTo(GeoWorld::Core::FGeodetic::FromDegrees(
+			(South + North) * 0.5, (West + East) * 0.5, Altitude));
+
+		Quadtree->SetEnabled(true);
+		Quadtree->SetDebugOverlayEnabled(true);
+		Quadtree->SetDebugDrawEnabled(true);
+
+		GeoLodConsole::Report(FString::Printf(
+			TEXT("LOD attivo su '%s'. Quota %.0f m, soglia %.1f px."),
+			*Dataset.GetDatasetName(), Altitude, Quadtree->GetMaxScreenSpaceError()));
+		GeoLodConsole::Report(TEXT("Scendi di quota: le tile devono suddividersi da sole."));
+		GeoLodConsole::Report(TEXT("Prova geo.Lod.Error 1 (piu' dettaglio) e geo.Lod.Freeze 1."));
 	}));

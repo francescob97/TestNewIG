@@ -8,6 +8,7 @@
 #include "GameFramework/Actor.h"
 #include "GameFramework/PlayerController.h"
 #include "Camera/PlayerCameraManager.h"
+#include "Engine/GameViewportClient.h"
 #include "DrawDebugHelpers.h"
 #include "Geo/GeoUnits.h"
 
@@ -514,4 +515,61 @@ void UGeoreferenceSubsystem::DrawDebugOverlay() const
 		DrawDebugLine(World, FVector::ZeroVector, FVector(0, AxisLengthUu, 0), FColor::Green, false, -1.f, 0, 200.f);
 		DrawDebugLine(World, FVector::ZeroVector, FVector(0, 0, AxisLengthUu), FColor::Blue,  false, -1.f, 0, 200.f);
 	}
+}
+
+bool UGeoreferenceSubsystem::GetActiveViewInfo(FActiveViewInfo& OutInfo) const
+{
+	const UWorld* World = GetWorld();
+	if (!World) { return false; }
+
+	if (const APlayerController* PC = World->GetFirstPlayerController())
+	{
+		if (APlayerCameraManager* CameraManager = PC->PlayerCameraManager)
+		{
+			// GetCameraCachePOV da' posizione, rotazione e FOV gia' passati per
+			// tutti i modificatori di camera: e' cio' che si sta davvero
+			// guardando, non cio' che il pawn avrebbe voluto inquadrare.
+			const FMinimalViewInfo View = CameraManager->GetCameraCacheView();
+			OutInfo.Location = View.Location;
+			OutInfo.Rotation = View.Rotation;
+			OutInfo.HorizontalFovDegrees = View.FOV;
+
+			if (GEngine && GEngine->GameViewport && GEngine->GameViewport->Viewport)
+			{
+				const FIntPoint Size = GEngine->GameViewport->Viewport->GetSizeXY();
+				if (Size.X > 0 && Size.Y > 0)
+				{
+					OutInfo.ScreenSize = Size;
+					OutInfo.AspectRatio = static_cast<float>(Size.X) / static_cast<float>(Size.Y);
+				}
+			}
+			return true;
+		}
+	}
+
+#if WITH_EDITOR
+	if (GEditor && World->WorldType == EWorldType::Editor)
+	{
+		if (FViewport* Viewport = GEditor->GetActiveViewport())
+		{
+			if (FEditorViewportClient* Client =
+					static_cast<FEditorViewportClient*>(Viewport->GetClient()))
+			{
+				OutInfo.Location = Client->GetViewLocation();
+				OutInfo.Rotation = Client->GetViewRotation();
+				OutInfo.HorizontalFovDegrees = Client->ViewFOV;
+
+				const FIntPoint Size = Viewport->GetSizeXY();
+				if (Size.X > 0 && Size.Y > 0)
+				{
+					OutInfo.ScreenSize = Size;
+					OutInfo.AspectRatio = static_cast<float>(Size.X) / static_cast<float>(Size.Y);
+				}
+				return true;
+			}
+		}
+	}
+#endif
+
+	return false;
 }

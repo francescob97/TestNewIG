@@ -29,7 +29,7 @@ Il progetto `TestNewIG` e' un guscio vuoto: tutto il codice vive in
       *(nota: resta aperta la issue #1 sul jitter, vedi `docs/issues-aperte.md`)*
 - [x] **Fase 2** — pipeline dati offline (Python + GDAL, TINITALY -> piramide di tile)
 - [x] **Fase 3** — loader asincrono, cache LRU, lettura dataset *(mai compilata in UE)*
-- [ ] Fase 4 — quadtree, selezione LOD, culling
+- [x] **Fase 4** — quadtree, selezione LOD, culling *(mai compilata in UE)*
 - [ ] Fase 5 — generazione mesh e skirt
 - [ ] Fase 6 — imagery drappeggiata
 
@@ -85,4 +85,5 @@ Quadro d'insieme delle sei fasi: `docs/programma.md`.
 
 ## Verifica in Unreal
 
-Vedi `docs/fase1-verifica.md`, `docs/fase2-verifica.md` e `docs/fase3-verifica.md`.
+Vedi `docs/fase1-verifica.md`, `docs/fase2-verifica.md`, `docs/fase3-verifica.md`
+e `docs/fase4-verifica.md`.

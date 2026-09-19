@@ -167,6 +167,26 @@ public:
 	 */
 	bool GetActiveViewLocation(FVector& OutLocation) const;
 
+	/**
+	 * Tutto cio' che descrive la vista: posizione, orientamento, campo visivo,
+	 * proporzioni e altezza dello schermo in pixel.
+	 *
+	 * Serve alla selezione LOD, che ha bisogno del campo visivo e dei pixel per
+	 * convertire un errore in metri in un errore su schermo. Sta qui e non in
+	 * GeoRender perche' e' questo il subsystem che gia' sa distinguere fra la
+	 * camera di gioco e quella del viewport dell'editor.
+	 */
+	struct FActiveViewInfo
+	{
+		FVector Location = FVector::ZeroVector;
+		FRotator Rotation = FRotator::ZeroRotator;
+		float HorizontalFovDegrees = 90.0f;
+		float AspectRatio = 1.7777f;
+		FIntPoint ScreenSize = FIntPoint(1920, 1080);
+	};
+
+	bool GetActiveViewInfo(FActiveViewInfo& OutInfo) const;
+
 	/** Teletrasporta la camera attiva su un punto geografico ("geo.Goto"). */
 	bool TeleportViewTo(const FGeodetic& Destination);
 

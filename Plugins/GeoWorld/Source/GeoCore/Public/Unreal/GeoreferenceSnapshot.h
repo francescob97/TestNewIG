@@ -73,6 +73,13 @@ struct GEOCORE_API FGeoreferenceSnapshot
 		return Georeference.UnrealToGeodetic(FUnrealPos{ Position.X, Position.Y, Position.Z });
 	}
 
+	/** Ruota una direzione da spazio Unreal a ECEF (nessuna traslazione). */
+	FEcef UnrealDirectionToEcef(const FVector& Direction) const
+	{
+		return Georeference.UnrealDirectionToEcef(
+			FUnrealPos{ Direction.X, Direction.Y, Direction.Z });
+	}
+
 	/** Distanza in metri dall'origine corrente. */
 	double DistanceFromOriginMeters(const FVector& Position) const
 	{

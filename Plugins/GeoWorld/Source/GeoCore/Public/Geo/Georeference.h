@@ -122,6 +122,22 @@ namespace GeoWorld::Core
 				EcefToUeBasis.Transform(LocalNeuInEcef.GetRow(2)));  // Alto locale
 		}
 
+		/**
+		 * Ruota una DIREZIONE dallo spazio di Unreal a ECEF.
+		 *
+		 * Diversa da UnrealToEcef: una direzione non si trasla, si ruota
+		 * soltanto. Applicare la traslazione a un vettore direzione darebbe un
+		 * punto invece di una direzione, ed e' uno degli errori piu' facili da
+		 * commettere e piu' difficili da vedere, perche' il risultato ha
+		 * comunque l'aria di un vettore sensato.
+		 *
+		 * Nessuna conversione di unita': le direzioni sono adimensionali.
+		 */
+		FEcef UnrealDirectionToEcef(const FUnrealPos& Direction) const
+		{
+			return UeToEcefBasis.Transform(FEcef{ Direction.X, Direction.Y, Direction.Z });
+		}
+
 		// Distanza in METRI fra un punto in spazio Unreal e l'origine corrente.
 		// E' il test del rebasing: non serve passare per l'ECEF, la norma si
 		// conserva sotto rotazione.

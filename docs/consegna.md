@@ -12,7 +12,7 @@ Ultimo aggiornamento: 2026-09-17. Branch: `claude/charming-goodall-xd2r3g`.
 | 1 | Geodesia, georeferenziazione, origin rebasing | codice completo, **issue #1 aperta** |
 | 2 | Pipeline dati offline (Python + GDAL) | completa, gira su dati veri |
 | 3 | Loader asincrono, cache LRU, lettura dataset | **codice completo, mai compilato in UE** |
-| 4 | Quadtree, selezione LOD, culling | da fare |
+| 4 | Quadtree, selezione LOD, culling | **codice completo, mai compilato in UE** |
 | 5 | Mesh e skirt — **primo terreno visibile** | da fare |
 | 6 | Imagery drappeggiata | da fare |
 
@@ -80,6 +80,12 @@ geo.Tiles.Debug <0|1>          overlay con le statistiche di streaming
 geo.Tiles.Draw <0|1>           volumi delle tile disegnati nel mondo
 geo.Tiles.Budget <MB>          budget della cache a caldo
 geo.Tiles.Clear                svuota
+
+geo.Lod.Demo <cartella>        apre, si posiziona e accende la selezione LOD
+geo.Lod.Error <pixel>          soglia dell'errore su schermo (la manopola del LOD)
+geo.Lod.Freeze <0|1>           congela la vista: mostra cosa il culling ha scartato
+geo.Lod.Draw <0|1>             tassellatura scelta, un colore per livello
+geo.Lod.Stats                  nodi visitati, scarti, tempo di selezione
 ```
 
 ---
@@ -328,6 +334,8 @@ calcolabile con `PostSpacingDeg(Level) * 111132`.
 | Verifica Fase 2 | `docs/fase2-verifica.md` |
 | Design e motivazioni Fase 3 | `docs/fase3-design.md` |
 | Verifica Fase 3, con la demo visiva | `docs/fase3-verifica.md` |
+| Design e motivazioni Fase 4 | `docs/fase4-design.md` |
+| Verifica Fase 4, con la demo visiva | `docs/fase4-verifica.md` |
 | Issue aperte | `docs/issues-aperte.md` |
 | Uso della pipeline, installazione Windows | `Pipeline/README.md` |
 

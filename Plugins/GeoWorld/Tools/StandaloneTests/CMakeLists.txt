@@ -59,6 +59,26 @@ else()
 	target_compile_options(geotiles_tests PRIVATE -Wall -Wextra -O2)
 endif()
 
+# --- Quadtree (Fase 4): volumi, culling, selezione LOD ---------------------
+set(GEORENDER_DIR ${CMAKE_CURRENT_SOURCE_DIR}/../../Source/GeoRender)
+
+add_executable(geoquadtree_tests
+	geoquadtree_main.cpp
+	${GEORENDER_DIR}/Private/Quadtree/Culling.cpp
+	${GEORENDER_DIR}/Private/Quadtree/TileSelector.cpp
+	${GEOTILES_DIR}/Private/Tiles/TilingScheme.cpp
+	${GEOCORE_DIR}/Private/Geo/Ellipsoid.cpp
+)
+target_include_directories(geoquadtree_tests PRIVATE
+	${GEORENDER_DIR}/Public ${GEOTILES_DIR}/Public ${GEOCORE_DIR}/Public)
+
+if (MSVC)
+	target_compile_options(geoquadtree_tests PRIVATE /W4)
+else()
+	target_compile_options(geoquadtree_tests PRIVATE -Wall -Wextra -O2)
+endif()
+
 enable_testing()
 add_test(NAME geocore COMMAND geocore_tests)
 add_test(NAME geotiles COMMAND geotiles_tests)
+add_test(NAME geoquadtree COMMAND geoquadtree_tests)
