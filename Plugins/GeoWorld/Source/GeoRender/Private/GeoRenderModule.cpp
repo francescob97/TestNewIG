@@ -4,18 +4,21 @@
 // =============================================================================
 #include "Modules/ModuleManager.h"
 
+#include "GeoFlyPawn.h"
 #include "GeoMarkerActor.h"
 #include "Georeference/GeoTransformComponent.h"
 #include "Lod/GeoQuadtreeSubsystem.h"
 #include "Terrain/GeoTerrainSubsystem.h"
 #include "Streaming/GeoTileStreamingSubsystem.h"
 #include "Georeference/GeoreferenceSubsystem.h"
+#include "Georeference/GeoPlaces.h"
 #include "Georeference/GeoWorldTypes.h"
 #include "GeoCoreModule.h"
 
 #include "Engine/Engine.h"
 #include "Engine/World.h"
 #include "EngineUtils.h"
+#include "GameFramework/PlayerController.h"
 #include "HAL/IConsoleManager.h"
 #include "Geo/GeoUnits.h"
 
@@ -25,23 +28,14 @@ IMPLEMENT_MODULE(FDefaultModuleImpl, GeoRender)
 
 namespace GeoMarkers
 {
-	struct FNamedPlace
+	// I luoghi vivono in GeoCore/Public/Georeference/GeoPlaces.h: la stessa
+	// tabella che usa geo.Goto. Averne due copie significa vederle divergere.
+	// Qui si sceglie solo QUALI marcare: i cubi servono a controllare che la
+	// geodesia metta le cose al posto giusto, e cinque punti sparsi bastano.
+	static const TCHAR* MarkedPlaces[] =
 	{
-		const TCHAR* Name;
-		double Latitude;
-		double Longitude;
-		double HeightMeters;
-	};
-
-	// Punti di verifica sull'Italia. Le coordinate sono controllabili su una
-	// qualunque mappa: e' proprio questo il senso del test visivo.
-	static const FNamedPlace Places[] =
-	{
-		{ TEXT("Colosseo"),          41.890210, 12.492231,   40.0 },
-		{ TEXT("Duomo di Milano"),   45.464200,  9.191900,  120.0 },
-		{ TEXT("Torre di Pisa"),     43.722950, 10.396600,   20.0 },
-		{ TEXT("Monte Bianco"),      45.832600,  6.865200, 4808.0 },
-		{ TEXT("Etna"),              37.751000, 14.993400, 3357.0 },
+		TEXT("Colosseo"), TEXT("Duomo"), TEXT("Pisa"),
+		TEXT("MonteBianco"), TEXT("Etna"),
 	};
 }
 
@@ -58,29 +52,34 @@ static FAutoConsoleCommandWithWorld GeoSpawnMarkersCommand(
 
 		int32 SpawnedCount = 0;
 
-		for (const GeoMarkers::FNamedPlace& Place : GeoMarkers::Places)
+		for (const TCHAR* PlaceName : GeoMarkers::MarkedPlaces)
 		{
 			// NOTA UE: SpawnActor richiede i parametri di spawn se vogliamo
 			// impostare proprieta' PRIMA che l'attore sia completamente
 			// inizializzato. Qui ci basta il caso semplice: spawn e poi
 			// configurazione, perche' UGeoTransformComponent si riposiziona da
 			// solo appena gli si cambia la coordinata.
+			const GeoWorld::Places::FNamedPlace* Place = GeoWorld::Places::Find(PlaceName);
+			if (!Place) { continue; }
+
 			AGeoMarkerActor* Marker = World->SpawnActor<AGeoMarkerActor>();
 			if (!Marker)
 			{
 				continue;
 			}
 
-			Marker->Label = Place.Name;
+			Marker->Label = Place->Name;
 
 #if WITH_EDITOR
 			// NOTA UE: SetActorLabel (il nome leggibile nel World Outliner)
 			// esiste SOLO nelle build con editor. Senza la guardia il progetto
 			// compila nell'editor e poi si rompe al packaging.
-			Marker->SetActorLabel(Place.Name);
+			Marker->SetActorLabel(Place->Name);
 #endif
+			// Quota SUL SUOLO zero: il cubo sta sul terreno, non sospeso. La
+			// conversione da ortometrica a ellissoidica la fa ToGeodetic.
 			Marker->GetGeoTransform()->SetGeoCoordinate(
-				FGeoCoordinate(Place.Latitude, Place.Longitude, Place.HeightMeters));
+				FGeoCoordinate::FromGeodetic(GeoWorld::Places::ToGeodetic(*Place, 0.0)));
 
 			++SpawnedCount;
 		}
@@ -736,6 +735,83 @@ static FAutoConsoleCommandWithWorld GeoTerrainDiagCommand(
 		GeoTerrainConsole::Report(TEXT("  r.Fog 0              a 20 km la nebbia di default sostituisce il terreno col cielo"), FColor::Yellow);
 		GeoTerrainConsole::Report(TEXT("  r.SkyAtmosphere 0    come sopra, prospettiva aerea"), FColor::Yellow);
 		GeoTerrainConsole::Report(TEXT("  geo.Terrain.FlipWinding 0/1  orientamento delle facce"), FColor::Yellow);
+	}));
+
+// =============================================================================
+//  VOLO -- geo.Fly, geo.Fly.Speed
+// =============================================================================
+//
+//  QUALE CAMERA STAI MUOVENDO. Nell'editor fuori dal Play la "camera" non e' un
+//  attore: e' lo stato del viewport client, e si guida con i suoi comandi (tasto
+//  destro + WASD, rotella per la velocita', o geo.ViewSpeed). Dentro il Play la
+//  camera E' un attore, e allora si puo' sostituire con qualcosa di adatto alla
+//  scala planetaria: e' quello che fa geo.Fly.
+static FAutoConsoleCommandWithWorld GeoFlyCommand(
+	TEXT("geo.Fly"),
+	TEXT("Sostituisce la camera del Play con una che vola a velocita' proporzionale alla quota."),
+	FConsoleCommandWithWorldDelegate::CreateStatic([](UWorld* World)
+	{
+		if (!World) { return; }
+
+		APlayerController* PlayerController = World->GetFirstPlayerController();
+		if (!PlayerController)
+		{
+			GeoTerrainConsole::Report(
+				TEXT("Nessun PlayerController: sei nel viewport dell'editor, non nel Play."), FColor::Yellow);
+			GeoTerrainConsole::Report(
+				TEXT("Li' la camera e' del viewport: usa tasto destro + WASD, e geo.ViewSpeed per la velocita'."));
+			return;
+		}
+
+		// Si parte esattamente da dove si sta guardando: un teletrasporto
+		// involontario a ogni geo.Fly sarebbe disorientante.
+		FVector Location;
+		FRotator Rotation;
+		PlayerController->GetPlayerViewPoint(Location, Rotation);
+
+		FActorSpawnParameters Parameters;
+		Parameters.ObjectFlags |= RF_Transient;
+		Parameters.SpawnCollisionHandlingOverride =
+			ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
+
+		AGeoFlyPawn* Pawn = World->SpawnActor<AGeoFlyPawn>(
+			AGeoFlyPawn::StaticClass(), Location, Rotation, Parameters);
+		if (!Pawn)
+		{
+			GeoTerrainConsole::Report(TEXT("Non sono riuscito a creare la camera di volo."), FColor::Red);
+			return;
+		}
+
+		// NOTA UE: Possess cambia il pawn controllato E il view target, quindi
+		// non serve chiamare SetViewTarget separatamente. Il pawn precedente
+		// resta nel livello: non lo distruggo perche' potrebbe essere il pawn
+		// del gioco, e una camera di debug non ha il diritto di cancellarlo.
+		PlayerController->Possess(Pawn);
+
+		GeoTerrainConsole::Report(TEXT("Camera di volo attiva. WASD per muoverti, Q/E per salire e scendere."));
+		GeoTerrainConsole::Report(TEXT("La velocita' segue la quota: mezza quota al secondo."));
+		GeoTerrainConsole::Report(TEXT("Troppo veloce o troppo lenta: geo.Fly.Speed 0.3 / geo.Fly.Speed 3"));
+	}));
+
+static FAutoConsoleCommandWithWorldAndArgs GeoFlySpeedCommand(
+	TEXT("geo.Fly.Speed"),
+	TEXT("geo.Fly.Speed <moltiplicatore> - scala la velocita' calcolata dalla quota."),
+	FConsoleCommandWithWorldAndArgsDelegate::CreateStatic(
+		[](const TArray<FString>& Args, UWorld* World)
+	{
+		APlayerController* PlayerController = World ? World->GetFirstPlayerController() : nullptr;
+		AGeoFlyPawn* Pawn = PlayerController ? Cast<AGeoFlyPawn>(PlayerController->GetPawn()) : nullptr;
+		if (!Pawn)
+		{
+			GeoTerrainConsole::Report(TEXT("Nessuna camera di volo attiva: lancia prima geo.Fly."), FColor::Yellow);
+			return;
+		}
+
+		if (Args.Num() >= 1) { Pawn->SetSpeedMultiplier(FCString::Atof(*Args[0])); }
+
+		GeoTerrainConsole::Report(FString::Printf(
+			TEXT("Moltiplicatore x%.2f  ->  %.0f km/h alla quota attuale di %.0f m"),
+			Pawn->GetSpeedMultiplier(), Pawn->GetCurrentSpeedKmh(), Pawn->GetCurrentHeightM()));
 	}));
 
 // --- geo.Terrain.Demo -------------------------------------------------------

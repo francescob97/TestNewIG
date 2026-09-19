@@ -196,6 +196,50 @@ Ora una tassellatura nuova si riempie visibilmente una tile alla volta. Con
 `geo.Terrain.Budget 64` si riempie subito, ma su uno scatto. Il default 4 e' il
 compromesso.
 
+### Muoversi
+
+Due camere diverse, e sapere quale stai guidando evita meta' della confusione:
+
+| Dove sei | Chi e' la camera | Come la muovi |
+|---|---|---|
+| Viewport dell'editor | uno stato del viewport client, **non un attore** | tasto destro + WASD, rotella per la velocita', `geo.ViewSpeed <1..8> [x]` |
+| Nel Play | un attore | `geo.Fly`, poi WASD e Q/E |
+
+`geo.Fly` sostituisce la camera del Play con una che vola a **velocita'
+proporzionale alla quota**: mezza quota al secondo. A 200 m sono 360 km/h, a
+15 km sono 27.000 km/h. E' la stessa regola di Google Earth, e non e' un vezzo:
+cio' che conta non e' la velocita' in metri al secondo ma quanto in fretta
+cambia l'inquadratura, e quella scala con la quota. Se non ti torna,
+`geo.Fly.Speed 0.3` o `geo.Fly.Speed 3`.
+
+La quota usata e' quella sull'**ellissoide**, non sul terreno: sopra una vetta
+di 4000 m la camera va piu' veloce di quanto la distanza dal suolo
+giustificherebbe. Correggerlo vorrebbe dire campionare il terreno sotto la
+camera a ogni frame, cioe' legare il movimento alla cache delle tile.
+
+### Saltare da un posto all'altro
+
+```
+geo.Places                     elenco dei luoghi noti
+geo.Goto Torino                2500 m SOPRA IL SUOLO
+geo.Goto MonteBianco 500       500 m sopra la vetta
+geo.Goto Monte Bianco 500      uguale: spazi e maiuscole non contano
+geo.Goto gar                   basta un pezzo del nome -> LagoDiGarda
+geo.Goto 45.07 7.69 3000       coordinate: quota ELLISSOIDICA
+```
+
+**La quota cambia significato fra le due forme, di proposito.** Con un nome e'
+sopra il suolo, perche' `geo.Goto MonteBianco 2000` inteso sull'ellissoide
+metterebbe la camera 2800 m dentro la montagna. Con le coordinate e'
+ellissoidica, perche' li' stai verificando un numero e vuoi quello che hai
+scritto.
+
+I 28 luoghi stanno in `GeoCore/Public/Georeference/GeoPlaces.h`, una tabella
+sola condivisa con `geo.SpawnMarkers`. Le quote sono **ortometriche**, come si
+leggono su una mappa, cosi' restano controllabili a mano; la conversione a
+ellissoidiche avviene in un punto solo (`ToGeodetic`) sommando 48 m di
+ondulazione del geoide, che in Italia e' giusta entro circa 5 m.
+
 ### Comandi
 
 ```
@@ -208,6 +252,12 @@ geo.Terrain.Budget <N>         tile costruite per frame
 geo.Terrain.Stats              statistiche dell'ultimo frame
 geo.Terrain.Diag               cosa il renderer ha davvero, e dove
 geo.Terrain.Boxes <0|1>        scatole di debug sui bounds (linee, non mesh)
+
+geo.Fly                        camera di volo nel Play
+geo.Fly.Speed <x>              moltiplicatore della velocita'
+geo.ViewSpeed <1..8> [x]       velocita' della camera del viewport dell'editor
+geo.Goto <nome|lat lon> [q]    teletrasporto
+geo.Places                     luoghi noti
 ```
 
 ---

@@ -81,7 +81,12 @@ geo.Help                       elenco dei comandi di Fase 1
 geo.Diag                       diagnosi del jitter (vedi issue #1)
 geo.Debug 1                    overlay
 geo.SpawnMarkers               cubi di verifica sull'Italia
-geo.Goto <lat> <lon> [quota]   teletrasporto
+geo.Goto <lat> <lon> [quota]   teletrasporto su coordinate (quota ellissoidica)
+geo.Goto <nome> [quota]        teletrasporto su un luogo noto (quota SUL SUOLO)
+geo.Places                     elenco dei 28 luoghi noti
+geo.Fly                        camera di volo nel Play, velocita' ~ quota
+geo.Fly.Speed <x>              moltiplicatore della velocita' di volo
+geo.ViewSpeed <1..8> [x]       velocita' della camera del viewport dell'editor
 
 geo.Tiles.Demo <cartella>      fa tutto in un colpo: apri, vai, carica, mostra
 geo.Tiles.Open <cartella>      apre un dataset

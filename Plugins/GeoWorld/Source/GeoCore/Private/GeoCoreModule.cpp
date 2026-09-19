@@ -1,11 +1,19 @@
 #include "GeoCoreModule.h"
 
 #include "Georeference/GeoreferenceSubsystem.h"
+#include "Georeference/GeoPlaces.h"
 #include "Georeference/GeoWorldTypes.h"
 
 #include "Engine/Engine.h"
 #include "Engine/World.h"
 #include "HAL/IConsoleManager.h"
+
+#if WITH_EDITOR
+	// Vedi la nota in GeoCore.Build.cs: la dipendenza da UnrealEd e' ammessa
+	// solo quando si costruisce un target che contiene l'editor.
+	#include "Editor.h"
+	#include "EditorViewportClient.h"
+#endif
 
 DEFINE_LOG_CATEGORY(LogGeoWorld);
 
@@ -78,12 +86,18 @@ static FAutoConsoleCommand GeoHelpCommand(
 	{
 		GeoConsole::Report(TEXT("geo.Where                    - posizione geografica della camera"));
 		GeoConsole::Report(TEXT("geo.Origin                   - origine corrente e statistiche di rebase"));
-		GeoConsole::Report(TEXT("geo.Goto <lat> <lon> [quota] - teletrasporta la camera su un punto"));
+		GeoConsole::Report(TEXT("geo.Goto <lat> <lon> [quota]  - teletrasporta su coordinate"));
+		GeoConsole::Report(TEXT("geo.Goto <nome> [quota]      - teletrasporta su un luogo noto, quota SUL SUOLO"));
+		GeoConsole::Report(TEXT("geo.Places                   - elenco dei luoghi noti"));
 		GeoConsole::Report(TEXT("geo.Rebase                   - forza un rebase sulla posizione attuale"));
 		GeoConsole::Report(TEXT("geo.AutoRebase <0|1>         - attiva/disattiva il rebasing automatico"));
 		GeoConsole::Report(TEXT("geo.RebaseThreshold <km>     - cambia la soglia di rebasing"));
 		GeoConsole::Report(TEXT("geo.Debug <0|1>              - overlay di debug"));
 		GeoConsole::Report(TEXT("geo.SpawnMarkers             - piazza i cubi di verifica sull'Italia"));
+		GeoConsole::Report(TEXT("--- Muoversi ---"));
+		GeoConsole::Report(TEXT("geo.Fly                      - camera di volo (solo nel Play)"));
+		GeoConsole::Report(TEXT("geo.Fly.Speed <x>            - moltiplicatore della velocita' di volo"));
+		GeoConsole::Report(TEXT("geo.ViewSpeed <1..8> [x]     - velocita' della camera del viewport dell'editor"));
 	}));
 
 // --- geo.Where --------------------------------------------------------------
@@ -138,36 +152,155 @@ static FAutoConsoleCommandWithWorld GeoOriginCommand(
 	}));
 
 // --- geo.Goto ---------------------------------------------------------------
+//
+//  Due forme, perche' servono due cose diverse: le coordinate quando si sta
+//  verificando un numero, il nome quando si sta guardando il terreno.
+//
+//      geo.Goto 45.07 7.69 3000     lat, lon, quota ELLISSOIDICA
+//      geo.Goto Torino              nome, quota di default SOPRA IL SUOLO
+//      geo.Goto Monte Bianco 500    nome con spazi, 500 m sopra la vetta
+//
+//  La differenza di significato della quota fra le due forme e' voluta ed e'
+//  spiegata in GeoPlaces.h: sopra una vetta di 4800 m, "quota 2000" inteso
+//  sull'ellissoide metterebbe la camera dentro la montagna.
 static FAutoConsoleCommandWithWorldAndArgs GeoGotoCommand(
 	TEXT("geo.Goto"),
-	TEXT("geo.Goto <lat> <lon> [quota_m] - teletrasporta la camera su un punto geografico."),
+	TEXT("geo.Goto <lat> <lon> [quota] | <nome> [quota_sul_suolo] - porta la camera su un punto."),
 	FConsoleCommandWithWorldAndArgsDelegate::CreateStatic(
 		[](const TArray<FString>& Args, UWorld* World)
 	{
 		UGeoreferenceSubsystem* Georeference = GeoConsole::GetGeoreference(World);
 		if (!Georeference) { return; }
 
-		if (Args.Num() < 2)
+		if (Args.Num() == 0)
 		{
-			GeoConsole::Report(TEXT("Uso: geo.Goto <lat> <lon> [quota_m]"), FColor::Red);
+			GeoConsole::Report(TEXT("Uso: geo.Goto <lat> <lon> [quota]   oppure   geo.Goto <nome> [quota_sul_suolo]"), FColor::Red);
+			GeoConsole::Report(TEXT("Nomi disponibili: geo.Places"));
 			return;
 		}
 
-		const double Latitude  = FCString::Atod(*Args[0]);
-		const double Longitude = FCString::Atod(*Args[1]);
-		const double Height    = (Args.Num() >= 3) ? FCString::Atod(*Args[2]) : 500.0;
-
-		const FGeoCoordinate Destination(Latitude, Longitude, Height);
-
-		if (Georeference->TeleportViewTo(Destination.ToGeodetic()))
+		// Il primo argomento decide la forma: un numero sono coordinate, una
+		// parola e' un nome. Nessun flag da ricordare.
+		if (Args[0].IsNumeric())
 		{
-			GeoConsole::Report(FString::Printf(TEXT("Teletrasporto -> %s"), *Destination.ToDisplayString()));
+			if (Args.Num() < 2)
+			{
+				GeoConsole::Report(TEXT("Uso: geo.Goto <lat> <lon> [quota_m]"), FColor::Red);
+				return;
+			}
+
+			const FGeoCoordinate Destination(
+				FCString::Atod(*Args[0]), FCString::Atod(*Args[1]),
+				(Args.Num() >= 3) ? FCString::Atod(*Args[2]) : 2500.0);
+
+			if (Georeference->TeleportViewTo(Destination.ToGeodetic()))
+			{
+				GeoConsole::Report(FString::Printf(TEXT("Teletrasporto -> %s"), *Destination.ToDisplayString()));
+			}
+			else
+			{
+				GeoConsole::Report(TEXT("Nessuna camera da spostare."), FColor::Red);
+			}
+			return;
+		}
+
+		// Forma per nome. L'ultimo argomento, se e' un numero, e' la quota sul
+		// suolo; tutto il resto e' il nome, perche' "Monte Bianco" arriva qui
+		// gia' spezzato in due argomenti dalla console.
+		int32 NameArgCount = Args.Num();
+		double AboveGround = GeoWorld::Places::DefaultAglM;
+		if (Args.Num() >= 2 && Args.Last().IsNumeric())
+		{
+			AboveGround = FCString::Atod(*Args.Last());
+			--NameArgCount;
+		}
+
+		FString Name;
+		for (int32 Index = 0; Index < NameArgCount; ++Index) { Name += Args[Index]; }
+
+		const GeoWorld::Places::FNamedPlace* Place = GeoWorld::Places::Find(Name);
+		if (!Place)
+		{
+			GeoConsole::Report(FString::Printf(TEXT("Non conosco '%s'. Elenco: geo.Places"), *Name), FColor::Red);
+			return;
+		}
+
+		const GeoWorld::Core::FGeodetic Destination =
+			GeoWorld::Places::ToGeodetic(*Place, AboveGround);
+
+		if (Georeference->TeleportViewTo(Destination))
+		{
+			GeoConsole::Report(FString::Printf(
+				TEXT("-> %s   suolo %.0f m, camera %.0f m sopra (quota ellissoidica %.0f m)"),
+				Place->Name, Place->GroundElevationM, AboveGround, Destination.HeightM));
 		}
 		else
 		{
 			GeoConsole::Report(TEXT("Nessuna camera da spostare."), FColor::Red);
 		}
 	}));
+
+// --- geo.Places -------------------------------------------------------------
+static FAutoConsoleCommand GeoPlacesCommand(
+	TEXT("geo.Places"),
+	TEXT("Elenca i luoghi noti utilizzabili con geo.Goto."),
+	FConsoleCommandDelegate::CreateStatic([]()
+	{
+		GeoConsole::Report(TEXT("--- Luoghi noti (geo.Goto <nome> [quota_sul_suolo]) ---"));
+		for (const GeoWorld::Places::FNamedPlace& Place : GeoWorld::Places::Table)
+		{
+			GeoConsole::Report(FString::Printf(TEXT("  %-14s %8.4f  %8.4f   suolo %5.0f m"),
+				Place.Name, Place.LatitudeDeg, Place.LongitudeDeg, Place.GroundElevationM));
+		}
+		GeoConsole::Report(TEXT("Il nome non distingue maiuscole ne' spazi, e basta un pezzo: 'gar' -> LagoDiGarda."));
+	}));
+
+// --- geo.ViewSpeed ----------------------------------------------------------
+//
+//  PERCHE' SERVE UN COMANDO SOLO PER QUESTO. Nel viewport dell'editor la camera
+//  non e' un attore e non la si puo' sostituire: e' uno stato del viewport
+//  client. La sua velocita' si regola con la rotella tenendo premuto il tasto
+//  destro, ma la scala del progetto (1 uu = 1 cm) rende il massimo
+//  dell'interfaccia comunque lento per un pianeta: la moltiplica serve.
+//
+//  Se sei nel Play e non nel viewport, questo comando non c'entra: li' la
+//  camera e' un attore e la risposta e' geo.Fly.
+#if WITH_EDITOR
+static FAutoConsoleCommandWithArgs GeoViewSpeedCommand(
+	TEXT("geo.ViewSpeed"),
+	TEXT("geo.ViewSpeed <1..8> [moltiplicatore] - velocita' della camera del viewport dell'editor."),
+	FConsoleCommandWithArgsDelegate::CreateStatic([](const TArray<FString>& Args)
+	{
+		if (!GEditor)
+		{
+			GeoConsole::Report(TEXT("Nessun editor."), FColor::Red);
+			return;
+		}
+
+		FViewport* Viewport = GEditor->GetActiveViewport();
+		FEditorViewportClient* Client = Viewport
+			? static_cast<FEditorViewportClient*>(Viewport->GetClient()) : nullptr;
+		if (!Client)
+		{
+			GeoConsole::Report(TEXT("Nessun viewport attivo. Clicca dentro il viewport e riprova."), FColor::Red);
+			return;
+		}
+
+		if (Args.Num() >= 1)
+		{
+			Client->SetCameraSpeedSetting(FMath::Clamp(FCString::Atoi(*Args[0]), 1, 8));
+		}
+		if (Args.Num() >= 2)
+		{
+			Client->SetCameraSpeedScalar(FMath::Clamp(FCString::Atof(*Args[1]), 1.0f, 128.0f));
+		}
+
+		GeoConsole::Report(FString::Printf(
+			TEXT("Viewport dell'editor: velocita' %d, moltiplicatore x%.1f"),
+			Client->GetCameraSpeedSetting(), Client->GetCameraSpeedScalar()));
+		GeoConsole::Report(TEXT("Per volare sul terreno da vicino: 4 e moltiplicatore 8 e' un buon punto di partenza."));
+	}));
+#endif
 
 // --- geo.Rebase -------------------------------------------------------------
 static FAutoConsoleCommandWithWorld GeoRebaseCommand(
