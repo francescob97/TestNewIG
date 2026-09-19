@@ -20,8 +20,13 @@ arriva in Fase 5.
 ## 2. Di nuovo i due strati, e di nuovo hanno ripagato
 
 Tutta la matematica — volumi di contenimento, frustum, orizzonte, errore su
-schermo, attraversamento — sta in `Public/Quadtree` senza una riga di Unreal, ed
-e' coperta da **37 test eseguibili in un secondo**.
+schermo, attraversamento — sta in `Public/Quadtree` senza una riga di Unreal ed
+e' **header-only**, ed e' coperta da **37 test eseguibili in un secondo**.
+
+Header-only non e' una finezza: in Unreal ogni modulo e' una DLL, e un simbolo
+definito in un `.cpp` non e' visibile agli altri moduli se non esportato con la
+macro API. Esportarlo metterebbe una macro del motore dentro lo strato che non
+deve sapere di stare dentro Unreal.
 
 Non e' un principio astratto: **il bug piu' grave di questa fase e' stato
 trovato da quei test, non aprendo l'editor** (vedi sezione 5).

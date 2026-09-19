@@ -27,10 +27,9 @@ endif()
 
 set(GEOCORE_DIR ${CMAKE_CURRENT_SOURCE_DIR}/../../Source/GeoCore)
 
-add_executable(geocore_tests
-	main.cpp
-	${GEOCORE_DIR}/Private/Geo/Ellipsoid.cpp
-)
+# Nessun .cpp oltre al main: lo strato puro e' header-only (vedi la nota
+# "IMPLEMENTAZIONE" in Ellipsoid.h per il perche').
+add_executable(geocore_tests main.cpp)
 
 target_include_directories(geocore_tests PRIVATE ${GEOCORE_DIR}/Public)
 
@@ -45,11 +44,7 @@ endif()
 # --- GeoTiles (Fase 3): formato delle tile, schema, cache LRU ---------------
 set(GEOTILES_DIR ${CMAKE_CURRENT_SOURCE_DIR}/../../Source/GeoTiles)
 
-add_executable(geotiles_tests
-	geotiles_main.cpp
-	${GEOTILES_DIR}/Private/Tiles/TilingScheme.cpp
-	${GEOTILES_DIR}/Private/Tiles/TileFormat.cpp
-)
+add_executable(geotiles_tests geotiles_main.cpp)
 target_include_directories(geotiles_tests PRIVATE
 	${GEOTILES_DIR}/Public ${GEOCORE_DIR}/Public)
 
@@ -62,13 +57,7 @@ endif()
 # --- Quadtree (Fase 4): volumi, culling, selezione LOD ---------------------
 set(GEORENDER_DIR ${CMAKE_CURRENT_SOURCE_DIR}/../../Source/GeoRender)
 
-add_executable(geoquadtree_tests
-	geoquadtree_main.cpp
-	${GEORENDER_DIR}/Private/Quadtree/Culling.cpp
-	${GEORENDER_DIR}/Private/Quadtree/TileSelector.cpp
-	${GEOTILES_DIR}/Private/Tiles/TilingScheme.cpp
-	${GEOCORE_DIR}/Private/Geo/Ellipsoid.cpp
-)
+add_executable(geoquadtree_tests geoquadtree_main.cpp)
 target_include_directories(geoquadtree_tests PRIVATE
 	${GEORENDER_DIR}/Public ${GEOTILES_DIR}/Public ${GEOCORE_DIR}/Public)
 

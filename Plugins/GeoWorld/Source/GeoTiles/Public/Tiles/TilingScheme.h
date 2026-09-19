@@ -12,6 +12,8 @@
 #pragma once
 
 #include <cstdint>
+#include <algorithm>
+#include <cmath>
 
 namespace GeoWorld::Tiles
 {
@@ -73,4 +75,37 @@ namespace GeoWorld::Tiles
 	/** Tile che contiene il punto. I bordi del dominio rientrano nell'ultima tile. */
 	void TileForLonLat(uint32_t Level, double Lon, double Lat,
 	                   uint32_t& OutX, uint32_t& OutY);
+
+	// ======================================================================
+	//  IMPLEMENTAZIONE
+	//
+	//  Lo strato puro e' HEADER-ONLY, e non per stile: in Unreal ogni modulo
+	//  e' una DLL, e un simbolo definito in un .cpp non e' visibile agli altri
+	//  moduli se non viene esportato con la macro API del modulo. Esportarlo
+	//  significherebbe pero' mettere una macro del motore dentro lo strato che
+	//  per definizione non deve sapere di stare dentro Unreal: proprio la
+	//  perdita che la separazione in due strati esiste per evitare.
+	//  Header-only risolve alla radice, e su funzioni matematiche di poche
+	//  righe non costa niente.
+	// ======================================================================
+
+	inline void TileForLonLat(uint32_t Level, double Lon, double Lat,
+	                   uint32_t& OutX, uint32_t& OutY)
+	{
+		const double Span = TileSpanDeg(Level);
+
+		// floor e non troncamento: per longitudini negative il troncamento
+		// arrotonda verso lo zero e sposta la tile di uno.
+		double X = std::floor((Lon - LonMin) / Span);
+		double Y = std::floor((LatMax - Lat) / Span);
+
+		// Gli estremi del dominio (polo Nord, antimeridiano) cadrebbero in una
+		// tile che non esiste: rientrano nell'ultima.
+		X = std::max(0.0, std::min(X, static_cast<double>(TilesX(Level) - 1)));
+		Y = std::max(0.0, std::min(Y, static_cast<double>(TilesY(Level) - 1)));
+
+		OutX = static_cast<uint32_t>(X);
+		OutY = static_cast<uint32_t>(Y);
+	}
+
 }

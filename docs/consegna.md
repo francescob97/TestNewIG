@@ -34,6 +34,7 @@ gia' incontrati e corretti, per riconoscerli se tornano:
 | `cannot open source file "Unreal/..."` | tre moduli avevano tutti una cartella `Public/Unreal`. Ora si chiamano `Georeference`, `Streaming`, `Lod`. Se compare su file nuovi: **rigenera i project file di Visual Studio** |
 | errore su un parametro chiamato come un membro | Unreal tratta lo shadowing come ERRORE. Convenzione: prefisso `In` (`bInEnabled`). Lo intercetta `Tools/CheckShadowedParameters.py` |
 | errori di `std::max`, `std::numeric_limits` | include della standard library che gcc tira dentro da solo e MSVC no |
+| `unresolved external symbol` su una funzione dello strato puro | in Unreal ogni modulo e' una DLL: un simbolo definito in un `.cpp` non e' visibile fuori se non esportato. **Lo strato puro e' header-only**, appunto per non doverlo esportare. Lo intercetta `Tools/CheckModuleExports.py` |
 
 Dopo aver aggiunto file o cartelle: tasto destro sul `.uproject` ->
 **Generate Visual Studio project files**. IntelliSense non li vede finche' non
@@ -269,8 +270,19 @@ docs/             programma.md, dati.md, consegna.md (questo),
 sui percorsi di inclusione, `#include "Unreal/X.h"` diventa ambiguo e
 IntelliSense ci si perde: e' costato un giro di compilazione.
 
-**La regola dei due strati**: sotto `Public/Geo` e `Public/Tiles` non entra
-**nessun** include di Unreal. Cosi' quel codice si compila e si testa in un
+**La regola dei due strati**, in due parti:
+
+1. sotto `Public/Geo`, `Public/Tiles` e `Public/Quadtree` non entra **nessun**
+   include di Unreal;
+2. quegli strati sono **header-only**. Non e' stile: in Unreal ogni modulo e'
+   una DLL, e un simbolo definito in un `.cpp` non e' visibile agli altri moduli
+   se non viene esportato con la macro API del modulo. Esportarlo
+   significherebbe pero' mettere una macro del motore dentro lo strato che per
+   definizione non deve sapere di stare dentro Unreal — proprio la perdita che
+   la separazione esiste per evitare. Header-only risolve alla radice, e su
+   funzioni matematiche di poche righe non costa niente.
+
+Sotto `Public/Geo` e `Public/Tiles` non entra nessun include di Unreal. Cosi' quel codice si compila e si testa in un
 secondo con un normale `g++`, invece che aprendo l'editor. Non e' purismo: e'
 il motivo per cui la Fase 1 e la Fase 3 sono verificate numericamente pur non
 essendo mai state compilate nel motore. `CheckSourceDiscipline.sh` lo impone.

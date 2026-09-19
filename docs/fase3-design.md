@@ -24,7 +24,7 @@ Come `GeoCore`, anche `GeoTiles` e' diviso in due parti che non si mescolano:
 
 | Strato | Cartelle | Include ammessi |
 |---|---|---|
-| Puro | `Public/Tiles`, `Private/Tiles` | solo standard library |
+| Puro | `Public/Tiles` | solo standard library, **header-only** |
 | Ponte Unreal | `Public/Georeference`, `Private/Georeference` | `CoreMinimal.h`, `Engine`, … |
 
 Non e' purismo ripetuto per abitudine: e' il motivo per cui questa fase, pur non

@@ -12,6 +12,10 @@
 namespace GeoWorld::Quadtree
 {
 	using GeoWorld::Core::FEcef;
+	using GeoWorld::Core::FEllipsoid;
+	using GeoWorld::Core::FGeodetic;
+	using GeoWorld::Core::GeodeticSurfaceNormal;
+	using GeoWorld::Core::GeodeticToEcef;
 	using GeoWorld::Tiles::FTileKey;
 
 	/**
