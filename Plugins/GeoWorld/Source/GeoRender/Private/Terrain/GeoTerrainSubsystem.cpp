@@ -189,11 +189,16 @@ void UGeoTerrainSubsystem::SynchroniseWithSelection()
 	Stats.TileInAttesa = Waiting;
 	Stats.TileConGeometria = Provider->GetTileCount();
 
-	Stats.TriangoliTotali = 0;
+	// I triangoli che ho COSTRUITO e quelli che il renderer ha DAVVERO sono due
+	// numeri diversi, e la differenza e' esattamente cio' che serve sapere
+	// quando "i conteggi ci sono ma non si vede niente". La prima versione
+	// mostrava solo il primo dei due, cioe' la mia intenzione: inutile.
+	Stats.TriangoliCostruiti = 0;
 	for (const TPair<uint64, FBuiltTile>& Pair : BuiltTiles)
 	{
-		Stats.TriangoliTotali += Pair.Value.TriangleCount;
+		Stats.TriangoliCostruiti += Pair.Value.TriangleCount;
 	}
+	Stats.TriangoliTotali = Provider->GetRealizedTriangleCount();
 
 	// Stima: posizioni, normali e UV in float piu' gli indici.
 	Stats.MemoriaGeometriaMB = static_cast<float>(
@@ -266,8 +271,17 @@ void UGeoTerrainSubsystem::DrawDebugOverlay()
 	Line(FColor::White, FString::Printf(TEXT("Provider      : %s%s"),
 		*GetProviderName(), IsWireframe() ? TEXT("   [wireframe]") : TEXT("")));
 
-	Line(FColor::Green, FString::Printf(TEXT("Tile disegnate: %d   triangoli %d"),
-		Stats.TileConGeometria, Stats.TriangoliTotali));
+	// Verde solo se il renderer ha davvero i triangoli che credo di aver
+	// costruito. Rosso se li ha persi per strada: in quel caso il problema e'
+	// nel provider, non nella generazione della mesh.
+	const bool bGeometriaArrivata = (Stats.TriangoliTotali == Stats.TriangoliCostruiti);
+	const FString Discrepanza = bGeometriaArrivata
+		? FString()
+		: FString::Printf(TEXT("  (ne ho costruiti %d: geo.Terrain.Diag)"), Stats.TriangoliCostruiti);
+
+	Line(bGeometriaArrivata ? FColor::Green : FColor::Red,
+		FString::Printf(TEXT("Tile disegnate: %d   triangoli nel renderer %d%s"),
+			Stats.TileConGeometria, Stats.TriangoliTotali, *Discrepanza));
 
 	// Se molte tile restano in attesa frame dopo frame, il budget non basta per
 	// quanto in fretta ci si muove: il terreno si riempie in ritardo.

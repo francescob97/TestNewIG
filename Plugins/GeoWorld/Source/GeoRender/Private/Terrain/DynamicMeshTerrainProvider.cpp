@@ -62,8 +62,8 @@ void FDynamicMeshTerrainProvider::Initialize(UWorld* World)
 
 	// Materiale di base del motore: serve solo a vedere la geometria. Il
 	// materiale vero arriva in Fase 6, quando ci sara' l'imagery da mostrare.
-	Material = LoadObject<UMaterialInterface>(
-		nullptr, TEXT("/Engine/BasicShapes/BasicShapeMaterial.BasicShapeMaterial"));
+	Material.Reset(LoadObject<UMaterialInterface>(
+		nullptr, TEXT("/Engine/BasicShapes/BasicShapeMaterial.BasicShapeMaterial")));
 
 	UE_LOG(LogGeoWorld, Log, TEXT("[GeoTerrain] Provider '%s' pronto."), *GetName());
 }
@@ -84,6 +84,7 @@ bool FDynamicMeshTerrainProvider::CreateOrUpdateTile(
 	const uint64 Packed = PackKey(Key);
 	FTileEntry& Entry = Tiles.FindOrAdd(Packed);
 	Entry.Origin = MeshData.Origin;
+	Entry.Key = Key;
 
 	UDynamicMeshComponent* Component = Entry.Component.Get();
 	if (!Component)
@@ -211,5 +212,60 @@ void FDynamicMeshTerrainProvider::SetWireframe(bool bInWireframe)
 		{
 			ApplyWireframe(Component, bWireframe);
 		}
+	}
+}
+
+// ---------------------------------------------------------------------------
+//  Diagnostica: i numeri del RENDERER, non i miei.
+// ---------------------------------------------------------------------------
+int32 FDynamicMeshTerrainProvider::GetRealizedTriangleCount() const
+{
+	int32 Total = 0;
+	for (const TPair<uint64, FTileEntry>& Pair : Tiles)
+	{
+		const UDynamicMeshComponent* Component = Pair.Value.Component.Get();
+		if (!Component) { continue; }
+
+		if (const UE::Geometry::FDynamicMesh3* Mesh = Component->GetMesh())
+		{
+			Total += Mesh->TriangleCount();
+		}
+	}
+	return Total;
+}
+
+void FDynamicMeshTerrainProvider::GetDiagnostics(TArray<FGeoTerrainTileDiagnostic>& Out,
+                                                 int32 MaxEntries) const
+{
+	Out.Reset();
+	for (const TPair<uint64, FTileEntry>& Pair : Tiles)
+	{
+		if (Out.Num() >= MaxEntries) { break; }
+
+		const UDynamicMeshComponent* Component = Pair.Value.Component.Get();
+		if (!Component) { continue; }
+
+		FGeoTerrainTileDiagnostic& Entry = Out.AddDefaulted_GetRef();
+		Entry.Key = Pair.Value.Key;
+		Entry.WorldLocation = Component->GetComponentLocation();
+
+		// NOTA UE: Bounds e' il membro pubblico di USceneComponent aggiornato
+		// dal motore, ed e' ESATTAMENTE il volume che il renderer usa per
+		// decidere se la primitiva e' nel frustum. Se e' degenere (raggio zero)
+		// la geometria viene scartata prima ancora di essere disegnata: e' la
+		// causa classica di "i conteggi ci sono ma non si vede niente".
+		Entry.BoundsRadiusUu = Component->Bounds.SphereRadius;
+
+		if (const UE::Geometry::FDynamicMesh3* Mesh = Component->GetMesh())
+		{
+			Entry.RealVertexCount = Mesh->VertexCount();
+			Entry.RealTriangleCount = Mesh->TriangleCount();
+		}
+
+		Entry.bRegistered = Component->IsRegistered();
+		Entry.bVisible = Component->IsVisible();
+
+		const UMaterialInterface* TileMaterial = Component->GetMaterial(0);
+		Entry.MaterialName = TileMaterial ? TileMaterial->GetName() : TEXT("(nessuno)");
 	}
 }

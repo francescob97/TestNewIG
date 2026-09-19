@@ -67,13 +67,36 @@ diventa gialla se il budget non sta al passo con quanto in fretta ti muovi, e
 ### Se non vedi niente
 
 ```
-geo.Terrain.FlipWinding 1
+geo.Terrain.Diag
 ```
 
+Prima di provare rimedi a caso, guarda i numeri. `Diag` stampa cio' che il
+**renderer** ha davvero in mano, non cio' che il subsystem crede di aver
+costruito — sono due cose diverse, e la differenza e' tutta l'informazione:
+
+| Cosa leggi | Cosa significa |
+|---|---|
+| `triangoli 0` su una tile | la mesh non e' arrivata al componente: problema nel provider |
+| `raggio 0.0 km` | bounds degeneri, il renderer scarta la primitiva prima di disegnarla |
+| `distanza` enorme (migliaia di km) | la geometria e' altrove: problema di trasformazione |
+| `davanti` negativo | le tile selezionate stanno **dietro** la camera: problema nel frustum della selezione, non nella mesh |
+| `NON REGISTRATO` / `NASCOSTO` | il componente non e' nella scena |
+| tutto verde e sensato | la geometria c'e' ed e' al posto giusto: resta l'orientamento delle facce |
+
+In quest'ultimo caso:
+
+```
+geo.Terrain.FlipWinding 0
+```
+
+**Nota: il default e' gia' `1`.** Dare `geo.Terrain.FlipWinding 1` non cambia
+niente — il valore da provare e' `0`. I comandi a interruttore adesso lo dicono
+("era GIA' ON, nessun cambiamento") invece di rispondere "ON" come se avessero
+fatto qualcosa.
+
 La convenzione di faccia frontale non e' mai stata verificata dentro il motore
-(vedi `fase5-design.md`, sezione 5). Se il terreno e' invisibile dall'alto e
-visibile da sotto, e' questo. Se dopo il flip si vede, il default va cambiato in
-`FTileMeshParameters::bFlipWinding` — dimmelo e lo cambio.
+(vedi `fase5-design.md`, sezione 5). Se dopo il flip si vede, il default va
+cambiato in `FTileMeshParameters::bFlipWinding` — dimmelo e lo cambio.
 
 ### Le quattro prove
 
@@ -144,6 +167,7 @@ geo.Terrain.Skirt <0|1>        gonne ai bordi
 geo.Terrain.FlipWinding <0|1>  orientamento delle facce
 geo.Terrain.Budget <N>         tile costruite per frame
 geo.Terrain.Stats              statistiche dell'ultimo frame
+geo.Terrain.Diag               cosa il renderer ha davvero, e dove
 ```
 
 ---

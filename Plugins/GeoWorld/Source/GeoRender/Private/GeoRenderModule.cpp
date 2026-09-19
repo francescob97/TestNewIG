@@ -517,9 +517,26 @@ namespace GeoTerrainConsole
 	{
 		UGeoTerrainSubsystem* Terrain = Get(World);
 		if (!Terrain) { return; }
-		const bool bValue = (Args.Num() >= 1) ? (FCString::Atoi(*Args[0]) != 0) : !Getter(Terrain);
+		const bool bWas = Getter(Terrain);
+		const bool bValue = (Args.Num() >= 1) ? (FCString::Atoi(*Args[0]) != 0) : !bWas;
 		Setter(Terrain, bValue);
-		Report(FString::Printf(TEXT("%s: %s"), Label, bValue ? TEXT("ON") : TEXT("OFF")));
+
+		// PERCHE' QUESTO RAMO ESISTE: "geo.Terrain.FlipWinding 1" su un valore
+		// gia' a 1 non fa NIENTE, perche' il setter esce subito se il valore non
+		// cambia -- e la geometria non viene ricostruita. La prima versione
+		// rispondeva comunque "Orientamento invertito: ON", cioe' dava per fatto
+		// qualcosa che non era successo, ed e' costato un giro intero di
+		// diagnosi. Un comando che non ha cambiato niente deve dirlo.
+		if (bValue == bWas)
+		{
+			Report(FString::Printf(
+				TEXT("%s: era GIA' %s, nessun cambiamento (per invertirlo: %s)"),
+				Label, bValue ? TEXT("ON") : TEXT("OFF"), bValue ? TEXT("0") : TEXT("1")),
+				FColor::Yellow);
+			return;
+		}
+		Report(FString::Printf(TEXT("%s: %s (era %s)"), Label,
+			bValue ? TEXT("ON") : TEXT("OFF"), bWas ? TEXT("ON") : TEXT("OFF")));
 	}
 }
 
@@ -603,6 +620,101 @@ static FAutoConsoleCommandWithWorld GeoTerrainStatsCommand(
 			Stats.TempoCostruzioneMediaMs));
 		GeoTerrainConsole::Report(FString::Printf(TEXT("Rebase gestiti: %d  (nessun vertice rigenerato)"),
 			Stats.Rebase));
+	}));
+
+// --- geo.Terrain.Diag -------------------------------------------------------
+//
+//  "Disegna 108 tile e 3,5 milioni di triangoli, ma non vedo niente" e' un
+//  sintomo che i contatori dell'overlay non sanno spiegare, perche' contavano
+//  quello che IO avevo costruito e non quello che il RENDERER aveva ricevuto.
+//  Questo comando stampa i numeri dell'altro lato: la mesh vera dentro il
+//  componente, i suoi bounds, dove sta rispetto alla camera.
+//
+//  Come si legge il risultato:
+//    triangoli 0            -> la mesh non e' arrivata al componente
+//    raggio 0               -> bounds degeneri: il renderer scarta la primitiva
+//    distanza enorme        -> la geometria e' altrove, problema di trasformazione
+//    tutto sensato          -> la geometria c'e' ed e' al posto giusto: allora
+//                              e' orientamento delle facce o materiale
+static FAutoConsoleCommandWithWorld GeoTerrainDiagCommand(
+	TEXT("geo.Terrain.Diag"),
+	TEXT("Diagnosi: cosa il renderer ha davvero, e dove sta rispetto alla camera."),
+	FConsoleCommandWithWorldDelegate::CreateStatic([](UWorld* World)
+	{
+		UGeoTerrainSubsystem* Terrain = GeoTerrainConsole::Get(World);
+		UGeoreferenceSubsystem* Georeference =
+			World ? World->GetSubsystem<UGeoreferenceSubsystem>() : nullptr;
+		if (!Terrain || !Georeference) { return; }
+
+		const FGeoTerrainStats Stats = Terrain->GetStats();
+		GeoTerrainConsole::Report(TEXT("--- geo.Terrain.Diag ---"));
+		GeoTerrainConsole::Report(FString::Printf(
+			TEXT("Terreno %s   provider %s   tile %d"),
+			Terrain->IsEnabled() ? TEXT("ON") : TEXT("OFF"),
+			*Terrain->GetProviderName(), Stats.TileConGeometria));
+
+		GeoTerrainConsole::Report(FString::Printf(
+			TEXT("Triangoli: costruiti %d, nel renderer %d"),
+			Stats.TriangoliCostruiti, Stats.TriangoliTotali),
+			Stats.TriangoliCostruiti == Stats.TriangoliTotali ? FColor::Green : FColor::Red);
+
+		const FGeoreferenceSnapshot Snapshot = Georeference->GetSnapshot();
+
+		UGeoreferenceSubsystem::FActiveViewInfo View;
+		if (!Georeference->GetActiveViewInfo(View))
+		{
+			GeoTerrainConsole::Report(TEXT("Nessuna camera attiva: non posso dire dove guardi."), FColor::Red);
+			return;
+		}
+
+		const GeoWorld::Core::FGeodetic CameraGeodetic = Snapshot.UnrealToGeodetic(View.Location);
+		GeoTerrainConsole::Report(FString::Printf(
+			TEXT("Camera: uu (%.0f, %.0f, %.0f)  =  lat %.4f  lon %.4f  quota %.0f m"),
+			View.Location.X, View.Location.Y, View.Location.Z,
+			CameraGeodetic.LatDeg(), CameraGeodetic.LonDeg(), CameraGeodetic.HeightM));
+
+		const FVector Forward = View.Rotation.Vector();
+		GeoTerrainConsole::Report(FString::Printf(
+			TEXT("Sguardo: pitch %.1f  yaw %.1f   (pitch negativo = verso il basso)"),
+			View.Rotation.Pitch, View.Rotation.Yaw));
+
+		TArray<FGeoTerrainTileDiagnostic> Diagnostics;
+		Terrain->GetTileDiagnostics(Diagnostics, 3);
+		if (Diagnostics.Num() == 0)
+		{
+			GeoTerrainConsole::Report(TEXT("Nessun componente da ispezionare."), FColor::Red);
+			return;
+		}
+
+		for (const FGeoTerrainTileDiagnostic& Tile : Diagnostics)
+		{
+			const FVector ToTile = Tile.WorldLocation - View.Location;
+			const double DistanceKm = ToTile.Size() / GeoWorld::Units::MetersToUu / 1000.0;
+
+			// Un valore vicino a +1 significa "davanti alla camera", vicino a -1
+			// "dietro". Se le tile selezionate risultassero dietro, il problema
+			// sarebbe nel frustum della selezione, non nella mesh.
+			const double Ahead = ToTile.IsNearlyZero()
+				? 1.0 : FVector::DotProduct(ToTile.GetSafeNormal(), Forward);
+
+			GeoTerrainConsole::Report(FString::Printf(
+				TEXT("L%u (%u,%u): vertici %d  triangoli %d  raggio %.1f km"),
+				Tile.Key.Level, Tile.Key.X, Tile.Key.Y,
+				Tile.RealVertexCount, Tile.RealTriangleCount,
+				Tile.BoundsRadiusUu / GeoWorld::Units::MetersToUu / 1000.0),
+				Tile.RealTriangleCount > 0 ? FColor::Green : FColor::Red);
+
+			GeoTerrainConsole::Report(FString::Printf(
+				TEXT("      distanza %.1f km  davanti %.2f  %s  %s  materiale %s"),
+				DistanceKm, Ahead,
+				Tile.bRegistered ? TEXT("registrato") : TEXT("NON REGISTRATO"),
+				Tile.bVisible ? TEXT("visibile") : TEXT("NASCOSTO"),
+				*Tile.MaterialName),
+				(Tile.bRegistered && Tile.bVisible) ? FColor::White : FColor::Red);
+		}
+
+		GeoTerrainConsole::Report(
+			TEXT("Se qui e' tutto verde e sensato, prova: geo.Terrain.FlipWinding 0"));
 	}));
 
 // --- geo.Terrain.Demo -------------------------------------------------------

@@ -38,6 +38,10 @@ public:
 	virtual void SetWireframe(bool bInWireframe) override;
 	virtual bool IsWireframe() const override { return bWireframe; }
 
+	virtual int32 GetRealizedTriangleCount() const override;
+	virtual void GetDiagnostics(TArray<FGeoTerrainTileDiagnostic>& Out,
+	                            int32 MaxEntries) const override;
+
 private:
 	struct FTileEntry
 	{
@@ -45,6 +49,10 @@ private:
 		/** Origine geodetica del frame locale: serve per ricalcolare la
 		 *  trasformazione dopo un rebase, senza toccare i vertici. */
 		GeoWorld::Core::FGeodetic Origin;
+		/** La chiave INTERA. PackKey non e' invertibile, e tenere solo quella
+		 *  significa non poter piu' dire di quale tile si sta parlando: e' gia'
+		 *  costato un bug di rimozione nel subsystem. */
+		GeoWorld::Tiles::FTileKey Key;
 	};
 
 	static uint64 PackKey(const GeoWorld::Tiles::FTileKey& Key)
@@ -54,7 +62,15 @@ private:
 	}
 
 	TWeakObjectPtr<AActor> Container;
-	TWeakObjectPtr<UMaterialInterface> Material;
+
+	// NOTA UE: puntatore FORTE, non debole. Questa classe non e' un UObject,
+	// quindi non puo' dichiarare una UPROPERTY, e il materiale caricato con
+	// LoadObject non ha nessun altro che lo tenga in vita: con un TWeakObjectPtr
+	// il garbage collector se lo porterebbe via al primo passaggio e le tile
+	// costruite dopo resterebbero con il materiale di default, senza un errore.
+	// TStrongObjectPtr e' il modo corretto per un oggetto non-UObject di
+	// dichiarare al GC che quel riferimento conta.
+	TStrongObjectPtr<UMaterialInterface> Material;
 	TMap<uint64, FTileEntry> Tiles;
 	bool bWireframe = false;
 };

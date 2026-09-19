@@ -24,7 +24,11 @@ struct FGeoTerrainStats
 	UPROPERTY() int32 TileInAttesa = 0;
 	UPROPERTY() int32 CostruiteQuestoFrame = 0;
 	UPROPERTY() int32 RimosseQuestoFrame = 0;
+	/** Triangoli che il RENDERER ha davvero (letti dal provider). */
 	UPROPERTY() int32 TriangoliTotali = 0;
+	/** Triangoli che il subsystem crede di aver costruito. Se i due numeri non
+	 *  coincidono, la geometria si e' persa fra la mesh e il componente. */
+	UPROPERTY() int32 TriangoliCostruiti = 0;
 	UPROPERTY() float MemoriaGeometriaMB = 0.0f;
 	UPROPERTY() float TempoCostruzioneMediaMs = 0.0f;
 	UPROPERTY() int32 Rebase = 0;
@@ -89,6 +93,13 @@ public:
 
 	FGeoTerrainStats GetStats() const { return Stats; }
 	FString GetProviderName() const { return Provider.IsValid() ? Provider->GetName() : TEXT("nessuno"); }
+
+	/** Diagnosi delle prime MaxEntries tile, lette dal provider (geo.Terrain.Diag). */
+	void GetTileDiagnostics(TArray<FGeoTerrainTileDiagnostic>& Out, int32 MaxEntries) const
+	{
+		Out.Reset();
+		if (Provider.IsValid()) { Provider->GetDiagnostics(Out, MaxEntries); }
+	}
 
 private:
 	void SynchroniseWithSelection();

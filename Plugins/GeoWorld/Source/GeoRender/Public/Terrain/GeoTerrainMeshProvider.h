@@ -36,6 +36,32 @@
  *  soltanto le trasformazioni dei componenti, che sono una manciata di double
  *  per tile.
  */
+/**
+ * Cosa il RENDERER ha davvero in mano per una tile.
+ *
+ * PERCHE' ESISTE. La prima versione dell'overlay contava i triangoli dalla
+ * FTileMeshData, cioe' dal MIO lato: diceva "3.538.944 triangoli" anche se il
+ * componente di Unreal non ne aveva ricevuto neanche uno. Un contatore che
+ * misura l'intenzione invece del risultato non e' debug, e' rumore che nasconde
+ * il problema. Questi numeri vengono letti dal componente vero.
+ */
+struct FGeoTerrainTileDiagnostic
+{
+	GeoWorld::Tiles::FTileKey Key;
+
+	/** Posizione del componente in spazio Unreal (uu) e raggio dei suoi bounds. */
+	FVector WorldLocation = FVector::ZeroVector;
+	double BoundsRadiusUu = 0.0;
+
+	/** Letti dalla mesh del componente, non dalla FTileMeshData. */
+	int32 RealVertexCount = 0;
+	int32 RealTriangleCount = 0;
+
+	bool bRegistered = false;
+	bool bVisible = false;
+	FString MaterialName;
+};
+
 class GEORENDER_API IGeoTerrainMeshProvider
 {
 public:
@@ -64,4 +90,15 @@ public:
 	virtual int32 GetTileCount() const = 0;
 	virtual void SetWireframe(bool bInWireframe) = 0;
 	virtual bool IsWireframe() const = 0;
+
+	/**
+	 * Triangoli che il renderer ha davvero, sommati su tutte le tile.
+	 * Se non coincide con quelli che il subsystem crede di aver costruito, il
+	 * problema sta nel provider e non nella generazione della mesh.
+	 */
+	virtual int32 GetRealizedTriangleCount() const = 0;
+
+	/** Diagnosi delle prime MaxEntries tile, per geo.Terrain.Diag. */
+	virtual void GetDiagnostics(TArray<FGeoTerrainTileDiagnostic>& Out,
+	                            int32 MaxEntries) const = 0;
 };
