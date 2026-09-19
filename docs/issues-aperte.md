@@ -32,7 +32,20 @@ impossibile distinguere un problema di precisione da un problema di generazione
 della geometria.
 
 
-## #2 — `build` "non funziona ancora bene" — APERTA, non diagnosticata
+## #2 — `build` "non funziona ancora bene" — CHIUSA il 2026-09-19
+
+Erano due cause distinte, entrambe corrette:
+
+1. la risoluzione del sorgente letta nelle unita' del CRS invece che in metri,
+   che su un sorgente geografico dava livello 24 e un raster da 518 TB
+   (commit `b869e0b`);
+2. il passo di campionamento della griglia geoidica non allineato al passo
+   nativo di EGM2008, che su dati TINITALY reali faceva superare la soglia
+   dell'errore di interpolazione e fermava lo stadio 2.
+
+Testo originale della segnalazione, per storia:
+
+### #2 (storico) — `build` "non funziona ancora bene"
 
 Segnalato senza dettagli. Per riprenderla servono: il comando esatto, l'output
 completo dello stadio 1 (bbox, formato, **risoluzione sul terreno**, livello

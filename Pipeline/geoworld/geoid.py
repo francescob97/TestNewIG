@@ -42,15 +42,34 @@ serve gia' per un altro scopo (riempire i post senza dato con la quota
 ellissoidica del livello del mare), quindi non e' un artefatto in piu'.
 
 --------------------------------------------------------------------------
-L'ERRORE CHE QUESTO INTRODUCE, E PERCHE' E' TRASCURABILE
+L'ERRORE DI RICAMPIONAMENTO DIPENDE DALL'ALLINEAMENTO, NON DALLA FINEZZA
 --------------------------------------------------------------------------
-Campionare N su una griglia e interpolare invece di valutarlo per pixel
-introduce un errore. EGM2008 e' uno sviluppo in armoniche sferiche fino al
-grado 2190, cioe' ha risoluzione ~9 km: e' un campo liscio. Con passo di 0.01
-gradi (~1.1 km) l'errore di interpolazione bilineare e' di frazioni di
-millimetro. Non e' un'assunzione: `measure_interpolation_error()` lo MISURA
-confrontando i valori interpolati con quelli esatti su punti casuali, e la
-pipeline fallisce se supera la soglia.
+Campionare N su una nostra griglia e interpolare, invece di valutarlo per
+pixel, introduce un errore. La cosa controintuitiva, misurata e non supposta,
+e' che quell'errore NON dipende quasi per niente da quanto fitta e' la nostra
+griglia: dipende da come i nostri nodi cadono rispetto a quelli della griglia
+geoidica di PROJ.
+
+Il motivo e' che PROJ interpola bilinearmente dentro la propria griglia, quindi
+il campo che vediamo e' continuo ma con una "piega" su ogni linea di nodi.
+Ricampionarlo e poi re-interpolarlo e' esatto finche' i nostri nodi cadono sui
+suoi; appena cadono in mezzo, la piega viene tagliata e l'errore compare.
+
+Misurato su EGM96 (griglia a 15' = 0.25 gradi), stesso bbox, stessi punti:
+
+    passo 0.0104167 = 1/96   ->  0.25/passo = 24.0000 (intero)  ->   0.0036 mm
+    passo 0.0104              ->  0.25/passo = 24.0385           ->   7.9409 mm
+    passo 0.0110              ->  0.25/passo = 22.7273           ->  17.3452 mm
+
+Diciassette micrometri di differenza nel passo cambiano l'errore di duemila
+volte. Percio' il passo NON si sceglie "abbastanza fine": si sceglie come
+sottomultiplo intero del passo nativo della griglia geoidica.
+
+    EGM2008: 2.5 primi = 1/24 di grado
+    EGM96  : 15  primi = 1/4  di grado
+
+`measure_interpolation_error()` misura comunque il risultato, e
+`build_aligned_undulation_grid()` infittisce da sola se non bastasse.
 """
 
 from __future__ import annotations
@@ -63,6 +82,18 @@ import numpy as np
 #: Datum verticali supportati. Il primo e' il default richiesto.
 VERTICAL_CRS_EGM2008 = "EPSG:3855"
 VERTICAL_CRS_EGM96 = "EPSG:5773"
+
+#: Passo NATIVO delle griglie geoidiche, in gradi. Campionare su un
+#: sottomultiplo intero di questi valori fa cadere i nostri nodi su quelli
+#: della griglia sorgente, ed e' cio' che rende il ricampionamento esatto.
+GEOID_NATIVE_SPACING_DEG = {
+    VERTICAL_CRS_EGM2008: 1.0 / 24.0,   # 2.5 primi d'arco
+    VERTICAL_CRS_EGM96: 1.0 / 4.0,      # 15 primi d'arco
+}
+
+#: Sottodivisioni di default del passo nativo. 4 tiene la griglia piccola
+#: (qualche MB sull'Italia) restando allineata.
+DEFAULT_GEOID_SUBDIVISIONS = 4
 
 #: Intervallo plausibile per l'ondulazione del geoide in Italia. Serve come
 #: controllo di sanita': se il valore calcolato cade fuori, qualcosa non va
@@ -263,3 +294,84 @@ def measure_interpolation_error(grid: np.ndarray, geotransform: tuple[float, flo
         "undulationMinM": float(exact.min()),
         "undulationMaxM": float(exact.max()),
     }
+
+
+def default_sampling_spacing(vertical_crs: str,
+                             subdivisions: int = DEFAULT_GEOID_SUBDIVISIONS) -> float | None:
+    """
+    Passo di campionamento allineato alla griglia geoidica, o None se il datum
+    non e' fra quelli noti (in quel caso decide chi chiama).
+    """
+    native = GEOID_NATIVE_SPACING_DEG.get(vertical_crs)
+    return None if native is None else native / float(max(1, subdivisions))
+
+
+def is_spacing_aligned(spacing_deg: float, vertical_crs: str,
+                       tolerance: float = 1e-9) -> bool:
+    """Il passo dato e' un sottomultiplo intero del passo nativo della griglia?"""
+    native = GEOID_NATIVE_SPACING_DEG.get(vertical_crs)
+    if native is None or spacing_deg <= 0.0:
+        return False
+    ratio = native / spacing_deg
+    return abs(ratio - round(ratio)) < tolerance
+
+
+def build_aligned_undulation_grid(bbox: tuple[float, float, float, float],
+                                  vertical_crs: str, max_error_m: float,
+                                  spacing_deg: float | None = None,
+                                  max_attempts: int = 4, log=None):
+    """
+    Costruisce la griglia di N e GARANTISCE che l'errore di interpolazione stia
+    sotto la soglia, infittendo da sola se serve.
+
+    Parte dal passo allineato al passo nativo della griglia geoidica; se la
+    misura non rispetta comunque la soglia, raddoppia le sottodivisioni (cosi'
+    resta allineato) e riprova. La griglia costa pochi MB anche sull'Italia
+    intera, quindi infittire e' praticamente gratis: fermare la pipeline
+    quando basta raddoppiare un parametro sarebbe solo scortese.
+
+    Ritorna (grid, geotransform, error_info, spacing_usato).
+    """
+    subdivisions = DEFAULT_GEOID_SUBDIVISIONS
+    spacing = spacing_deg if spacing_deg is not None else default_sampling_spacing(
+        vertical_crs, subdivisions)
+
+    if spacing is None:
+        # Datum verticale non fra quelli noti: non sappiamo il passo nativo,
+        # quindi non possiamo allineare. Si parte da un valore ragionevole e ci
+        # si affida al raffinamento automatico.
+        spacing = 0.01
+
+    if spacing_deg is not None and not is_spacing_aligned(spacing, vertical_crs) \
+            and vertical_crs in GEOID_NATIVE_SPACING_DEG and log:
+        native = GEOID_NATIVE_SPACING_DEG[vertical_crs]
+        log(f"      NOTA: il passo {spacing:.7f} non e' un sottomultiplo intero di "
+            f"{native:.7f} (passo nativo di {vertical_crs}).")
+        log(f"            L'errore di interpolazione sara' molto piu' alto del "
+            f"necessario. Ometti --geoid-spacing per lasciarlo scegliere.")
+
+    last = None
+    for attempt in range(max_attempts):
+        grid, geotransform = build_undulation_grid(bbox, spacing, vertical_crs)
+        error = measure_interpolation_error(grid, geotransform, bbox, vertical_crs)
+        last = (grid, geotransform, error, spacing)
+
+        if log:
+            aligned = is_spacing_aligned(spacing, vertical_crs)
+            log(f"      griglia N: {grid.shape[1]} x {grid.shape[0]} a passo "
+                f"{spacing:.7f} gradi{' (allineata)' if aligned else ''}")
+            log(f"      errore di interpolazione: max {error['maxErrorM'] * 1000:.4f} mm, "
+                f"rms {error['rmsErrorM'] * 1000:.4f} mm")
+
+        if error["maxErrorM"] <= max_error_m:
+            return last
+
+        subdivisions *= 2
+        refined = default_sampling_spacing(vertical_crs, subdivisions)
+        spacing = refined if refined is not None else spacing / 2.0
+
+        if log and attempt + 1 < max_attempts:
+            log(f"      sopra la soglia di {max_error_m * 1000:.1f} mm: "
+                f"infittisco a {spacing:.7f} gradi e rimisuro.")
+
+    return last

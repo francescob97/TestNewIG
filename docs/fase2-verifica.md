@@ -11,7 +11,7 @@ python run.py check-env                      # prima di tutto: diagnosi ambiente
 python -m unittest discover -s tests -v
 ```
 
-Attesi **32 test verdi** (15 di schema e formato, 11 di integrazione, 6 di risoluzione).
+Attesi **41 test verdi** (15 di schema e formato, 11 di integrazione, 6 di risoluzione, 9 di geoide).
 
 | Test | Cosa dimostra | Misurato |
 |---|---|---|
@@ -63,6 +63,10 @@ Cose da guardare nell'output:
    assurdo.
 2. **Stadio 2** — `N(Colosseo)` deve valere ~48 m. Se vale 0, la griglia
    geoidica non sta funzionando (ma il preflight avrebbe gia' fermato tutto).
+   La riga della griglia deve dire **(allineata)**: significa che il passo e' un
+   sottomultiplo intero del passo nativo della griglia geoidica, che e' cio' da
+   cui dipende l'errore di interpolazione. Se non lo dice, hai passato
+   `--geoid-spacing` a mano: toglilo.
 3. **Stadio 3** — `post con dato` dice quale frazione del bbox e' terraferma:
    per l'Italia atteso ~20-25%. Un valore vicino al 100% significa che il nodata
    del sorgente non e' stato riconosciuto.

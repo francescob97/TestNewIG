@@ -171,7 +171,8 @@ def command_build(args: argparse.Namespace) -> int:
 
     # ---------------------------------------------------------------- 2 ----
     geoid_parameters = {"stage": "geoid", "verticalCrs": args.vertical_crs,
-                        "spacing": args.geoid_spacing, "bbox": [west, south, east, north]}
+                        "spacing": args.geoid_spacing, "maxError": args.max_geoid_error,
+                        "bbox": [west, south, east, north]}
     fingerprint = PipelineState.fingerprint(geoid_parameters)
     if state.is_complete("geoid", fingerprint):
         stage_header(2, "geoid", skipped=True)
@@ -184,24 +185,27 @@ def command_build(args: argparse.Namespace) -> int:
         for name, _, _, undulation in transform_info.sample_points:
             log(f"        N({name}) = {undulation:.3f} m")
 
-        undulation_grid, undulation_geotransform = geoid.build_undulation_grid(
-            (west, south, east, north), args.geoid_spacing, args.vertical_crs)
+        undulation_grid, undulation_geotransform, error, used_spacing = \
+            geoid.build_aligned_undulation_grid(
+                (west, south, east, north), args.vertical_crs,
+                max_error_m=args.max_geoid_error,
+                spacing_deg=args.geoid_spacing, log=log)
+
         write_undulation_geotiff(undulation_path, undulation_grid, undulation_geotransform)
 
-        error = geoid.measure_interpolation_error(
-            undulation_grid, undulation_geotransform,
-            (west, south, east, north), args.vertical_crs)
-        log(f"      griglia N: {undulation_grid.shape[1]} x {undulation_grid.shape[0]} "
-            f"a passo {args.geoid_spacing} gradi")
-        log(f"      errore di interpolazione: max {error['maxErrorM'] * 1000:.4f} mm, "
-            f"rms {error['rmsErrorM'] * 1000:.4f} mm")
-
         if error["maxErrorM"] > args.max_geoid_error:
-            log(f"      ERRORE: supera la soglia di {args.max_geoid_error * 1000:.1f} mm. "
-                f"Riduci --geoid-spacing.")
+            log("")
+            log(f"      ERRORE: dopo il raffinamento l'errore resta "
+                f"{error['maxErrorM'] * 1000:.3f} mm, sopra la soglia di "
+                f"{args.max_geoid_error * 1000:.1f} mm.")
+            log("      Se il datum verticale non e' EGM2008 o EGM96, il passo nativo")
+            log("      della sua griglia non e' noto e l'allineamento non e' automatico:")
+            log("      prova --geoid-spacing con un sottomultiplo del passo di quella griglia,")
+            log(f"      oppure alza la soglia con --max-geoid-error.")
             return 3
 
-        geoid_info = {"transform": transform_info.as_dict(), "interpolationError": error}
+        geoid_info = {"transform": transform_info.as_dict(), "interpolationError": error,
+                      "samplingSpacingDeg": used_spacing}
         state.mark_complete("geoid", fingerprint, [undulation_path], geoid_info)
 
     undulation_grid, undulation_geotransform = read_undulation_geotiff(undulation_path)
@@ -243,7 +247,7 @@ def command_build(args: argparse.Namespace) -> int:
 
     warp_parameters = {"stage": "warp", "level": max_level, "resampling": args.resampling,
                        "bbox": [west, south, east, north], "verticalCrs": args.vertical_crs,
-                       "geoidSpacing": args.geoid_spacing}
+                       "geoidSpacing": geoid_info.get("samplingSpacingDeg")}
     fingerprint = PipelineState.fingerprint(warp_parameters, [vrt_path, undulation_path])
     if state.is_complete("warp", fingerprint):
         stage_header(3, "warp", skipped=True)
@@ -564,8 +568,12 @@ def build_parser() -> argparse.ArgumentParser:
     build.add_argument("--vertical-crs", default=geoid.VERTICAL_CRS_EGM2008,
                        help=f"datum verticale del sorgente (default {geoid.VERTICAL_CRS_EGM2008} = EGM2008; "
                             f"{geoid.VERTICAL_CRS_EGM96} = EGM96)")
-    build.add_argument("--geoid-spacing", type=float, default=0.01,
-                       help="passo della griglia di ondulazione, in gradi (default 0.01)")
+    build.add_argument("--geoid-spacing", type=float, default=None,
+                       help="passo della griglia di ondulazione in gradi. Per default viene "
+                            "scelto come sottomultiplo intero del passo nativo della griglia "
+                            "geoidica (1/96 per EGM2008), perche' l'errore di ricampionamento "
+                            "dipende dall'allineamento e non dalla finezza. Impostalo solo se "
+                            "sai cosa stai facendo.")
     build.add_argument("--max-geoid-error", type=float, default=0.01,
                        help="errore massimo tollerato sull'interpolazione di N, in metri")
     build.add_argument("--source-crs", default=None,

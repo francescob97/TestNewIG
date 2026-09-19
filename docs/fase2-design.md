@@ -124,14 +124,49 @@ Difese aggiuntive:
   le quote con il terreno analitico piu' N. Misurato: bias **+0.0021 m** con la
   conversione, **+48.36 m** senza. La soglia del test e' 0.5 m.
 
-### Errore introdotto dal campionare N su griglia
+### L'errore di ricampionamento dipende dall'ALLINEAMENTO, non dalla finezza
 
-EGM2008 e' uno sviluppo in armoniche sferiche fino al grado 2190, cioe' ha
-risoluzione ~9 km: e' un campo liscio. Con passo 0.01 gradi (~1.1 km) l'errore
-di interpolazione bilineare e' trascurabile — ma non lo diamo per buono:
-`measure_interpolation_error()` lo **misura** contro i valori esatti di PROJ su
-4000 punti casuali e la pipeline si ferma se supera `--max-geoid-error`.
-Misurato su EGM96: **max 0.0036 mm**.
+Campionare N su una griglia nostra e interpolare introduce un errore. La cosa
+controintuitiva, **misurata e non supposta**, e' che quell'errore non dipende
+quasi per niente da quanto fitta e' la nostra griglia: dipende da come i nostri
+nodi cadono rispetto a quelli della griglia geoidica di PROJ.
+
+PROJ interpola bilinearmente dentro la propria griglia, quindi il campo che
+vediamo e' continuo ma ha una **piega** su ogni linea di nodi. Ricampionarlo e
+poi re-interpolarlo e' esatto finche' i nostri nodi cadono sui suoi; appena
+cadono in mezzo, la piega viene tagliata e l'errore compare.
+
+Misurato su EGM96 (griglia a 15' = 0.25 gradi), stesso bbox alpino, stessi punti:
+
+| passo | 0.25 / passo | allineato | errore max |
+|---|---|---|---|
+| 0.0104167 = 1/96 | 24.0000 | si | **0.0036 mm** |
+| 0.0104 | 24.0385 | no | 7.9409 mm |
+| 0.0110 | 22.7273 | no | 17.3452 mm |
+
+Diciassette micrometri di differenza nel passo cambiano l'errore di **duemila
+volte**.
+
+Percio' il passo non si sceglie "abbastanza fine": si sceglie come
+**sottomultiplo intero del passo nativo della griglia geoidica**.
+
+| Datum | Passo nativo | Default usato (nativo / 4) |
+|---|---|---|
+| EGM2008 | 2.5' = 1/24 gradi | 1/96 = 0.0104167 |
+| EGM96 | 15' = 1/4 gradi | 1/16 = 0.0625 |
+
+`build_aligned_undulation_grid()` parte da li', **misura** l'errore vero con
+`measure_interpolation_error()` contro i valori esatti di PROJ su 4000 punti
+casuali, e se non bastasse raddoppia le sottodivisioni (restando allineato) e
+rimisura. La griglia costa pochi MB anche sull'Italia intera, quindi infittire
+e' gratis.
+
+**Questo bug e' costato un fallimento su dati veri.** Il default era 0.01 gradi,
+scelto "abbastanza fine" e validato su EGM96 — dove divide 0.25 in 25 parti
+esatte, quindi era allineato *per caso*. Su EGM2008 lo stesso valore da'
+(1/24)/0.01 = 4.1667, e sull'arco alpino l'errore saliva a 11 mm, oltre la
+soglia di 10. Ora c'e' `tests/test_geoid.py` a impedire che il default torni a
+essere una scelta arbitraria.
 
 ---
 
