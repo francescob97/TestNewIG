@@ -150,6 +150,11 @@ geo.Terrain.Stats              statistiche dell'ultimo frame
 
 ## C. Cosa NON e' verificato
 
+* **Errori di compilazione gia' incontrati e corretti su Windows** (se tornano,
+  li riconosci): `'SetWireframe': is not a member of 'UDynamicMeshComponent'` —
+  il wireframe non ha un setter sul componente, vive come proprieta' pubblica
+  `bExplicitShowWireframe` su `UBaseDynamicMeshComponent`, e va seguito da
+  `MarkRenderStateDirty()` perche' il proxy di scena non rilegge i flag da solo.
 * **Il C++ non e' mai stato compilato dentro Unreal.** L'ambiente e' Linux senza
   motore. La matematica della mesh e' verificata numericamente, le convenzioni
   UE staticamente (`CheckSourceDiscipline.sh`, `CheckShadowedParameters.py`,

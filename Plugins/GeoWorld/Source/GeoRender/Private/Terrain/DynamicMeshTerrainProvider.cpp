@@ -13,14 +13,40 @@
 
 using namespace GeoWorld;
 
+// ---------------------------------------------------------------------------
+//  NOTA UE: il wireframe di un UDynamicMeshComponent non si accende con un
+//  setter dedicato sul componente -- quel metodo non esiste. Vive su
+//  UBaseDynamicMeshComponent come proprieta' pubblica bExplicitShowWireframe
+//  ("disegna il reticolo SOPRA la mesh ombreggiata"), accompagnata dagli
+//  accessori virtuali SetEnableWireframeRenderPass/EnableWireframeRenderPass.
+//
+//  Qui si scrive la proprieta' e si invalida esplicitamente lo stato di
+//  rendering: il proxy di scena viene costruito una volta e non rilegge da solo
+//  i flag del componente, quindi senza MarkRenderStateDirty() il cambiamento si
+//  vedrebbe solo al prossimo aggiornamento della mesh -- cioe' il comando
+//  sembrerebbe non fare niente finche' non ci si muove.
+// ---------------------------------------------------------------------------
+static void ApplyWireframe(UDynamicMeshComponent* Component, bool bInWireframe)
+{
+	if (!Component || Component->bExplicitShowWireframe == bInWireframe) { return; }
+
+	Component->bExplicitShowWireframe = bInWireframe;
+	Component->MarkRenderStateDirty();
+}
+
 void FDynamicMeshTerrainProvider::Initialize(UWorld* World)
 {
 	if (!World) { return; }
 
 	// Un attore contenitore, cosi' tutte le tile stanno sotto un solo nodo del
 	// World Outliner e si cancellano insieme.
+	// NOTA UE: NON si impone un nome fisso all'attore. Se quel nome risultasse
+	// gia' occupato -- una Initialize chiamata due volte, un attore transient
+	// non ancora raccolto -- SpawnActor restituirebbe nullptr e il terreno non
+	// comparirebbe mai, senza un solo messaggio di errore. Il nome leggibile
+	// nel World Outliner lo da' SetActorLabel qui sotto, che non ha vincoli di
+	// unicita'.
 	FActorSpawnParameters Parameters;
-	Parameters.Name = TEXT("GeoTerrainContainer");
 	Parameters.ObjectFlags |= RF_Transient;   // non finisce nel livello salvato
 
 	AActor* Actor = World->SpawnActor<AActor>(AActor::StaticClass(), Parameters);
@@ -68,12 +94,11 @@ bool FDynamicMeshTerrainProvider::CreateOrUpdateTile(
 		// Niente collisione: il terreno serve a essere guardato. Generarla per
 		// 33.000 triangoli per tile costerebbe piu' della geometria stessa.
 		Component->SetCollisionEnabled(ECollisionEnabled::NoCollision);
-		Component->SetComplexAsSimpleCollisionEnabled(false);
 		if (UMaterialInterface* BaseMaterial = Material.Get())
 		{
 			Component->SetMaterial(0, BaseMaterial);
 		}
-		Component->SetWireframe(bWireframe);
+		ApplyWireframe(Component, bWireframe);
 		Component->RegisterComponent();
 		Entry.Component = Component;
 	}
@@ -184,7 +209,7 @@ void FDynamicMeshTerrainProvider::SetWireframe(bool bInWireframe)
 	{
 		if (UDynamicMeshComponent* Component = Pair.Value.Component.Get())
 		{
-			Component->SetWireframe(bWireframe);
+			ApplyWireframe(Component, bWireframe);
 		}
 	}
 }
