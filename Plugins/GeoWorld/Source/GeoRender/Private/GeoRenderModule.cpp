@@ -622,6 +622,21 @@ static FAutoConsoleCommandWithWorld GeoTerrainStatsCommand(
 			Stats.Rebase));
 	}));
 
+static FAutoConsoleCommandWithWorldAndArgs GeoTerrainBoxesCommand(
+	TEXT("geo.Terrain.Boxes"),
+	TEXT("geo.Terrain.Boxes <0|1> - scatole di debug sui bounds delle tile."),
+	FConsoleCommandWithWorldAndArgsDelegate::CreateStatic(
+		[](const TArray<FString>& Args, UWorld* World)
+	{
+		GeoTerrainConsole::Toggle(Args, World, TEXT("Scatole sui bounds"),
+			[](UGeoTerrainSubsystem* T, bool b) { T->SetDrawBounds(b); },
+			[](UGeoTerrainSubsystem* T) { return T->IsDrawBounds(); });
+		GeoTerrainConsole::Report(
+			TEXT("  (linee di debug: non passano per il materiale e non vengono nebbiate."), FColor::White);
+		GeoTerrainConsole::Report(
+			TEXT("   Se vedi le scatole ma non il terreno, la geometria e' al posto giusto)"), FColor::White);
+	}));
+
 // --- geo.Terrain.Diag -------------------------------------------------------
 //
 //  "Disegna 108 tile e 3,5 milioni di triangoli, ma non vedo niente" e' un
@@ -713,8 +728,14 @@ static FAutoConsoleCommandWithWorld GeoTerrainDiagCommand(
 				(Tile.bRegistered && Tile.bVisible) ? FColor::White : FColor::Red);
 		}
 
-		GeoTerrainConsole::Report(
-			TEXT("Se qui e' tutto verde e sensato, prova: geo.Terrain.FlipWinding 0"));
+		// Se i numeri sono sani, il problema non e' piu' "dove sta la geometria"
+		// ma "perche' non la vedo", e sono domande diverse con strumenti diversi.
+		GeoTerrainConsole::Report(TEXT("Numeri sani? Allora non e' la geometria. In quest'ordine:"), FColor::Yellow);
+		GeoTerrainConsole::Report(TEXT("  viewmode wireframe   ignora materiali, luci e facce: se appare, e' ombreggiatura"), FColor::Yellow);
+		GeoTerrainConsole::Report(TEXT("  geo.Terrain.Boxes 1  linee di debug, non nebbiate: se appaiono, la posizione e' giusta"), FColor::Yellow);
+		GeoTerrainConsole::Report(TEXT("  r.Fog 0              a 20 km la nebbia di default sostituisce il terreno col cielo"), FColor::Yellow);
+		GeoTerrainConsole::Report(TEXT("  r.SkyAtmosphere 0    come sopra, prospettiva aerea"), FColor::Yellow);
+		GeoTerrainConsole::Report(TEXT("  geo.Terrain.FlipWinding 0/1  orientamento delle facce"), FColor::Yellow);
 	}));
 
 // --- geo.Terrain.Demo -------------------------------------------------------
@@ -749,19 +770,36 @@ static FAutoConsoleCommandWithWorldAndArgs GeoTerrainDemoCommand(
 		double West, South, East, North;
 		Dataset.GetBoundingBox(West, South, East, North);
 
-		// Una quota da cui si vede un pezzo di terreno con del rilievo, non
-		// l'intero dataset schiacciato: a 15 km si distinguono le valli.
+		// QUOTA. La prima versione partiva da 15 km "per vedere le valli". E'
+		// una quota sbagliata per un primo avvio: con la nebbia atmosferica di
+		// default di UE (ExponentialHeightFog piu' SkyAtmosphere) il terreno a
+		// 20 km di distanza e' quasi interamente sostituito dal colore del
+		// cielo, e si conclude che non viene disegnato. 6 km e' sopra le Alpi e
+		// abbastanza vicino da vedere la geometria anche con la nebbia accesa.
 		Georeference->TeleportViewTo(GeoWorld::Core::FGeodetic::FromDegrees(
-			(South + North) * 0.5, (West + East) * 0.5, 15000.0));
+			(South + North) * 0.5, (West + East) * 0.5, 6000.0));
 
 		Quadtree->SetEnabled(true);
 		Terrain->SetEnabled(true);
 		Terrain->SetDebugOverlayEnabled(true);
 
+		// WIREFRAME ACCESO AL PRIMO AVVIO, di proposito.
+		// Il materiale di base e' una superficie grigia senza texture: illuminata
+		// solo dalla luce del cielo riempie lo schermo di un azzurrino uniforme,
+		// indistinguibile dal cielo vuoto. Il reticolo dei triangoli invece non
+		// si confonde con niente. Si spegne con geo.Terrain.Wireframe 0.
+		Terrain->SetWireframe(true);
+
 		GeoTerrainConsole::Report(FString::Printf(
 			TEXT("Terreno attivo su '%s'. Quota 15 km sul centro del dataset."),
 			*Dataset.GetDatasetName()));
+		GeoTerrainConsole::Report(TEXT("Wireframe acceso: il terreno grigio senza texture si confonde col cielo."));
+		GeoTerrainConsole::Report(TEXT("Spegnilo quando lo vedi: geo.Terrain.Wireframe 0"));
 		GeoTerrainConsole::Report(TEXT("Scendi di quota: la geometria si raffina da sola."));
-		GeoTerrainConsole::Report(TEXT("Se non vedi niente dall'alto: geo.Terrain.FlipWinding"));
 		GeoTerrainConsole::Report(TEXT("Per capire cosa fanno le gonne: geo.Terrain.Skirt 0"));
+		GeoTerrainConsole::Report(TEXT("Se non vedi niente, in quest'ordine:"), FColor::Yellow);
+		GeoTerrainConsole::Report(TEXT("  viewmode wireframe   (del motore: ignora materiali e facce)"), FColor::Yellow);
+		GeoTerrainConsole::Report(TEXT("  geo.Terrain.Boxes 1  (scatole di debug sui bounds)"), FColor::Yellow);
+		GeoTerrainConsole::Report(TEXT("  r.Fog 0              (la nebbia cancella il terreno lontano)"), FColor::Yellow);
+		GeoTerrainConsole::Report(TEXT("  geo.Terrain.Diag     (i numeri del renderer)"), FColor::Yellow);
 	}));

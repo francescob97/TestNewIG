@@ -83,6 +83,45 @@ costruito — sono due cose diverse, e la differenza e' tutta l'informazione:
 | `NON REGISTRATO` / `NASCOSTO` | il componente non e' nella scena |
 | tutto verde e sensato | la geometria c'e' ed e' al posto giusto: resta l'orientamento delle facce |
 
+### Numeri sani e ancora niente a schermo
+
+Se `Diag` e' tutto verde, la domanda non e' piu' "dove sta la geometria" ma
+"perche' non la vedo", e sono due cose diverse. Tre cause, in ordine di
+frequenza, e i comandi che le distinguono:
+
+**1. La stai guardando e non la riconosci.** Il materiale di base e' una
+superficie grigia senza texture. Illuminata dalla sola luce del cielo riempie lo
+schermo di un **azzurrino uniforme**, indistinguibile dal cielo di un livello
+vuoto. Per questo `geo.Terrain.Demo` adesso parte **con il wireframe acceso**:
+un reticolo di triangoli non si confonde con niente.
+
+```
+geo.Terrain.Wireframe 1
+viewmode wireframe          <- comando del MOTORE: ignora materiali, luci e facce
+```
+
+**2. La nebbia se l'e' mangiata.** Con `ExponentialHeightFog` e `SkyAtmosphere`
+di default, il terreno a 20 km viene sostituito quasi per intero dal colore del
+cielo. E' il motivo per cui la demo adesso si posiziona a **6 km** e non a 15.
+
+```
+r.Fog 0
+r.SkyAtmosphere 0
+```
+
+**3. Le facce sono girate.** Resta solo se le prime due non spiegano niente.
+
+Un quarto strumento separa "non si vede" da "non c'e'":
+
+```
+geo.Terrain.Boxes 1
+```
+
+Disegna i bounds dei componenti come scatole di debug. Le linee di debug non
+passano per il materiale, non hanno faccia frontale e non vengono nebbiate: se
+vedi le scatole ma non il terreno, la geometria e' al posto giusto e il problema
+e' in come viene ombreggiata.
+
 In quest'ultimo caso:
 
 ```
@@ -168,6 +207,7 @@ geo.Terrain.FlipWinding <0|1>  orientamento delle facce
 geo.Terrain.Budget <N>         tile costruite per frame
 geo.Terrain.Stats              statistiche dell'ultimo frame
 geo.Terrain.Diag               cosa il renderer ha davvero, e dove
+geo.Terrain.Boxes <0|1>        scatole di debug sui bounds (linee, non mesh)
 ```
 
 ---

@@ -7,6 +7,7 @@
 #include "Terrain/DynamicMeshTerrainProvider.h"
 #include "Geo/GeoUnits.h"
 
+#include "DrawDebugHelpers.h"
 #include "Engine/Engine.h"
 #include "Engine/World.h"
 
@@ -101,6 +102,7 @@ void UGeoTerrainSubsystem::Tick(float DeltaTime)
 
 	if (bTerrainEnabled) { SynchroniseWithSelection(); }
 	if (bShowDebugOverlay) { DrawDebugOverlay(); }
+	if (bDrawBounds) { DrawTileBounds(); }
 }
 
 void UGeoTerrainSubsystem::SynchroniseWithSelection()
@@ -297,4 +299,42 @@ void UGeoTerrainSubsystem::DrawDebugOverlay()
 
 	Line(FColor::White, FString::Printf(TEXT("Gonne         : %s   rebase gestiti: %d"),
 		IsSkirtEnabled() ? TEXT("on") : TEXT("OFF"), Stats.Rebase));
+}
+
+// ---------------------------------------------------------------------------
+//  Le scatole di debug: un canale di disegno INDIPENDENTE dalla mesh.
+//
+//  Non passano per il materiale, non hanno faccia frontale da orientare e non
+//  vengono attenuate dalla nebbia atmosferica come la geometria opaca. Servono
+//  a separare due domande che altrimenti restano confuse: "la geometria e' dove
+//  credo?" e "la geometria si vede?".
+//
+//  Si disegnano i bounds letti dal COMPONENTE, non quelli che ho calcolato io:
+//  sono esattamente il volume che il renderer usa per decidere se la primitiva
+//  e' nel frustum.
+// ---------------------------------------------------------------------------
+void UGeoTerrainSubsystem::DrawTileBounds()
+{
+	UWorld* World = GetWorld();
+	if (!World || !Provider.IsValid()) { return; }
+
+	TArray<FGeoTerrainTileDiagnostic> Diagnostics;
+	Provider->GetDiagnostics(Diagnostics, 4096);
+
+	for (const FGeoTerrainTileDiagnostic& Tile : Diagnostics)
+	{
+		// Un colore per livello, come nella tassellatura della Fase 4, cosi' i
+		// due disegni si possono confrontare a colpo d'occhio.
+		static const FColor LevelColours[] = {
+			FColor::Red, FColor::Green, FColor::Blue, FColor::Yellow,
+			FColor::Cyan, FColor::Magenta, FColor::Orange, FColor::Turquoise
+		};
+		const FColor Colour = LevelColours[Tile.Key.Level % UE_ARRAY_COUNT(LevelColours)];
+
+		// LifeTime 0 = un solo frame: si ridisegnano a ogni tick, quindi
+		// seguono il rebasing senza doverli cancellare.
+		DrawDebugBox(World, Tile.BoundsOrigin, Tile.BoundsExtent, Colour,
+		             /*bPersistentLines=*/false, /*LifeTime=*/0.0f,
+		             /*DepthPriority=*/0, /*Thickness=*/200.0f);
+	}
 }

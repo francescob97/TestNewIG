@@ -255,6 +255,8 @@ void FDynamicMeshTerrainProvider::GetDiagnostics(TArray<FGeoTerrainTileDiagnosti
 		// la geometria viene scartata prima ancora di essere disegnata: e' la
 		// causa classica di "i conteggi ci sono ma non si vede niente".
 		Entry.BoundsRadiusUu = Component->Bounds.SphereRadius;
+		Entry.BoundsOrigin = Component->Bounds.Origin;
+		Entry.BoundsExtent = Component->Bounds.BoxExtent;
 
 		if (const UE::Geometry::FDynamicMesh3* Mesh = Component->GetMesh())
 		{

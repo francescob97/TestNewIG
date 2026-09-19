@@ -53,6 +53,10 @@ struct FGeoTerrainTileDiagnostic
 	FVector WorldLocation = FVector::ZeroVector;
 	double BoundsRadiusUu = 0.0;
 
+	/** Il volume che il RENDERER usa per il culling, in spazio mondo. */
+	FVector BoundsOrigin = FVector::ZeroVector;
+	FVector BoundsExtent = FVector::ZeroVector;
+
 	/** Letti dalla mesh del componente, non dalla FTileMeshData. */
 	int32 RealVertexCount = 0;
 	int32 RealTriangleCount = 0;

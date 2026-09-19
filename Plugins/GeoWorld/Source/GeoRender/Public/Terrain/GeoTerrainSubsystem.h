@@ -94,6 +94,18 @@ public:
 	FGeoTerrainStats GetStats() const { return Stats; }
 	FString GetProviderName() const { return Provider.IsValid() ? Provider->GetName() : TEXT("nessuno"); }
 
+	/**
+	 * Disegna i BOUNDS dei componenti come scatole di debug.
+	 *
+	 * PERCHE' SERVE UN SECONDO CANALE DI DISEGNO. Le linee di debug non passano
+	 * per il materiale, non hanno faccia frontale e non vengono nebbiate come la
+	 * geometria opaca. Se le scatole si vedono e il terreno no, la geometria e'
+	 * al posto giusto e il problema e' nel come viene ombreggiata; se non si
+	 * vede nemmeno una scatola, non stai guardando dove credi.
+	 */
+	void SetDrawBounds(bool bInDraw) { bDrawBounds = bInDraw; }
+	bool IsDrawBounds() const { return bDrawBounds; }
+
 	/** Diagnosi delle prime MaxEntries tile, lette dal provider (geo.Terrain.Diag). */
 	void GetTileDiagnostics(TArray<FGeoTerrainTileDiagnostic>& Out, int32 MaxEntries) const
 	{
@@ -104,6 +116,7 @@ public:
 private:
 	void SynchroniseWithSelection();
 	void DrawDebugOverlay();
+	void DrawTileBounds();
 	void OnGeoreferenceRebased(const FGeoreferenceSnapshot& Snapshot);
 
 	TUniquePtr<IGeoTerrainMeshProvider> Provider;
@@ -128,6 +141,7 @@ private:
 
 	GeoWorld::Mesh::FTileMeshParameters MeshParameters;
 	FGeoTerrainStats Stats;
+	bool bDrawBounds = false;
 	FDelegateHandle RebaseHandle;
 
 	int32 MaxTilesPerFrame = 4;
