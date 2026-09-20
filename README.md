@@ -31,7 +31,7 @@ Il progetto `TestNewIG` e' un guscio vuoto: tutto il codice vive in
 - [x] **Fase 3** — loader asincrono, cache LRU, lettura dataset *(mai compilata in UE)*
 - [x] **Fase 4** — quadtree, selezione LOD, culling *(mai compilata in UE)*
 - [x] **Fase 5** — generazione mesh, gonne, terreno a schermo *(mai compilata in UE)*
-- [ ] Fase 6 — imagery drappeggiata
+- [ ] Fase 6 — ortofoto drappeggiate *(design scritto: `docs/fase6-design.md`)*
 
 ## Formato dei dati
 

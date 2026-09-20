@@ -406,6 +406,7 @@ Limitazioni note, lasciate aperte di proposito:
 | Verifica Fase 4, con la demo visiva | `docs/fase4-verifica.md` |
 | Design e motivazioni Fase 5 | `docs/fase5-design.md` |
 | Verifica Fase 5, con la demo visiva | `docs/fase5-verifica.md` |
+| Design e motivazioni Fase 6 | `docs/fase6-design.md` |
 | Issue aperte | `docs/issues-aperte.md` |
 | Uso della pipeline, installazione Windows | `Pipeline/README.md` |
 
