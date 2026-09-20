@@ -28,9 +28,36 @@ import struct
 from dataclasses import dataclass
 
 import numpy as np
-from PIL import Image
 
 from . import tiling
+
+
+def _pillow_image():
+    """
+    Importa Pillow SOLO quando serve davvero.
+
+    PERCHE' NON IN CIMA AL FILE. Un import in testa al modulo si propaga a tutta
+    la catena: cli.py importa imagecut, che importa questo, che importerebbe
+    Pillow. Risultato, senza Pillow installato NON PARTE NEMMENO check-env --
+    cioe' proprio il comando il cui unico scopo e' dirti cosa manca
+    nell'ambiente. Uno strumento di diagnosi che muore per la cosa che deve
+    diagnosticare e' inutile.
+
+    E' lo stesso motivo per cui GDAL viene importato dentro le funzioni in
+    raster.py, e la stessa lezione gia' imparata una volta: gli strumenti di
+    diagnosi devono essere la parte piu' robusta del progetto, non la piu'
+    fragile.
+    """
+    try:
+        from PIL import Image
+    except ImportError as error:
+        raise ImportError(
+            "serve Pillow per leggere e scrivere le tile di immagine.\n"
+            "    conda install -c conda-forge pillow\n"
+            "    (oppure: pip install Pillow)\n"
+            "Diagnosi completa dell'ambiente: python run.py check-env"
+        ) from error
+    return Image
 
 TILE_EXTENSION = ".gim"
 
@@ -113,6 +140,8 @@ def encode_tile(level: int, x: int, y: int, pixels: np.ndarray,
 
     coverage = int(round(max(0.0, min(100.0, coverage_percent))))
 
+    Image = _pillow_image()
+
     buffer = io.BytesIO()
     Image.fromarray(pixels, mode="RGB").save(
         buffer, format="JPEG", quality=quality, optimize=True)
@@ -155,6 +184,8 @@ def decode_tile(blob: bytes) -> tuple[ImageTileHeader, np.ndarray]:
     if len(payload) != header.payload_size:
         raise ValueError(
             f"payload troncato: {len(payload)} byte su {header.payload_size} dichiarati")
+
+    Image = _pillow_image()
 
     image = Image.open(io.BytesIO(payload))
     image.load()

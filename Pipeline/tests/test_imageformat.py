@@ -11,6 +11,18 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from geoworld import imagecut, imageformat, imagerymanifest, tiling
 
+# Pillow serve solo a comprimere e decomprimere il payload. Senza, i test che
+# toccano un JPEG SALTANO invece di fallire: e' la stessa scelta fatta per la
+# griglia geoidica in test_geoid.py. Un test rosso deve voler dire "il codice e'
+# sbagliato", non "ti manca una libreria opzionale".
+try:
+    from PIL import Image as _PillowImage
+    HAS_PILLOW = True
+except ImportError:
+    HAS_PILLOW = False
+
+NEEDS_PILLOW = "serve Pillow: conda install -c conda-forge pillow"
+
 
 def gradient_tile(seed: int = 0) -> np.ndarray:
     """Un'immagine riconoscibile: rosso verso est, verde verso sud, blu fisso."""
@@ -23,6 +35,24 @@ def gradient_tile(seed: int = 0) -> np.ndarray:
     return tile
 
 
+class TestHeaderStructure(unittest.TestCase):
+    """Gli invarianti del formato: non serve comprimere niente per provarli."""
+
+    def test_header_is_32_bytes(self):
+        self.assertEqual(imageformat.HEADER_STRUCT.size, imageformat.HEADER_SIZE)
+        self.assertEqual(imageformat.HEADER_SIZE, 32)
+
+    def test_tile_is_256_pixels(self):
+        self.assertEqual(imageformat.TILE_PIXELS, 256)
+        self.assertEqual(imageformat.TILE_PIXELS, 2 * tiling.TILE_CELLS)
+
+    def test_fill_tile_needs_only_numpy(self):
+        tile = imageformat.fill_tile()
+        self.assertEqual(tile.shape, (256, 256, 3))
+        self.assertTrue((tile[0, 0] == imageformat.FILL_COLOUR).all())
+
+
+@unittest.skipUnless(HAS_PILLOW, NEEDS_PILLOW)
 class TestHeader(unittest.TestCase):
 
     def test_round_trip(self):
@@ -35,10 +65,6 @@ class TestHeader(unittest.TestCase):
         self.assertEqual(header.coverage_percent, 100)
         self.assertFalse(header.has_filled_pixels)
         self.assertEqual(decoded.shape, (256, 256, 3))
-
-    def test_header_is_32_bytes(self):
-        self.assertEqual(imageformat.HEADER_STRUCT.size, imageformat.HEADER_SIZE)
-        self.assertEqual(imageformat.HEADER_SIZE, 32)
 
     def test_jpeg_is_lossy_but_faithful(self):
         """La compressione perde qualcosa, ma non deve stravolgere i colori."""
@@ -105,6 +131,7 @@ class TestReduction(unittest.TestCase):
             imageformat.reduce_2x2(np.zeros((5, 4, 3), np.uint8))
 
 
+@unittest.skipUnless(HAS_PILLOW, NEEDS_PILLOW)
 class TestPyramidWithoutGdal(unittest.TestCase):
     """
     Costruisce una piramide vera senza toccare GDAL.

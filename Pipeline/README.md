@@ -13,7 +13,7 @@ variabili `GDAL_DATA` e `PROJ_DATA` gia' impostate correttamente.
 ```bat
 conda create -n geoworld python=3.11
 conda activate geoworld
-conda install -c conda-forge gdal pyproj numpy proj-data
+conda install -c conda-forge gdal pyproj numpy pillow proj-data
 ```
 
 `proj-data` e' il pacchetto che contiene la griglia geoidica EGM2008. Senza,
@@ -46,7 +46,7 @@ Note specifiche Windows:
 ## Installazione su Linux / macOS
 
 ```bash
-conda install -c conda-forge gdal pyproj numpy proj-data
+conda install -c conda-forge gdal pyproj numpy pillow proj-data
 # oppure, su Debian/Ubuntu:
 apt install gdal-bin python3-gdal python3-pyproj python3-numpy proj-data
 ```

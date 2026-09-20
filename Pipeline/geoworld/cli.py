@@ -25,7 +25,13 @@ import os
 import sys
 import time
 
-import numpy as np
+# NOTA: numpy NON si importa qui in cima, e nemmeno Pillow.
+#
+# Un import in testa a cli.py e' un import che avviene per OGNI comando,
+# check-env compreso. Ma check-env esiste proprio per dire cosa manca
+# nell'ambiente: se muore importando cio' che deve diagnosticare, l'utente
+# riceve una traceback invece della risposta. Le due librerie si importano
+# dentro le funzioni che le usano davvero.
 
 from . import __version__, tiling, tileformat, geoid, environment, fetch as fetch_module, manifest as manifest_module
 from . import (fetchimagery, imagecut, imageformat, imagerybuild,
@@ -502,6 +508,8 @@ def command_verify(args: argparse.Namespace) -> int:
             if abs(header.min_height - item.min_height) > 1e-3:
                 problems.append(f"{level}/{item.x}/{item.y}: min nell'indice "
                                 f"{item.min_height:.3f}, nell'header {header.min_height:.3f}")
+            import numpy as np
+
             if not np.isfinite(heights).all():
                 problems.append(f"{level}/{item.x}/{item.y}: contiene valori non finiti")
 

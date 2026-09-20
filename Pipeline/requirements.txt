@@ -13,3 +13,10 @@
 GDAL>=3.4
 pyproj>=3.4
 numpy>=1.21
+
+# Pillow serve SOLO alle ortofoto (Fase 6): legge e scrive il payload JPEG
+# delle tile .gim. La pipeline delle quote funziona anche senza, e
+# `python run.py check-env` dice se manca.
+#
+#   conda install -c conda-forge pillow
+Pillow>=9.0

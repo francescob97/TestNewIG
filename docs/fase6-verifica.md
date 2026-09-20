@@ -40,8 +40,13 @@ cd Pipeline
 python -m unittest discover -s tests
 ```
 
-Attesi **63 test** (erano 41). I nuovi coprono il formato `.gim`, la riduzione
-della piramide, il drappeggio e i quadrati MGRS.
+Attesi **70 test** (erano 41). I nuovi coprono il formato `.gim`, la riduzione
+della piramide, il drappeggio, i quadrati MGRS e la struttura degli import.
+
+Senza Pillow ne saltano 14 invece di fallire: quelli che comprimono un JPEG. La
+pipeline delle quote e tutta la matematica del drappeggio restano verificate.
+Un test rosso deve voler dire "il codice e' sbagliato", non "ti manca una
+libreria opzionale".
 
 Uno merita di essere segnalato: `test_mgrs.py` non verifica solo la coerenza
 interna del calcolo. I quadrati attesi per Roma, Milano, Torino, Napoli,
@@ -57,6 +62,16 @@ download non troverebbe niente.
 cd Pipeline
 python run.py check-env
 ```
+
+Prima di tutto il resto: **serve Pillow**, che non era nelle dipendenze fino
+alla Fase 6.
+
+```bat
+conda install -c conda-forge pillow
+```
+
+Serve solo alle ortofoto; la pipeline delle quote funziona anche senza, e
+`check-env` lo dice a chiare lettere.
 
 Nuova sezione **formati leggibili**: dice quali driver GDAL hai davvero. Quasi
 certamente l'ECW risulterà assente — è normale, richiede l'SDK proprietario

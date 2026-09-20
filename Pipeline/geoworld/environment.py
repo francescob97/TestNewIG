@@ -27,6 +27,7 @@ class Report:
     python: dict = field(default_factory=dict)
     gdal: dict = field(default_factory=dict)
     pyproj: dict = field(default_factory=dict)
+    imaging: dict = field(default_factory=dict)
     grids: dict = field(default_factory=dict)
     vertical: dict = field(default_factory=dict)
 
@@ -93,6 +94,32 @@ def _gdal_info() -> dict:
         }
     except Exception as error:                      # noqa: BLE001
         return {"available": False, "error": f"{type(error).__name__}: {error}"}
+
+
+def _imaging_info() -> dict:
+    """
+    numpy e Pillow: servono alla pipeline delle ortofoto (Fase 6).
+
+    Vengono controllati qui e non lasciati fallire all'uso, perche' un
+    ModuleNotFoundError a meta' di una build su 200 GB e' il modo peggiore di
+    scoprire che manca una libreria.
+    """
+    report = {}
+
+    try:
+        import numpy
+        report["numpy"] = numpy.__version__
+    except ImportError as error:
+        report["numpyError"] = f"{type(error).__name__}: {error}"
+
+    try:
+        from PIL import Image
+        import PIL
+        report["pillow"] = PIL.__version__
+    except ImportError as error:
+        report["pillowError"] = f"{type(error).__name__}: {error}"
+
+    return report
 
 
 def _pyproj_info() -> dict:
@@ -178,7 +205,8 @@ def _vertical_info() -> dict:
 
 
 def collect() -> Report:
-    report = Report(python=_python_info(), gdal=_gdal_info(), pyproj=_pyproj_info())
+    report = Report(python=_python_info(), gdal=_gdal_info(), pyproj=_pyproj_info(),
+                    imaging=_imaging_info())
     if report.pyproj.get("available"):
         report.grids = _grid_info()
         report.vertical = _vertical_info()
@@ -218,6 +246,19 @@ def format_report(report: Report) -> str:
                 lines.append("    i GeoTIFF a build-imagery: la pipeline non guarda il formato.")
     else:
         lines.append(f"{mark(False)}GDAL non importabile: {report.gdal.get('error')}")
+
+    lines.append("")
+    lines.append("=== numpy / Pillow ===")
+    if "numpy" in report.imaging:
+        lines.append(f"{mark(True)}numpy {report.imaging['numpy']}")
+    else:
+        lines.append(f"{mark(False)}numpy non importabile: {report.imaging.get('numpyError')}")
+    if "pillow" in report.imaging:
+        lines.append(f"{mark(True)}Pillow {report.imaging['pillow']}  (tile di ortofoto)")
+    else:
+        lines.append(f"{mark(False)}Pillow non importabile: {report.imaging.get('pillowError')}")
+        lines.append("    Serve solo alle ortofoto (build-imagery). La pipeline delle")
+        lines.append("    quote funziona lo stesso.")
 
     lines.append("")
     lines.append("=== PROJ / pyproj ===")
@@ -279,6 +320,17 @@ def _install_instructions(report: Report) -> str:
 
     lines = ["=== Come sistemare ==="]
 
+    # Questo blocco viene PRIMA del ramo su GDAL, che termina con un return:
+    # altrimenti, mancando anche GDAL, di Pillow non si leggerebbe mai niente.
+    if "pillow" not in report.imaging:
+        lines.append("")
+        lines.append("  Manca Pillow. Serve solo alle ORTOFOTO (build-imagery,")
+        lines.append("  verify-imagery, inspect-imagery); la pipeline delle quote")
+        lines.append("  funziona anche senza.")
+        lines.append("")
+        lines.append("      conda install -c conda-forge pillow")
+        lines.append("      # oppure: pip install Pillow")
+
     if not report.gdal.get("available") or not report.pyproj.get("available"):
         lines.append("")
         lines.append("  Mancano GDAL e/o pyproj.")
@@ -287,14 +339,14 @@ def _install_instructions(report: Report) -> str:
             lines.append("")
             lines.append("      conda create -n geoworld python=3.11")
             lines.append("      conda activate geoworld")
-            lines.append("      conda install -c conda-forge gdal pyproj numpy proj-data")
+            lines.append("      conda install -c conda-forge gdal pyproj numpy pillow proj-data")
             lines.append("")
             lines.append("  Evita 'pip install gdal': su Windows non esistono rotelle")
             lines.append("  ufficiali su PyPI e la compilazione da sorgente richiede il")
             lines.append("  toolchain C++ piu' le librerie di sistema.")
         else:
-            lines.append("      conda install -c conda-forge gdal pyproj numpy proj-data")
-            lines.append("      # oppure: apt install gdal-bin python3-gdal python3-pyproj proj-data")
+            lines.append("      conda install -c conda-forge gdal pyproj numpy pillow proj-data")
+            lines.append("      # oppure: apt install gdal-bin python3-gdal python3-pyproj python3-pil proj-data")
         return "\n".join(lines)
 
     lines.append("")

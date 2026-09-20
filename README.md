@@ -72,7 +72,7 @@ cmake --build build
 ./Plugins/GeoWorld/Tools/CheckSourceDiscipline.sh
 ```
 
-164 test C++ in totale, piu' 63 test Python della pipeline.
+164 test C++ in totale, piu' 70 test Python della pipeline.
 
 ## Pipeline dati
 
