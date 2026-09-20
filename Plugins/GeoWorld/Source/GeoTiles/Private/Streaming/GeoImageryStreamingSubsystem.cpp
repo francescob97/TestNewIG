@@ -165,7 +165,13 @@ void UGeoImageryStreamingSubsystem::Initialize(FSubsystemCollectionBase& Collect
 
 	// Budget piu' alto di quello delle quote: una tile decodificata occupa
 	// 256 KB (256 x 256 x 4 byte) contro i 66 KB di una tile di quote.
-	Cache = GeoWorld::Tiles::TTileCache<GeoWorld::Tiles::FImageTile>(512ull * 1024 * 1024);
+	//
+	// Si chiama il setter invece di riassegnare l'intero oggetto: riassegnarlo
+	// funzionerebbe, ma si appoggerebbe alla move-assignment implicita di una
+	// classe che contiene una list e una unordered_map. Un giorno qualcuno
+	// aggiunge un membro non assegnabile e il punto di rottura e' qui, lontano
+	// dalla causa.
+	Cache.SetBudgetBytes(512ull * 1024 * 1024);
 
 	Pool.Startup(LoadThreadCount, TEXT("GeoImageryLoadPool"));
 
@@ -293,7 +299,7 @@ void UGeoImageryStreamingSubsystem::SetTilePinned(const FTileKey& Key, bool bPin
 
 void UGeoImageryStreamingSubsystem::SetCacheBudgetMB(int32 Megabytes)
 {
-	Cache.SetBudget(static_cast<size_t>(FMath::Max(1, Megabytes)) * 1024 * 1024);
+	Cache.SetBudgetBytes(static_cast<size_t>(FMath::Max(1, Megabytes)) * 1024ull * 1024ull);
 }
 
 int32 UGeoImageryStreamingSubsystem::GetCacheBudgetMB() const
