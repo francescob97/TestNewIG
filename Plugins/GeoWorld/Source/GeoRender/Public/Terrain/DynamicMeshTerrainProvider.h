@@ -67,12 +67,6 @@ private:
 		bool bDraped = false;
 	};
 
-	static uint64 PackKey(const GeoWorld::Tiles::FTileKey& Key)
-	{
-		return (static_cast<uint64>(Key.Level) << 58) ^ (static_cast<uint64>(Key.Y) << 29)
-		     ^ static_cast<uint64>(Key.X);
-	}
-
 	TWeakObjectPtr<AActor> Container;
 
 	// NOTA UE: puntatore FORTE, non debole. Questa classe non e' un UObject,

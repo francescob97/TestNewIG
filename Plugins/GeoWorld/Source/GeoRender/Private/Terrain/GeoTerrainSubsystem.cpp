@@ -14,15 +14,6 @@
 using namespace GeoWorld;
 using GeoWorld::Tiles::FTileKey;
 
-namespace
-{
-	FORCEINLINE uint64 PackKey(const FTileKey& Key)
-	{
-		return (static_cast<uint64>(Key.Level) << 58) ^ (static_cast<uint64>(Key.Y) << 29)
-		     ^ static_cast<uint64>(Key.X);
-	}
-}
-
 bool UGeoTerrainSubsystem::ShouldCreateSubsystem(UObject* Outer) const
 {
 	if (!Super::ShouldCreateSubsystem(Outer)) { return false; }
@@ -121,7 +112,7 @@ void UGeoTerrainSubsystem::SynchroniseWithSelection()
 	// --- Chi dovrebbe esserci ---------------------------------------------
 	TSet<uint64> Wanted;
 	Wanted.Reserve(Selected.Num());
-	for (const Quadtree::FSelectedTile& Tile : Selected) { Wanted.Add(PackKey(Tile.Key)); }
+	for (const Quadtree::FSelectedTile& Tile : Selected) { Wanted.Add(Tile.Key.Pack()); }
 
 	// Le tile ancora selezionate restano pinnate: sfrattarle dalla cache mentre
 	// si stanno disegnando significherebbe ricaricarle subito dopo. E' il limite
@@ -146,7 +137,7 @@ void UGeoTerrainSubsystem::SynchroniseWithSelection()
 		Provider->RemoveTile(Built.Key);
 		// Spinnata: ora puo' tornare a essere sfrattabile dalla cache.
 		Streaming->SetTilePinned(Built.Key, false);
-		BuiltTiles.Remove(PackKey(Built.Key));
+		BuiltTiles.Remove(Built.Key.Pack());
 	}
 
 	// --- Costruisci cio' che manca, entro il budget ------------------------
@@ -155,7 +146,7 @@ void UGeoTerrainSubsystem::SynchroniseWithSelection()
 
 	for (const Quadtree::FSelectedTile& Tile : Selected)
 	{
-		const uint64 Packed = PackKey(Tile.Key);
+		const uint64 Packed = Tile.Key.Pack();
 		if (BuiltTiles.Contains(Packed)) { continue; }
 
 		if (Budget <= 0) { ++Waiting; continue; }

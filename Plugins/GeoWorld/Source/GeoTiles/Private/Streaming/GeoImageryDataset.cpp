@@ -8,14 +8,6 @@
 #include "Serialization/JsonReader.h"
 #include "Serialization/JsonSerializer.h"
 
-namespace
-{
-	FORCEINLINE uint64 PackXY(uint32 X, uint32 Y)
-	{
-		return (static_cast<uint64>(Y) << 32) | static_cast<uint64>(X);
-	}
-}
-
 bool FGeoImageryDataset::Open(const FString& InRootDirectory, FString& OutError)
 {
 	bIsOpen = false;
@@ -150,7 +142,7 @@ bool FGeoImageryDataset::EnsureLevelIndex(int32 Level, FString& OutError)
 	Info->Tiles.Reserve(static_cast<int32>(Entries.size()));
 	for (const GeoWorld::Tiles::FImageIndexEntry& Entry : Entries)
 	{
-		Info->Tiles.Add(PackXY(Entry.X, Entry.Y), Entry.CoveragePercent);
+		Info->Tiles.Add(GeoWorld::Tiles::FTileKey::PackXY(Entry.X, Entry.Y), Entry.CoveragePercent);
 	}
 	Info->bIndexLoaded = true;
 
@@ -163,7 +155,7 @@ bool FGeoImageryDataset::TileExists(const GeoWorld::Tiles::FTileKey& Key) const
 {
 	const FLevelInfo* Info = FindLevel(static_cast<int32>(Key.Level));
 	if (!Info || !Info->bIndexLoaded) { return false; }
-	return Info->Tiles.Contains(PackXY(Key.X, Key.Y));
+	return Info->Tiles.Contains(GeoWorld::Tiles::FTileKey::PackXY(Key.X, Key.Y));
 }
 
 bool FGeoImageryDataset::GetTileCoverage(const GeoWorld::Tiles::FTileKey& Key,
@@ -171,7 +163,7 @@ bool FGeoImageryDataset::GetTileCoverage(const GeoWorld::Tiles::FTileKey& Key,
 {
 	const FLevelInfo* Info = FindLevel(static_cast<int32>(Key.Level));
 	if (!Info || !Info->bIndexLoaded) { return false; }
-	if (const uint8* Found = Info->Tiles.Find(PackXY(Key.X, Key.Y)))
+	if (const uint8* Found = Info->Tiles.Find(GeoWorld::Tiles::FTileKey::PackXY(Key.X, Key.Y)))
 	{
 		OutPercent = *Found;
 		return true;

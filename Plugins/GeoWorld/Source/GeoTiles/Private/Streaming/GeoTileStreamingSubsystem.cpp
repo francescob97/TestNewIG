@@ -16,12 +16,6 @@ using namespace GeoWorld::Tiles;
 
 namespace
 {
-	FORCEINLINE uint64 PackKey(const FTileKey& Key)
-	{
-		return (static_cast<uint64>(Key.Level) << 58) ^ (static_cast<uint64>(Key.Y) << 29)
-		     ^ static_cast<uint64>(Key.X);
-	}
-
 	/** Thread del pool. Non serve uno per core: il collo di bottiglia e' il disco. */
 	constexpr int32 LoadThreadCount = 4;
 }
@@ -164,7 +158,7 @@ void UGeoTileStreamingSubsystem::DrainCompletedLoads()
 	FLoadResult Result;
 	while (CompletedLoads.Dequeue(Result))
 	{
-		InFlight.Remove(PackKey(Result.Key));
+		InFlight.Remove(Result.Key.Pack());
 
 		if (Result.Tile.IsValid())
 		{
@@ -221,7 +215,7 @@ UGeoTileStreamingSubsystem::FTilePtr UGeoTileStreamingSubsystem::FindLoadedTile(
 EGeoTileState UGeoTileStreamingSubsystem::GetTileState(const FTileKey& Key) const
 {
 	if (Cache.Peek(Key)) { return EGeoTileState::Pronta; }
-	if (InFlight.Contains(PackKey(Key))) { return EGeoTileState::InCaricamento; }
+	if (InFlight.Contains(Key.Pack())) { return EGeoTileState::InCaricamento; }
 	if (!Dataset.TileExists(Key)) { return EGeoTileState::Assente; }
 	return EGeoTileState::NonCaricata;
 }
@@ -230,7 +224,7 @@ EGeoTileState UGeoTileStreamingSubsystem::RequestTile(const FTileKey& Key, int32
 {
 	if (Cache.Peek(Key)) { return EGeoTileState::Pronta; }
 
-	const uint64 Packed = PackKey(Key);
+	const uint64 Packed = Key.Pack();
 	if (InFlight.Contains(Packed)) { return EGeoTileState::InCaricamento; }
 
 	// L'indice del livello deve esserci: senza, non si puo' sapere se la tile

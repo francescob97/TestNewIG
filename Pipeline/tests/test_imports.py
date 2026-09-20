@@ -95,6 +95,59 @@ class TestCliRunsWithoutOptionalLibraries(unittest.TestCase):
                       "check-env non dice niente su Pillow: l'utente non saprebbe "
                       "cosa installare")
 
+    def test_report_formats_with_gdal_present(self):
+        """
+        Il ramo "GDAL c'e'" va esercitato anche dove GDAL non e' installato.
+
+        Senza questo test il rapporto veniva provato solo nel caso GDAL
+        assente, e un bug nella tabella dei driver -- una variabile che
+        sovrascriveva la lambda mark() -- e' arrivato fino alla macchina
+        dell'utente. Il report si costruisce da dati, quindi i dati si possono
+        inventare.
+        """
+        from geoworld import environment
+
+        report = environment.Report(
+            # La parte "python" si prende da quella vera, non si inventa: cosi'
+            # il test non deve rincorrere i campi ogni volta che se ne aggiunge
+            # uno, ed e' proprio quel disallineamento ad aver fatto fallire la
+            # prima stesura di questo test.
+            python=environment._python_info(),
+            gdal={"available": True, "version": "3.8.0",
+                  "driverGTiff": True, "driverVRT": True,
+                  "drivers": {name: (name != "ECW")
+                              for name in environment.INTERESTING_DRIVERS}},
+            pyproj={"available": False, "error": "finto"},
+            imaging={"numpy": "1.26.0", "pillow": "10.0.0"})
+
+        text = environment.format_report(report)
+
+        self.assertIn("GTiff", text)
+        self.assertIn("ECW", text)
+        self.assertIn("Nota sulle ECW", text,
+                      "manca l'avviso su ECW proprio quando il driver e' assente")
+        self.assertIn("numpy 1.26.0", text)
+        self.assertIn("Pillow 10.0.0", text)
+
+    def test_instructions_format_with_gdal_present(self):
+        """Anche le istruzioni hanno rami che i test devono attraversare."""
+        from geoworld import environment
+
+        report = environment.Report(
+            python=environment._python_info(),
+            gdal={"available": True, "version": "3.8.0",
+                  "driverGTiff": True, "driverVRT": True, "drivers": {}},
+            pyproj={"available": True, "version": "3.6", "projVersion": "9.3",
+                    "dataDirs": [], "projDataEnv": None, "projLibEnv": None,
+                    "userWritableDir": "/tmp", "networkEnabled": False},
+            imaging={"numpy": "1.26.0"},
+            grids={}, vertical={})
+
+        text = environment._install_instructions(report)
+        self.assertIn("Pillow", text,
+                      "mancando Pillow le istruzioni devono dirlo anche quando "
+                      "GDAL e pyproj ci sono")
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)

@@ -70,9 +70,17 @@ cmake --build build
 ./build/geoimagery_tests     # 44 test  -- drappeggio, formato immagine
 
 ./Plugins/GeoWorld/Tools/CheckSourceDiscipline.sh
+python3 Plugins/GeoWorld/Tools/CheckShadowedParameters.py
+python3 Plugins/GeoWorld/Tools/CheckModuleExports.py
+python3 Plugins/GeoWorld/Tools/CheckUnityCollisions.py
 ```
 
-164 test C++ in totale, piu' 70 test Python della pipeline.
+I quattro controlli statici esistono perche' qui non c'e' Unreal: intercettano
+in locale le quattro classi di errore di compilazione gia' incontrate su
+Windows (shadowing, simboli non esportati fra moduli, tipi di comando console
+inesistenti, collisioni da build unity).
+
+164 test C++ in totale, piu' 72 test Python della pipeline.
 
 ## Pipeline dati
 

@@ -48,13 +48,45 @@ namespace GeoWorld::Tiles
 			return X < Other.X;
 		}
 
+		/**
+		 * Impacchetta la chiave in un intero a 64 bit, per usarla come chiave di
+		 * una TMap di Unreal (che non sa hashare una FTileKey da sola).
+		 *
+		 * PERCHE' STA QUI E NON NEI SINGOLI .CPP. Perche' c'era in cinque file
+		 * diversi, ognuno con la propria copia in un namespace anonimo, e questo
+		 * ha prodotto un errore di compilazione che qui non si poteva vedere:
+		 * Unreal usa le UNITY BUILD, cioe' incolla piu' .cpp dello stesso modulo
+		 * in una sola unita' di traduzione. Due namespace anonimi di file
+		 * diversi diventano allora LO STESSO namespace, e due funzioni omonime
+		 * si scontrano. Una definizione sola elimina il problema alla radice.
+		 *
+		 * NON E' INVERTIBILE, ed e' importante ricordarlo: uno XOR perde
+		 * informazione. Chi ha bisogno di risalire alla tile deve conservare la
+		 * FTileKey intera -- dimenticarlo e' gia' costato due bug, uno nella
+		 * rimozione delle mesh e uno nella diagnostica.
+		 *
+		 * L'impacchettamento e' iniettivo fino al livello 20 (il massimo
+		 * supportato): li' X sta in 21 bit, Y in 20, e i campi non si
+		 * sovrappongono.
+		 */
+		uint64_t Pack() const
+		{
+			return (static_cast<uint64_t>(Level) << 58)
+			     ^ (static_cast<uint64_t>(Y) << 29)
+			     ^ static_cast<uint64_t>(X);
+		}
+
+		/** Impacchetta solo X e Y: per le mappe di un singolo livello. */
+		static uint64_t PackXY(uint32_t InX, uint32_t InY)
+		{
+			return (static_cast<uint64_t>(InY) << 32) | static_cast<uint64_t>(InX);
+		}
+
 		uint64_t ToHash() const
 		{
 			// Mescolamento a 64 bit (splitmix). Le chiavi consecutive differiscono
 			// di 1 in X: senza mescolare, finirebbero tutte nello stesso bucket.
-			uint64_t Value = (static_cast<uint64_t>(Level) << 58)
-			               ^ (static_cast<uint64_t>(Y) << 29)
-			               ^ static_cast<uint64_t>(X);
+			uint64_t Value = Pack();
 			Value ^= Value >> 30; Value *= 0xbf58476d1ce4e5b9ULL;
 			Value ^= Value >> 27; Value *= 0x94d049bb133111ebULL;
 			Value ^= Value >> 31;

@@ -21,7 +21,7 @@ compilata con Unreal Engine. L'ambiente in cui e' stato scritto e' Linux senza
 il motore. Quello che **e'** stato verificato:
 
 * tutta la matematica pura, con test numerici eseguiti: **164 test C++** in
-  totale (37 Fase 1 + 23 Fase 3 + 37 Fase 4 + 28 Fase 5 + 44 Fase 6), piu' 70
+  totale (37 Fase 1 + 23 Fase 3 + 37 Fase 4 + 28 Fase 5 + 44 Fase 6), piu' 72
   test Python;
 * le convenzioni UE controllate staticamente (bilanciamento parentesi,
   posizione dei `.generated.h`, guardie `WITH_EDITOR`, macro di export);
@@ -36,6 +36,7 @@ gia' incontrati e corretti, per riconoscerli se tornano:
 | errore su un parametro chiamato come un membro | Unreal tratta lo shadowing come ERRORE. Convenzione: prefisso `In` (`bInEnabled`). Lo intercetta `Tools/CheckShadowedParameters.py` |
 | errori di `std::max`, `std::numeric_limits` | include della standard library che gcc tira dentro da solo e MSVC no |
 | `ModuleNotFoundError: No module named 'PIL'` lanciando un comando Python | manca Pillow, che serve solo alle ortofoto: `conda install -c conda-forge pillow`. `check-env` lo dice, e ora **parte anche senza** |
+| `C2084: function 'X' already has a body` su una funzione in un namespace anonimo | **build unity**: Unreal incolla piu' .cpp dello stesso modulo in una sola unita' di traduzione, e due namespace anonimi diventano lo stesso namespace. Non rinominare: metti la funzione in un header condiviso. Lo intercetta `Tools/CheckUnityCollisions.py` |
 | `missing type specifier` su una riga `static FAutoConsoleCommand...` | il tipo non esiste. **`FAutoConsoleCommandWithArgs` NON esiste**: i validi sono `FAutoConsoleCommand` (che accetta anche un delegato con argomenti), `...WithWorld`, `...WithWorldAndArgs`, `...WithOutputDevice`, `...WithArgsAndOutputDevice`, `...WithWorldArgsAndOutputDevice`. Lo intercetta la regola 5 di `CheckSourceDiscipline.sh` |
 | `unresolved external symbol` su una funzione dello strato puro | in Unreal ogni modulo e' una DLL: un simbolo definito in un `.cpp` non e' visibile fuori se non esportato. **Lo strato puro e' header-only**, appunto per non doverlo esportare. Lo intercetta `Tools/CheckModuleExports.py` |
 
@@ -296,7 +297,10 @@ Plugins/GeoWorld/Source/
   GeoWorldEditor/ strumenti di editor                           [vuoto]
 
   Tools/StandaloneTests/   test C++ senza Unreal (CMake)
-  Tools/CheckSourceDiscipline.sh
+  Tools/CheckSourceDiscipline.sh     5 regole di disciplina
+  Tools/CheckShadowedParameters.py   parametri che nascondono membri
+  Tools/CheckModuleExports.py        simboli invisibili fra moduli (DLL)
+  Tools/CheckUnityCollisions.py      nomi che la build unity farebbe scontrare
 
 Pipeline/         pipeline dati Python + GDAL                   [Fase 2]
   geoworld/       tiling, tileformat, geoid, raster, tilecut, fetch, cli

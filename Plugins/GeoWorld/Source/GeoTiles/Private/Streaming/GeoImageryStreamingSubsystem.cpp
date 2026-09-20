@@ -9,16 +9,6 @@
 #include "Misc/FileHelper.h"
 #include "Modules/ModuleManager.h"
 
-namespace
-{
-	FORCEINLINE uint64 PackKey(const GeoWorld::Tiles::FTileKey& Key)
-	{
-		return (static_cast<uint64>(Key.Level) << 58)
-		     ^ (static_cast<uint64>(Key.Y) << 29)
-		     ^ static_cast<uint64>(Key.X);
-	}
-}
-
 /**
  * Il lavoro che gira sul thread di caricamento.
  *
@@ -210,7 +200,7 @@ void UGeoImageryStreamingSubsystem::Tick(float DeltaTime)
 	FLoadResult Result;
 	while (CompletedLoads.Dequeue(Result))
 	{
-		InFlight.Remove(PackKey(Result.Key));
+		InFlight.Remove(Result.Key.Pack());
 
 		if (!Result.Error.IsEmpty() || !Result.Tile.IsValid())
 		{
@@ -268,7 +258,7 @@ EGeoTileState UGeoImageryStreamingSubsystem::RequestTile(const FTileKey& Key, in
 	if (Cache.Peek(Key)) { return EGeoTileState::Pronta; }
 	if (!Dataset.TileExists(Key)) { return EGeoTileState::Assente; }
 
-	const uint64 Packed = PackKey(Key);
+	const uint64 Packed = Key.Pack();
 	if (InFlight.Contains(Packed)) { return EGeoTileState::InCaricamento; }
 	if (!Pool.IsRunning()) { return EGeoTileState::Errore; }
 
@@ -281,7 +271,7 @@ EGeoTileState UGeoImageryStreamingSubsystem::RequestTile(const FTileKey& Key, in
 EGeoTileState UGeoImageryStreamingSubsystem::GetTileState(const FTileKey& Key) const
 {
 	if (Cache.Peek(Key)) { return EGeoTileState::Pronta; }
-	if (InFlight.Contains(PackKey(Key))) { return EGeoTileState::InCaricamento; }
+	if (InFlight.Contains(Key.Pack())) { return EGeoTileState::InCaricamento; }
 	if (!Dataset.TileExists(Key)) { return EGeoTileState::Assente; }
 	return EGeoTileState::NonCaricata;
 }

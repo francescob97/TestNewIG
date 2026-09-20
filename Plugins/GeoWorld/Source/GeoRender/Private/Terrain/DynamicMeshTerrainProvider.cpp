@@ -99,7 +99,7 @@ bool FDynamicMeshTerrainProvider::CreateOrUpdateTile(
 	AActor* Actor = Container.Get();
 	if (!Actor || !MeshData.IsValid()) { return false; }
 
-	const uint64 Packed = PackKey(Key);
+	const uint64 Packed = Key.Pack();
 	FTileEntry& Entry = Tiles.FindOrAdd(Packed);
 	Entry.Origin = MeshData.Origin;
 	Entry.Key = Key;
@@ -184,7 +184,7 @@ bool FDynamicMeshTerrainProvider::CreateOrUpdateTile(
 void FDynamicMeshTerrainProvider::RemoveTile(const Tiles::FTileKey& Key)
 {
 	FTileEntry Entry;
-	if (Tiles.RemoveAndCopyValue(PackKey(Key), Entry))
+	if (Tiles.RemoveAndCopyValue(Key.Pack(), Entry))
 	{
 		if (UDynamicMeshComponent* Component = Entry.Component.Get())
 		{
@@ -298,7 +298,7 @@ void FDynamicMeshTerrainProvider::SetTileDrape(const Tiles::FTileKey& Key,
                                                UTexture2D* Texture,
                                                const GeoWorld::Imagery::FDrapeTransform& Drape)
 {
-	FTileEntry* Entry = Tiles.Find(PackKey(Key));
+	FTileEntry* Entry = Tiles.Find(Key.Pack());
 	if (!Entry) { return; }
 
 	UDynamicMeshComponent* Component = Entry->Component.Get();

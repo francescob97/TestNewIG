@@ -235,9 +235,14 @@ def format_report(report: Report) -> str:
         if drivers:
             lines.append("    formati leggibili:")
             for name, description in INTERESTING_DRIVERS.items():
+                # NON chiamare questa variabile "mark": nella stessa funzione
+                # c'e' gia' la lambda mark(), e riassegnarla qui la distrugge
+                # per tutto il resto del report. E' successo davvero, e il
+                # sintomo era un "'str' object is not callable" trenta righe
+                # piu' sotto, in un blocco che non c'entrava niente.
                 present = drivers.get(name, False)
-                mark = "si" if present else "NO"
-                lines.append(f"      [{mark:>2}] {name:<12} {description}")
+                flag = "si" if present else "NO"
+                lines.append(f"      [{flag:>2}] {name:<12} {description}")
             if not drivers.get("ECW", False):
                 lines.append("")
                 lines.append("    Nota sulle ECW: il driver manca, come nella quasi totalita'")

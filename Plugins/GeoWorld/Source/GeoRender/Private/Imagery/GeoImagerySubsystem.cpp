@@ -16,13 +16,6 @@ using GeoWorld::Tiles::FTileKey;
 
 namespace
 {
-	FORCEINLINE uint64 PackKey(const FTileKey& Key)
-	{
-		return (static_cast<uint64>(Key.Level) << 58)
-		     ^ (static_cast<uint64>(Key.Y) << 29)
-		     ^ static_cast<uint64>(Key.X);
-	}
-
 	/** Byte occupati in memoria video da una texture 256x256 BGRA senza mipmap. */
 	constexpr double TextureBytes =
 		static_cast<double>(Tiles::TilePixels) * Tiles::TilePixels * 4.0;
@@ -191,7 +184,7 @@ void UGeoImagerySubsystem::SynchroniseWithTerrain()
 			continue;
 		}
 
-		StillUsed.Add(PackKey(Drape.ImageKey));
+		StillUsed.Add(Drape.ImageKey.Pack());
 
 		UTexture2D* Texture = bCheckerboard
 			? GetCheckerboardTexture()
@@ -230,7 +223,7 @@ void UGeoImagerySubsystem::SynchroniseWithTerrain()
 
 UTexture2D* UGeoImagerySubsystem::GetOrCreateTexture(const FTileKey& ImageKey, int32& InOutBudget)
 {
-	const uint64 Packed = PackKey(ImageKey);
+	const uint64 Packed = ImageKey.Pack();
 
 	if (const TStrongObjectPtr<UTexture2D>* Found = Textures.Find(Packed))
 	{

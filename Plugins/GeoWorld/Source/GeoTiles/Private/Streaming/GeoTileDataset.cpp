@@ -10,15 +10,6 @@
 
 using namespace GeoWorld::Tiles;
 
-namespace
-{
-	/** Chiave compatta per la TMap dell'indice. */
-	FORCEINLINE uint64 PackXY(uint32 X, uint32 Y)
-	{
-		return (static_cast<uint64>(Y) << 32) | static_cast<uint64>(X);
-	}
-}
-
 bool FGeoTileDataset::Open(const FString& InRootDirectory, FString& OutError)
 {
 	*this = FGeoTileDataset();
@@ -164,7 +155,7 @@ bool FGeoTileDataset::EnsureLevelIndex(int32 Level, FString& OutError)
 	Info->Tiles.Empty(Entries.size());
 	for (const FTileIndexEntry& Entry : Entries)
 	{
-		Info->Tiles.Add(PackXY(Entry.X, Entry.Y), TPair<float, float>(Entry.MinHeight, Entry.MaxHeight));
+		Info->Tiles.Add(GeoWorld::Tiles::FTileKey::PackXY(Entry.X, Entry.Y), TPair<float, float>(Entry.MinHeight, Entry.MaxHeight));
 	}
 	Info->bIndexLoaded = true;
 
@@ -176,7 +167,7 @@ bool FGeoTileDataset::EnsureLevelIndex(int32 Level, FString& OutError)
 bool FGeoTileDataset::TileExists(const FTileKey& Key) const
 {
 	const FLevelInfo* Info = FindLevel(static_cast<int32>(Key.Level));
-	return Info && Info->bIndexLoaded && Info->Tiles.Contains(PackXY(Key.X, Key.Y));
+	return Info && Info->bIndexLoaded && Info->Tiles.Contains(GeoWorld::Tiles::FTileKey::PackXY(Key.X, Key.Y));
 }
 
 bool FGeoTileDataset::GetTileHeightRange(const FTileKey& Key, float& OutMin, float& OutMax) const
@@ -184,7 +175,7 @@ bool FGeoTileDataset::GetTileHeightRange(const FTileKey& Key, float& OutMin, flo
 	const FLevelInfo* Info = FindLevel(static_cast<int32>(Key.Level));
 	if (!Info || !Info->bIndexLoaded) { return false; }
 
-	if (const TPair<float, float>* Range = Info->Tiles.Find(PackXY(Key.X, Key.Y)))
+	if (const TPair<float, float>* Range = Info->Tiles.Find(GeoWorld::Tiles::FTileKey::PackXY(Key.X, Key.Y)))
 	{
 		OutMin = Range->Key;
 		OutMax = Range->Value;

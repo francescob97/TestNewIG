@@ -40,7 +40,7 @@ cd Pipeline
 python -m unittest discover -s tests
 ```
 
-Attesi **70 test** (erano 41). I nuovi coprono il formato `.gim`, la riduzione
+Attesi **72 test** (erano 41). I nuovi coprono il formato `.gim`, la riduzione
 della piramide, il drappeggio, i quadrati MGRS e la struttura degli import.
 
 Senza Pillow ne saltano 14 invece di fallire: quelli che comprimono un JPEG. La
