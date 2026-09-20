@@ -7,8 +7,10 @@
 #include "GeoFlyPawn.h"
 #include "GeoMarkerActor.h"
 #include "Georeference/GeoTransformComponent.h"
+#include "Imagery/GeoImagerySubsystem.h"
 #include "Lod/GeoQuadtreeSubsystem.h"
 #include "Terrain/GeoTerrainSubsystem.h"
+#include "Streaming/GeoImageryStreamingSubsystem.h"
 #include "Streaming/GeoTileStreamingSubsystem.h"
 #include "Georeference/GeoreferenceSubsystem.h"
 #include "Georeference/GeoPlaces.h"
@@ -634,6 +636,217 @@ static FAutoConsoleCommandWithWorldAndArgs GeoTerrainBoxesCommand(
 			TEXT("  (linee di debug: non passano per il materiale e non vengono nebbiate."), FColor::White);
 		GeoTerrainConsole::Report(
 			TEXT("   Se vedi le scatole ma non il terreno, la geometria e' al posto giusto)"), FColor::White);
+	}));
+
+// =============================================================================
+//  ORTOFOTO (Fase 6)
+// =============================================================================
+namespace GeoImageryConsole
+{
+	static UGeoImagerySubsystem* Get(UWorld* World)
+	{
+		return World ? World->GetSubsystem<UGeoImagerySubsystem>() : nullptr;
+	}
+
+	static UGeoImageryStreamingSubsystem* GetStreaming(UWorld* World)
+	{
+		return World ? World->GetSubsystem<UGeoImageryStreamingSubsystem>() : nullptr;
+	}
+
+	template <typename SetterType, typename GetterType>
+	static void Toggle(const TArray<FString>& Args, UWorld* World, const TCHAR* Label,
+	                   SetterType Setter, GetterType Getter)
+	{
+		UGeoImagerySubsystem* Imagery = Get(World);
+		if (!Imagery) { return; }
+
+		const bool bWas = Getter(Imagery);
+		const bool bValue = (Args.Num() >= 1) ? (FCString::Atoi(*Args[0]) != 0) : !bWas;
+		Setter(Imagery, bValue);
+
+		if (bValue == bWas)
+		{
+			GeoTerrainConsole::Report(FString::Printf(
+				TEXT("%s: era GIA' %s, nessun cambiamento (per invertirlo: %s)"),
+				Label, bValue ? TEXT("ON") : TEXT("OFF"), bValue ? TEXT("0") : TEXT("1")),
+				FColor::Yellow);
+			return;
+		}
+		GeoTerrainConsole::Report(FString::Printf(TEXT("%s: %s (era %s)"), Label,
+			bValue ? TEXT("ON") : TEXT("OFF"), bWas ? TEXT("ON") : TEXT("OFF")));
+	}
+}
+
+static FAutoConsoleCommandWithWorldAndArgs GeoImageryOpenCommand(
+	TEXT("geo.Imagery.Open"),
+	TEXT("geo.Imagery.Open <cartella> - apre un dataset di ortofoto."),
+	FConsoleCommandWithWorldAndArgsDelegate::CreateStatic(
+		[](const TArray<FString>& Args, UWorld* World)
+	{
+		UGeoImageryStreamingSubsystem* Streaming = GeoImageryConsole::GetStreaming(World);
+		if (!Streaming) { return; }
+
+		if (Args.Num() < 1)
+		{
+			GeoTerrainConsole::Report(TEXT("Uso: geo.Imagery.Open <cartella del dataset>"), FColor::Red);
+			return;
+		}
+
+		FString Error;
+		if (!Streaming->OpenDataset(Args[0], Error))
+		{
+			GeoTerrainConsole::Report(FString::Printf(TEXT("Errore: %s"), *Error), FColor::Red);
+			return;
+		}
+
+		const FGeoImageryDataset& Dataset = Streaming->GetDataset();
+		double West, South, East, North;
+		Dataset.GetBoundingBox(West, South, East, North);
+
+		GeoTerrainConsole::Report(FString::Printf(
+			TEXT("Ortofoto '%s': livelli %d..%d, %lld tile indicizzate"),
+			*Dataset.GetDatasetName(), Dataset.GetMinLevel(), Dataset.GetMaxLevel(),
+			static_cast<long long>(Dataset.GetIndexedTileCount())));
+		GeoTerrainConsole::Report(FString::Printf(
+			TEXT("Area: ovest %.4f  sud %.4f  est %.4f  nord %.4f"), West, South, East, North));
+	}));
+
+static FAutoConsoleCommandWithWorldAndArgs GeoImageryEnableCommand(
+	TEXT("geo.Imagery.Enable"),
+	TEXT("geo.Imagery.Enable <0|1> - veste il terreno con le ortofoto."),
+	FConsoleCommandWithWorldAndArgsDelegate::CreateStatic(
+		[](const TArray<FString>& Args, UWorld* World)
+	{
+		GeoImageryConsole::Toggle(Args, World, TEXT("Drappeggio"),
+			[](UGeoImagerySubsystem* I, bool b) { I->SetEnabled(b); },
+			[](UGeoImagerySubsystem* I) { return I->IsEnabled(); });
+	}));
+
+static FAutoConsoleCommandWithWorldAndArgs GeoImageryCheckerCommand(
+	TEXT("geo.Imagery.Checker"),
+	TEXT("geo.Imagery.Checker <0|1> - scacchiera al posto delle foto: mostra le UV."),
+	FConsoleCommandWithWorldAndArgsDelegate::CreateStatic(
+		[](const TArray<FString>& Args, UWorld* World)
+	{
+		GeoImageryConsole::Toggle(Args, World, TEXT("Scacchiera"),
+			[](UGeoImagerySubsystem* I, bool b) { I->SetCheckerboard(b); },
+			[](UGeoImagerySubsystem* I) { return I->IsCheckerboard(); });
+		GeoTerrainConsole::Report(
+			TEXT("  (il bordo rosso di ogni tile deve combaciare con quello della vicina:"), FColor::White);
+		GeoTerrainConsole::Report(
+			TEXT("   se si vede doppio o sfalsato, il problema e' nelle UV)"), FColor::White);
+	}));
+
+static FAutoConsoleCommandWithWorldAndArgs GeoImageryDebugCommand(
+	TEXT("geo.Imagery.Debug"),
+	TEXT("geo.Imagery.Debug <0|1> - overlay con le statistiche del drappeggio."),
+	FConsoleCommandWithWorldAndArgsDelegate::CreateStatic(
+		[](const TArray<FString>& Args, UWorld* World)
+	{
+		GeoImageryConsole::Toggle(Args, World, TEXT("Overlay ortofoto"),
+			[](UGeoImagerySubsystem* I, bool b) { I->SetDebugOverlayEnabled(b); },
+			[](UGeoImagerySubsystem* I) { return I->IsDebugOverlayEnabled(); });
+	}));
+
+static FAutoConsoleCommandWithWorldAndArgs GeoImageryBudgetCommand(
+	TEXT("geo.Imagery.Budget"),
+	TEXT("geo.Imagery.Budget <N> - texture create per frame (default 4)."),
+	FConsoleCommandWithWorldAndArgsDelegate::CreateStatic(
+		[](const TArray<FString>& Args, UWorld* World)
+	{
+		UGeoImagerySubsystem* Imagery = GeoImageryConsole::Get(World);
+		if (!Imagery) { return; }
+		if (Args.Num() >= 1) { Imagery->SetMaxTexturesPerFrame(FCString::Atoi(*Args[0])); }
+		GeoTerrainConsole::Report(FString::Printf(
+			TEXT("Budget: %d texture per frame"), Imagery->GetMaxTexturesPerFrame()));
+	}));
+
+static FAutoConsoleCommandWithWorld GeoImageryStatsCommand(
+	TEXT("geo.Imagery.Stats"),
+	TEXT("Statistiche del drappeggio e dello streaming delle ortofoto."),
+	FConsoleCommandWithWorldDelegate::CreateStatic([](UWorld* World)
+	{
+		UGeoImagerySubsystem* Imagery = GeoImageryConsole::Get(World);
+		UGeoImageryStreamingSubsystem* Streaming = GeoImageryConsole::GetStreaming(World);
+		if (!Imagery || !Streaming) { return; }
+
+		const FGeoImageryStats Stats = Imagery->GetStats();
+		const FGeoImageryStreamingStats StreamStats = Streaming->GetStats();
+
+		GeoTerrainConsole::Report(TEXT("--- Ortofoto ---"));
+		GeoTerrainConsole::Report(FString::Printf(
+			TEXT("Tile vestite : %d   senza immagine %d   con immagine grossolana %d"),
+			Stats.TileVestite, Stats.TileSenzaImmagine, Stats.TileConImmagineGrossolana));
+		GeoTerrainConsole::Report(FString::Printf(
+			TEXT("Livelli usati: %d..%d"), Stats.LivelloImmagineMin, Stats.LivelloImmagineMax));
+		GeoTerrainConsole::Report(FString::Printf(
+			TEXT("Texture      : %d in memoria video (%.1f MB)"),
+			Stats.TextureInMemoria, Stats.MemoriaTextureMB));
+		GeoTerrainConsole::Report(FString::Printf(
+			TEXT("Cache        : %d tile, %.1f/%.0f MB, hit rate %.0f%%"),
+			StreamStats.TileResidenti, StreamStats.MemoriaMB, StreamStats.BudgetMB,
+			StreamStats.HitRate * 100.0f));   // non-unita: frazione -> percentuale
+		GeoTerrainConsole::Report(FString::Printf(
+			TEXT("Per tile     : lettura %.2f ms, decodifica %.2f ms   (errori: %d)"),
+			StreamStats.TempoMedioCaricamentoMs, StreamStats.TempoMedioDecodificaMs,
+			StreamStats.ErroriDiCaricamento));
+	}));
+
+// --- geo.Imagery.Demo -------------------------------------------------------
+static FAutoConsoleCommandWithWorldAndArgs GeoImageryDemoCommand(
+	TEXT("geo.Imagery.Demo"),
+	TEXT("geo.Imagery.Demo <cartella_terreno> <cartella_ortofoto> - apre tutto e accende."),
+	FConsoleCommandWithWorldAndArgsDelegate::CreateStatic(
+		[](const TArray<FString>& Args, UWorld* World)
+	{
+		UGeoTerrainSubsystem* Terrain = GeoTerrainConsole::Get(World);
+		UGeoImagerySubsystem* Imagery = GeoImageryConsole::Get(World);
+		UGeoImageryStreamingSubsystem* ImageStreaming = GeoImageryConsole::GetStreaming(World);
+		UGeoTileStreamingSubsystem* Heights = World ? World->GetSubsystem<UGeoTileStreamingSubsystem>() : nullptr;
+		UGeoQuadtreeSubsystem* Quadtree = World ? World->GetSubsystem<UGeoQuadtreeSubsystem>() : nullptr;
+		UGeoreferenceSubsystem* Georeference = World ? World->GetSubsystem<UGeoreferenceSubsystem>() : nullptr;
+		if (!Terrain || !Imagery || !ImageStreaming || !Heights || !Quadtree || !Georeference) { return; }
+
+		if (Args.Num() < 2)
+		{
+			GeoTerrainConsole::Report(
+				TEXT("Uso: geo.Imagery.Demo <cartella del terreno> <cartella delle ortofoto>"), FColor::Red);
+			return;
+		}
+
+		FString Error;
+		if (!Heights->OpenDataset(Args[0], Error))
+		{
+			GeoTerrainConsole::Report(FString::Printf(TEXT("Terreno: %s"), *Error), FColor::Red);
+			return;
+		}
+		if (!ImageStreaming->OpenDataset(Args[1], Error))
+		{
+			GeoTerrainConsole::Report(FString::Printf(TEXT("Ortofoto: %s"), *Error), FColor::Red);
+			return;
+		}
+
+		const FGeoTileDataset& TerrainDataset = Heights->GetDataset();
+		double West, South, East, North;
+		TerrainDataset.GetBoundingBox(West, South, East, North);
+
+		Georeference->TeleportViewTo(GeoWorld::Core::FGeodetic::FromDegrees(
+			(South + North) * 0.5, (West + East) * 0.5, 6000.0));
+
+		Quadtree->SetEnabled(true);
+		Terrain->SetEnabled(true);
+		// Qui il wireframe si SPEGNE, al contrario di geo.Terrain.Demo: con
+		// un'ortofoto addosso il terreno non si confonde piu' con il cielo, e il
+		// reticolo coprirebbe proprio quello che si e' venuti a vedere.
+		Terrain->SetWireframe(false);
+		Imagery->SetEnabled(true);
+		Imagery->SetDebugOverlayEnabled(true);
+
+		GeoTerrainConsole::Report(FString::Printf(
+			TEXT("Terreno '%s' vestito con '%s'. Quota 6 km."),
+			*TerrainDataset.GetDatasetName(), *ImageStreaming->GetDataset().GetDatasetName()));
+		GeoTerrainConsole::Report(TEXT("Per vedere le UV: geo.Imagery.Checker 1"));
+		GeoTerrainConsole::Report(TEXT("Se resta grigio: serve il materiale, geo.Imagery.CreateMaterial"));
 	}));
 
 // --- geo.Terrain.Diag -------------------------------------------------------

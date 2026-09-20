@@ -106,6 +106,17 @@ public:
 	void SetDrawBounds(bool bInDraw) { bDrawBounds = bInDraw; }
 	bool IsDrawBounds() const { return bDrawBounds; }
 
+	/** Le tile che hanno geometria adesso. Serve al drappeggio della Fase 6. */
+	void GetBuiltTileKeys(TArray<GeoWorld::Tiles::FTileKey>& Out) const
+	{
+		Out.Reset();
+		Out.Reserve(BuiltTiles.Num());
+		for (const TPair<uint64, FBuiltTile>& Pair : BuiltTiles) { Out.Add(Pair.Value.Key); }
+	}
+
+	/** Il provider, per chi deve vestire le tile. Puo' essere nullo. */
+	IGeoTerrainMeshProvider* GetProvider() const { return Provider.Get(); }
+
 	/** Diagnosi delle prime MaxEntries tile, lette dal provider (geo.Terrain.Diag). */
 	void GetTileDiagnostics(TArray<FGeoTerrainTileDiagnostic>& Out, int32 MaxEntries) const
 	{

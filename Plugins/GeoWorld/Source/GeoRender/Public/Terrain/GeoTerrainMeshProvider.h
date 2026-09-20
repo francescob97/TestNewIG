@@ -7,8 +7,11 @@
 #include "CoreMinimal.h"
 
 #include "Georeference/GeoreferenceSnapshot.h"
+#include "Imagery/ImageryMapping.h"
 #include "Mesh/TileMesh.h"
 #include "Tiles/TileKey.h"
+
+class UTexture2D;
 
 /**
  * =============================================================================
@@ -90,6 +93,31 @@ public:
 
 	/** Ricalcola le trasformazioni dopo un rebase. Nessun vertice viene toccato. */
 	virtual void RefreshTransforms(const FGeoreferenceSnapshot& Snapshot) = 0;
+
+	/**
+	 * Veste una tile con un pezzo di ortofoto.
+	 *
+	 * PERCHE' L'OFFSET E LA SCALA PASSANO DI QUI E NON FINISCONO NELLA MESH.
+	 * La prima idea era scrivere le UV ritagliate direttamente nei vertici,
+	 * cosi' da tenere il materiale banale. E' sbagliata: quando arriva
+	 * un'immagine di livello piu' fine il ritaglio cambia, e con le UV nei
+	 * vertici bisognerebbe riscrivere 17.157 coordinate di texture per ogni
+	 * tile che si affina -- proprio mentre ci si sta muovendo, cioe' nel
+	 * momento peggiore.
+	 *
+	 * Con un parametro vettoriale del materiale la stessa cosa costa
+	 * l'assegnazione di quattro float, e la mesh non viene toccata mai. Il
+	 * prezzo e' un nodo in piu' nel materiale.
+	 *
+	 * Passare `nullptr` come texture toglie il drappeggio e riporta la tile al
+	 * materiale grigio.
+	 */
+	virtual void SetTileDrape(const GeoWorld::Tiles::FTileKey& Key,
+	                          UTexture2D* Texture,
+	                          const GeoWorld::Imagery::FDrapeTransform& Drape) = 0;
+
+	/** Quante tile hanno davvero una texture addosso. */
+	virtual int32 GetDrapedTileCount() const = 0;
 
 	virtual int32 GetTileCount() const = 0;
 	virtual void SetWireframe(bool bInWireframe) = 0;

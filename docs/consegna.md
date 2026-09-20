@@ -1,7 +1,7 @@
 # GeoWorld — documento di consegna
 
 Tutto quello che serve per riprendere il lavoro da solo.
-Ultimo aggiornamento: 2026-09-19. Branch: `claude/charming-goodall-xd2r3g`.
+Ultimo aggiornamento: 2026-09-20. Branch: `claude/charming-goodall-xd2r3g`.
 
 ---
 
@@ -14,14 +14,15 @@ Ultimo aggiornamento: 2026-09-19. Branch: `claude/charming-goodall-xd2r3g`.
 | 3 | Loader asincrono, cache LRU, lettura dataset | **codice completo, mai compilato in UE** |
 | 4 | Quadtree, selezione LOD, culling | **codice completo, mai compilato in UE** |
 | 5 | Mesh, gonne, terreno a schermo | **codice completo, mai compilato in UE** |
-| 6 | Imagery drappeggiata | da fare |
+| 6 | Ortofoto drappeggiate | **codice completo, mai compilato in UE** |
 
 **Avvertenza sul C++:** nessuna riga di C++ di questo progetto e' mai stata
 compilata con Unreal Engine. L'ambiente in cui e' stato scritto e' Linux senza
 il motore. Quello che **e'** stato verificato:
 
-* tutta la matematica pura, con test numerici eseguiti: **125 test C++** in
-  totale (37 Fase 1 + 23 Fase 3 + 37 Fase 4 + 28 Fase 5), piu' 41 test Python;
+* tutta la matematica pura, con test numerici eseguiti: **164 test C++** in
+  totale (37 Fase 1 + 23 Fase 3 + 37 Fase 4 + 28 Fase 5 + 44 Fase 6), piu' 63
+  test Python;
 * le convenzioni UE controllate staticamente (bilanciamento parentesi,
   posizione dei `.generated.h`, guardie `WITH_EDITOR`, macro di export);
 * il formato dei file, letto dal codice C++ vero contro un dataset vero.
@@ -69,6 +70,7 @@ build\Debug\geocore_tests.exe                       :: 37 test
 build\Debug\geotiles_tests.exe dataset\test         :: 23 test
 build\Debug\geoquadtree_tests.exe                   :: 37 test
 build\Debug\geomesh_tests.exe                       :: 28 test
+build\Debug\geoimagery_tests.exe                    :: 44 test
 Plugins\GeoWorld\Tools\CheckSourceDiscipline.sh      :: serve bash (Git Bash)
 ```
 
@@ -113,6 +115,14 @@ geo.Terrain.Skirt <0|1>        gonne ai bordi: spegnile per VEDERE le crepe
 geo.Terrain.FlipWinding <0|1>  se il terreno e' invisibile dall'alto, e' questo
 geo.Terrain.Budget <N>         tile costruite per frame (default 4)
 geo.Terrain.Stats              tile in scena, triangoli, tempo di costruzione
+
+geo.Imagery.Demo <q> <o>       terreno vestito con le ortofoto, in un colpo
+geo.Imagery.Open <cartella>    apre un dataset di ortofoto
+geo.Imagery.Enable <0|1>       drappeggio
+geo.Imagery.Checker <0|1>      scacchiera: e' cosi' che si verificano le UV
+geo.Imagery.Budget <N>         texture create per frame
+geo.Imagery.Stats              statistiche del drappeggio
+geo.Imagery.CreateMaterial     costruisce M_GeoTerrain (solo editor)
 ```
 
 Se hai un dataset e vuoi vedere subito qualcosa, il comando e'
@@ -275,7 +285,9 @@ Plugins/GeoWorld/Source/
     Public/Tiles/     C++ PURO: TileKey, TilingScheme, TileFormat, TileCache
     Public/Streaming/     FGeoTileDataset, UGeoTileStreamingSubsystem
     TestData/         vettori di riferimento generati da Python
-  GeoRender/      quadtree, LOD, mesh, terreno                  [Fasi 4-5]
+  GeoRender/      quadtree, LOD, mesh, terreno, ortofoto        [Fasi 4-6]
+    Public/Imagery/   C++ PURO: ImageryMapping.h, il ritaglio delle UV
+                      + UGeoImagerySubsystem, che veste le tile
     Public/Quadtree/  C++ PURO: bounding volume, frustum, orizzonte, selezione
     Public/Mesh/      C++ PURO: TileMesh.h, da 129x129 quote a vertici e gonne
     Public/Lod/       UGeoQuadtreeSubsystem, overlay e disegno della selezione
@@ -317,46 +329,40 @@ essendo mai state compilate nel motore. `CheckSourceDiscipline.sh` lo impone.
 
 ---
 
-## 7. Come continuare: Fase 6 (imagery drappeggiata)
+## 7. Come continuare: oltre le sei fasi
 
-Quello che c'e' gia' e che serve:
+Le sei fasi del programma iniziale sono fatte. Quello che segue e' l'elenco
+onesto di cio' che manca, in ordine di quanto si fa sentire.
 
-* le **UV** della mesh sono gia' generate e coprono esattamente `[0,1]` sulla
-  tile (`Mesh/TileMesh.h`). Una texture per tile si applica senza toccare la
-  geometria;
-* `IGeoTerrainMeshProvider::CreateOrUpdateTile()` riceve gia' la tile e la sua
-  trasformazione: e' il punto dove assegnare il materiale con la texture;
-* la pipeline della Fase 2 sa gia' tagliare una piramide di tile allineata a
-  questo tiling: l'imagery usa lo stesso schema, cambia il payload (RGB
-  compresso invece di float32);
-* `docs/dati.md` elenca le sorgenti raggiungibili. La piu' pratica e'
-  **Sentinel-2** dal bucket pubblico `sentinel-cogs` su AWS: COG, nessuna
-  registrazione, 10 m di risoluzione.
+**1. La issue #1 sul jitter.** E' l'unica cosa aperta che riguarda la
+correttezza e non la resa. Finche' non e' chiusa non si possono giudicare le
+finiture visive. Serve l'output di `geo.Diag`.
 
-Le decisioni da prendere, con la mia opinione:
+**2. Mipmap sulle ortofoto.** Senza, a viste radenti il terreno sfarfalla. La
+soluzione e' scriverli nel file (il formato ha gia' il byte del tipo di payload
+e si presta) e caricarli tutti in `UTexture2D::CreateTransient`, che accetta un
+numero di mip.
 
-1. **Piramide separata o stessa tile?** Separata. L'imagery ha una risoluzione
-   nativa diversa dalle quote (10 m Sentinel-2 contro 10 m TINITALY oggi, ma
-   domani 25 cm di ortofoto AGEA su quote a 30 m) e legarle costringerebbe a
-   ridimensionare una delle due per sempre. Due dataset indipendenti, ognuno con
-   il proprio livello massimo, e il terreno prende la texture del livello
-   disponibile piu' vicino.
-2. **Formato del payload.** Non float32: DXT/BC1 compresso in fase di pipeline.
-   Una texture 256x256 BC1 sta in 32 KB contro i 196 KB di RGB grezzo, e la GPU
-   la consuma senza decomprimere.
-3. **Chi tiene la texture.** La cache della Fase 3 e' gia' generica sul byte
-   budget: serve una seconda istanza, non una seconda implementazione.
+**3. Un secondo provider di mesh.** Oggi ogni tile e' un
+`UDynamicMeshComponent` con la propria material instance: un draw call per
+tile. Con qualche centinaio di tile diventa il collo di bottiglia. Il rimedio e'
+un `FPrimitiveSceneProxy` custom con un atlante di texture, ed e' esattamente il
+motivo per cui esiste `IGeoTerrainMeshProvider`: si scrive una seconda
+implementazione e non si tocca nient'altro.
 
-La trappola che mi aspetto: **il livello dell'imagery non coincidera' con il
-livello del terreno.** Una tile di terreno al livello 12 puo' dover campionare
-una texture del livello 14. Le UV vanno quindi rimappate su un sottorettangolo
-della texture, non lasciate a `[0,1]`. Conviene prevederlo dal primo giorno:
-un `FVector4` di offset/scala nel materiale, non una texture per tile di
-terreno.
+**4. BC1 per le ortofoto.** Otto volte meno memoria video e nessuna
+decodifica. Serve un encoder nella pipeline, che ne' GDAL ne' Pillow forniscono.
+
+**5. Dissolvenza fra livelli di immagine.** Oggi il passaggio e' uno stacco
+netto.
+
+**6. I dati vettoriali del tuo database** (le `.shp` in SourceData). Strade,
+edifici, confini: sono la fase che il programma iniziale non aveva previsto e
+che cambierebbe di piu' l'aspetto del risultato.
 
 ---
 
-## 8. Cosa e' stato deciso in Fase 5, in breve
+## 8. Cosa e' stato deciso nelle Fasi 5 e 6, in breve
 
 Se riapri il codice fra sei mesi, questi sono i tre punti che sembrano
 arbitrari e non lo sono. Le motivazioni estese sono in `docs/fase5-design.md`.
@@ -377,6 +383,31 @@ arbitrari e non lo sono. Le motivazioni estese sono in `docs/fase5-design.md`.
   due tile costruite in frame locali diversi. Profondita' = passo del livello x
   111132 x 8, cioe' 152.6 m al livello 13, raddoppiando per livello.
 
+### Fase 6
+
+* **Due piramidi separate, un solo schema di tiling.** Separate perche'
+  risoluzione, cadenza di aggiornamento e payload non hanno niente in comune;
+  stesso tiling perche' cosi' la tile (L,X,Y) di terreno e quella di immagine
+  coprono lo stesso rettangolo, e nel caso normale il drappeggio non richiede
+  nessun calcolo.
+* **I pixel sono registrati sulle AREE, i post delle quote sui NODI.** 256x256
+  pixel coprono il rettangolo senza sovrapposizione. Duplicare una colonna sul
+  bordo, per analogia con i post, produrrebbe una striscia disegnata due volte
+  che sfarfalla. E 256 = 2 x 128 fa si' che l'immagine di livello L abbia la
+  risoluzione al suolo del terreno di livello L+1.
+* **Quando l'immagine giusta non c'e' si usa l'antenato**, con offset e scala in
+  aritmetica intera. Con d = 0 la formula degenera nel caso normale: non e' un
+  ramo separato. E si chiede sempre quella giusta, altrimenti resterebbe
+  grossolana per sempre.
+* **Offset e scala stanno in un parametro del MATERIALE, non nelle UV della
+  mesh.** Scriverli nei vertici obbligherebbe a riscrivere 17.157 coordinate
+  ogni volta che una tile si affina, cioe' proprio mentre ci si muove.
+* **La cache e' diventata un template** (`TTileCache<Payload>`) e il pool di
+  thread e' uscito dal subsystem (`FGeoLoaderPool`). Il pool si condivide, il
+  lavoro no: come si legge e si interpreta un file dipende dal payload, e una
+  classe base che provasse a condividerlo avrebbe un metodo virtuale per ogni
+  differenza.
+
 Limitazioni note, lasciate aperte di proposito:
 
 * la mesh si costruisce **sul game thread** con un budget di 4 tile per frame.
@@ -385,8 +416,10 @@ Limitazioni note, lasciate aperte di proposito:
 * le normali ai bordi usano differenze unilaterali: possibile cucitura di
   illuminazione, geometria comunque continua;
 * `bFlipWinding` ha un default scelto senza mai aver visto lo schermo. Se il
-  terreno e' invisibile dall'alto, `geo.Terrain.FlipWinding 1` e poi si cambia
-  il default in `FTileMeshParameters`.
+  terreno e' invisibile dall'alto, `geo.Terrain.FlipWinding 0` e poi si cambia
+  il default in `FTileMeshParameters`;
+* le ortofoto non hanno mipmap ne' trasparenza sulle tile parziali, e ogni tile
+  ha la propria texture e la propria material instance.
 
 ---
 
@@ -406,6 +439,7 @@ Limitazioni note, lasciate aperte di proposito:
 | Verifica Fase 4, con la demo visiva | `docs/fase4-verifica.md` |
 | Design e motivazioni Fase 5 | `docs/fase5-design.md` |
 | Verifica Fase 5, con la demo visiva | `docs/fase5-verifica.md` |
+| Verifica Fase 6, con la demo visiva | `docs/fase6-verifica.md` |
 | Design e motivazioni Fase 6 | `docs/fase6-design.md` |
 | Issue aperte | `docs/issues-aperte.md` |
 | Uso della pipeline, installazione Windows | `Pipeline/README.md` |
@@ -422,4 +456,6 @@ Numeri utili da tenere a mente:
 | Livello nativo DTED2 / Copernicus (30 m) | 13 |
 | Italia a livello 14 | ~4x10^5 tile, ~35 GB |
 | Una mesh di tile | 17.157 vertici, 33.792 triangoli, 0.91 MB |
+| Una tile di ortofoto | 256x256, 15-25 KB su disco, 256 KB in memoria video |
+| Livello nativo Sentinel-2 (10 m) | 13 (le immagini sono il doppio piu' fini del terreno) |
 | Profondita' della gonna al livello 13 | 152.6 m (raddoppia per livello) |

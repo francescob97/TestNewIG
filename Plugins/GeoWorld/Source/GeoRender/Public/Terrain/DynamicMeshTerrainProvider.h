@@ -9,7 +9,9 @@
 
 class AActor;
 class UDynamicMeshComponent;
+class UMaterialInstanceDynamic;
 class UMaterialInterface;
+class UTexture2D;
 
 /**
  * Un UDynamicMeshComponent per tile, tutti figli di un attore contenitore.
@@ -38,6 +40,11 @@ public:
 	virtual void SetWireframe(bool bInWireframe) override;
 	virtual bool IsWireframe() const override { return bWireframe; }
 
+	virtual void SetTileDrape(const GeoWorld::Tiles::FTileKey& Key,
+	                          UTexture2D* Texture,
+	                          const GeoWorld::Imagery::FDrapeTransform& Drape) override;
+	virtual int32 GetDrapedTileCount() const override;
+
 	virtual int32 GetRealizedTriangleCount() const override;
 	virtual void GetDiagnostics(TArray<FGeoTerrainTileDiagnostic>& Out,
 	                            int32 MaxEntries) const override;
@@ -53,6 +60,11 @@ private:
 		 *  significa non poter piu' dire di quale tile si sta parlando: e' gia'
 		 *  costato un bug di rimozione nel subsystem. */
 		GeoWorld::Tiles::FTileKey Key;
+
+		/** Istanza dinamica del materiale: una per tile, perche' ognuna ha la
+		 *  propria texture e il proprio ritaglio. Creata solo quando serve. */
+		TWeakObjectPtr<UMaterialInstanceDynamic> Material;
+		bool bDraped = false;
 	};
 
 	static uint64 PackKey(const GeoWorld::Tiles::FTileKey& Key)
@@ -71,6 +83,10 @@ private:
 	// TStrongObjectPtr e' il modo corretto per un oggetto non-UObject di
 	// dichiarare al GC che quel riferimento conta.
 	TStrongObjectPtr<UMaterialInterface> Material;
+
+	/** Materiale con i parametri del drappeggio. Manca finche' non lo si crea
+	 *  (geo.Imagery.CreateMaterial, o a mano: vedi fase6-verifica.md). */
+	TStrongObjectPtr<UMaterialInterface> DrapeMaterial;
 	TMap<uint64, FTileEntry> Tiles;
 	bool bWireframe = false;
 };

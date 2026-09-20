@@ -12,8 +12,8 @@ Il progetto `TestNewIG` e' un guscio vuoto: tutto il codice vive in
 | Modulo | Tipo | Contenuto |
 |---|---|---|
 | `GeoCore` | Runtime | Geodesia, georeferenziazione, origin rebasing |
-| `GeoTiles` | Runtime | Formato tile, loader asincrono, cache LRU *(Fase 2/3)* |
-| `GeoRender` | Runtime | Quadtree, LOD, generazione mesh, terreno *(Fase 4/5)* |
+| `GeoTiles` | Runtime | Formato tile, loader asincrono, cache LRU, ortofoto *(Fasi 2/3/6)* |
+| `GeoRender` | Runtime | Quadtree, LOD, mesh, terreno, drappeggio *(Fasi 4/5/6)* |
 | `GeoWorldEditor` | Editor | Strumenti di editor *(piu' avanti)* |
 
 `GeoCore` e' diviso in due strati fisicamente separati:
@@ -31,7 +31,7 @@ Il progetto `TestNewIG` e' un guscio vuoto: tutto il codice vive in
 - [x] **Fase 3** — loader asincrono, cache LRU, lettura dataset *(mai compilata in UE)*
 - [x] **Fase 4** — quadtree, selezione LOD, culling *(mai compilata in UE)*
 - [x] **Fase 5** — generazione mesh, gonne, terreno a schermo *(mai compilata in UE)*
-- [ ] Fase 6 — ortofoto drappeggiate *(design scritto: `docs/fase6-design.md`)*
+- [x] **Fase 6** — ortofoto drappeggiate *(mai compilata in UE)*
 
 ## Formato dei dati
 
@@ -43,6 +43,7 @@ Il progetto `TestNewIG` e' un guscio vuoto: tutto il codice vive in
 | Indice | `<root>/<level>/index.bin`, record di 16 byte per tile con min/max |
 | Manifest | `<root>/manifest.json`, metadati globali |
 | Quote | **ellissoidiche** WGS84 (ortometriche del sorgente + ondulazione del geoide) |
+| Ortofoto | piramide **separata**, stesso tiling; 256x256 pixel registrati sulle AREE (nessuna sovrapposizione), payload JPEG |
 
 Dettagli e motivazioni in `docs/fase2-design.md`.
 
@@ -66,11 +67,12 @@ cmake --build build
 ./build/geotiles_tests       # 23 test  -- formato tile, cache
 ./build/geoquadtree_tests    # 37 test  -- LOD, culling
 ./build/geomesh_tests        # 28 test  -- mesh, gonne, giunzioni
+./build/geoimagery_tests     # 44 test  -- drappeggio, formato immagine
 
 ./Plugins/GeoWorld/Tools/CheckSourceDiscipline.sh
 ```
 
-125 test C++ in totale, piu' 41 test Python della pipeline.
+164 test C++ in totale, piu' 63 test Python della pipeline.
 
 ## Pipeline dati
 
@@ -80,7 +82,13 @@ python run.py check-env                            :: diagnosi: GDAL, PROJ, grig
 python run.py fetch --area test -o dati/copernicus :: scarica un DEM libero
 python run.py build -i "dati/copernicus/*.tif" -o dataset/test
 python run.py verify -o dataset/test
-python -m unittest discover -s tests               :: 26 test, sorgente sintetico
+
+:: ortofoto (Fase 6): stessa struttura, dataset separato
+python run.py fetch-imagery --area roma -o dati/sentinel
+python run.py build-imagery -i "dati/sentinel/*_TCI.tif" -o dataset/ortofoto
+python run.py verify-imagery -o dataset/ortofoto
+
+python -m unittest discover -s tests               :: 63 test, sorgente sintetico
 ```
 
 Su Windows serve conda: vedi `Pipeline/README.md`.
@@ -91,6 +99,7 @@ Quadro d'insieme delle sei fasi: `docs/programma.md`.
 ## Verifica in Unreal
 
 Vedi `docs/fase1-verifica.md`, `docs/fase2-verifica.md`, `docs/fase3-verifica.md`,
-`docs/fase4-verifica.md` e `docs/fase5-verifica.md`.
+`docs/fase4-verifica.md`, `docs/fase5-verifica.md` e `docs/fase6-verifica.md`.
 
-Scorciatoia per vedere il terreno: `geo.Terrain.Demo <cartella del dataset>`.
+Scorciatoie: `geo.Terrain.Demo <quote>` per il terreno,
+`geo.Imagery.Demo <quote> <ortofoto>` per il terreno vestito.

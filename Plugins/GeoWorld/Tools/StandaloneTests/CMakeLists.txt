@@ -78,8 +78,20 @@ else()
 	target_compile_options(geomesh_tests PRIVATE -Wall -Wextra -O2)
 endif()
 
+# --- Ortofoto (Fase 6): drappeggio, formato, cache template ----------------
+add_executable(geoimagery_tests geoimagery_main.cpp)
+target_include_directories(geoimagery_tests PRIVATE
+	${GEORENDER_DIR}/Public ${GEOTILES_DIR}/Public ${GEOCORE_DIR}/Public)
+
+if (MSVC)
+	target_compile_options(geoimagery_tests PRIVATE /W4)
+else()
+	target_compile_options(geoimagery_tests PRIVATE -Wall -Wextra -O2)
+endif()
+
 enable_testing()
 add_test(NAME geocore COMMAND geocore_tests)
 add_test(NAME geotiles COMMAND geotiles_tests)
 add_test(NAME geoquadtree COMMAND geoquadtree_tests)
 add_test(NAME geomesh COMMAND geomesh_tests)
+add_test(NAME geoimagery COMMAND geoimagery_tests)

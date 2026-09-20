@@ -9,6 +9,12 @@ public class GeoTiles : ModuleRules
 		PublicDependencyModuleNames.AddRange(new string[]
 		{
 			"Core", "CoreUObject", "Engine", "GeoCore",
+
+			// Fase 6: ImageWrapper porta il decoder JPEG del motore, che gira
+			// sui thread di caricamento. Scrivere o importare un decoder JPEG
+			// per non dipendere da un modulo del motore sarebbe purismo che
+			// costa e non rende.
+			"ImageWrapper",
 		});
 		PrivateDependencyModuleNames.AddRange(new string[]
 		{

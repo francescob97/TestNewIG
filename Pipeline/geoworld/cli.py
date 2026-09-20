@@ -28,6 +28,8 @@ import time
 import numpy as np
 
 from . import __version__, tiling, tileformat, geoid, environment, fetch as fetch_module, manifest as manifest_module
+from . import (fetchimagery, imagecut, imageformat, imagerybuild,
+               imagerymanifest)
 from .raster import (LevelGrid, level_grid_for_bbox, build_source_vrt, source_bounds_wgs84,
                      source_ground_resolution, check_level_is_feasible,
                      warp_and_convert_heights, reduce_level,
@@ -547,6 +549,135 @@ def command_test_vectors(args: argparse.Namespace) -> int:
 
 # --- parser ---------------------------------------------------------------
 
+# =============================================================================
+#  ORTOFOTO (Fase 6)
+#
+#  Comandi separati da quelli delle quote, non varianti degli stessi. Le due
+#  piramidi sono dataset indipendenti: mischiare i comandi porterebbe prima o
+#  poi a scrivere immagini dentro un dataset di quote.
+# =============================================================================
+
+def command_fetch_imagery(args: argparse.Namespace) -> int:
+    bbox = tuple(args.bbox) if args.bbox else fetchimagery.NAMED_AREAS[args.area]
+    log(f"Area: ovest {bbox[0]} sud {bbox[1]} est {bbox[2]} nord {bbox[3]}")
+    log("")
+
+    try:
+        paths = fetchimagery.fetch(
+            bbox, args.output,
+            year=args.year, months=args.months, max_cloud=args.max_cloud,
+            stream=args.stream, report=log)
+    except RuntimeError as error:
+        log(f"ERRORE: {error}")
+        return 1
+
+    log("")
+    log("Da dare in pasto alla pipeline:")
+    if args.stream:
+        log(f"  python run.py build-imagery -i {' '.join(repr(p) for p in paths)} -o dataset/ortofoto")
+        log("  (GDAL legge dalla rete: comodo per provare, lento su aree grandi)")
+    else:
+        log(f"  python run.py build-imagery -i \"{args.output}/*_TCI.tif\" -o dataset/ortofoto")
+    return 0
+
+
+def command_build_imagery(args: argparse.Namespace) -> int:
+    try:
+        imagerybuild.build(
+            inputs=args.input, output=args.output, work=args.work,
+            name=args.name, source_description=args.source_description,
+            min_level=args.min_level, max_level=args.max_level,
+            quality=args.quality, source_crs=args.source_crs,
+            report=log)
+    except (FileNotFoundError, RuntimeError, ValueError) as error:
+        log(f"ERRORE: {error}")
+        return 1
+    return 0
+
+
+def command_inspect_imagery(args: argparse.Namespace) -> int:
+    header, pixels = imageformat.read_tile(args.tile)
+    bounds = tiling.tile_bounds(header.level, header.tile_x, header.tile_y)
+    log(f"tile    : livello {header.level}, x={header.tile_x}, y={header.tile_y}")
+    log(f"formato : v{header.version}, {header.width}x{header.height}, "
+        f"payload {header.payload_name} da {header.payload_size} byte")
+    log(f"copertura: {header.coverage_percent}%  "
+        f"(pixel di riempimento: {'si' if header.has_filled_pixels else 'no'})")
+    log(f"bbox    : ovest {bounds.west:.6f}  sud {bounds.south:.6f}  "
+        f"est {bounds.east:.6f}  nord {bounds.north:.6f}")
+    log(f"pixel   : {imagecut.imagery_pixel_size_deg(header.level):.8f} gradi")
+    log(f"colori  : medio RGB {pixels.reshape(-1, 3).mean(axis=0).round(1).tolist()}")
+    log(f"angoli  : NO={pixels[0, 0].tolist()}  NE={pixels[0, -1].tolist()}  "
+        f"SO={pixels[-1, 0].tolist()}  SE={pixels[-1, -1].tolist()}")
+    return 0
+
+
+def command_verify_imagery(args: argparse.Namespace) -> int:
+    """
+    Controlla un dataset di ortofoto gia' generato, leggendolo davvero.
+
+    Stessa filosofia di `verify` per le quote: i test automatici girano su un
+    sorgente sintetico, questo gira sul dataset vero.
+    """
+    root = args.output
+    failures = 0
+
+    try:
+        document = imagerymanifest.read_manifest(root)
+    except FileNotFoundError:
+        log(f"ERRORE: manca {imagerymanifest.MANIFEST_FILENAME} in {root}")
+        return 1
+
+    if document.get("datasetKind") != "imagery":
+        log("ERRORE: questo manifest non dichiara un dataset di immagini. "
+            "Hai puntato a una piramide di quote?")
+        return 1
+
+    log(f"dataset  : {document['datasetName']}")
+    log(f"livelli  : {[level['level'] for level in document['levels']]}")
+
+    for level_info in document["levels"]:
+        level = level_info["level"]
+        entries = imagerymanifest.read_level_index(root, level)
+
+        if len(entries) != level_info["tile_count"]:
+            log(f"  livello {level}: FALLITO - indice {len(entries)} voci, "
+                f"manifest {level_info['tile_count']}")
+            failures += 1
+            continue
+
+        # Si legge davvero qualche tile: un indice coerente con un manifest non
+        # dimostra che i file esistano e siano decodificabili.
+        sample = entries[:: max(1, len(entries) // 8)][:8]
+        bad = 0
+        for entry in sample:
+            path = os.path.join(root, imageformat.tile_relative_path(level, entry.x, entry.y))
+            try:
+                header, pixels = imageformat.read_tile(path)
+            except Exception as error:
+                log(f"  livello {level}: tile {entry.x},{entry.y} illeggibile: {error}")
+                bad += 1
+                continue
+            if (header.level, header.tile_x, header.tile_y) != (level, entry.x, entry.y):
+                log(f"  livello {level}: tile {entry.x},{entry.y} dichiara "
+                    f"{header.level}/{header.tile_x}/{header.tile_y}")
+                bad += 1
+            if pixels.shape != (imageformat.TILE_PIXELS, imageformat.TILE_PIXELS, 3):
+                log(f"  livello {level}: tile {entry.x},{entry.y} ha forma {pixels.shape}")
+                bad += 1
+
+        status = "ok" if bad == 0 else f"FALLITO ({bad} problemi)"
+        log(f"  livello {level:2d}: {len(entries):7d} tile, "
+            f"{level_info['partial_tiles']:5d} parziali, "
+            f"{level_info['pixel_size_m_lat']:7.2f} m/pixel   {status}")
+        failures += bad
+
+    log("")
+    log("TUTTO A POSTO" if failures == 0 else f"{failures} PROBLEMI")
+    return 0 if failures == 0 else 1
+
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="geoworld-pipeline",
@@ -630,7 +761,60 @@ def build_parser() -> argparse.ArgumentParser:
     vectors.add_argument("-o", "--output", default="tiling_vectors.json")
     vectors.set_defaults(func=command_test_vectors)
 
+    # --- ortofoto ----------------------------------------------------------
+    fetch_img = subparsers.add_parser(
+        "fetch-imagery",
+        help="scarica ortofoto Sentinel-2 (10 m, libere) per un'area")
+    img_area = fetch_img.add_mutually_exclusive_group()
+    img_area.add_argument("--area", default="test",
+                          choices=sorted(fetchimagery.NAMED_AREAS),
+                          help="area predefinita (default: test, un pezzo di Roma)")
+    img_area.add_argument("--bbox", nargs=4, type=float,
+                          metavar=("OVEST", "SUD", "EST", "NORD"))
+    fetch_img.add_argument("-o", "--output", required=True, help="cartella di destinazione")
+    fetch_img.add_argument("--year", type=int, default=2024)
+    fetch_img.add_argument("--months", type=int, nargs="+", default=[6, 7, 8],
+                           help="mesi in cui cercare (default: estate, poche nuvole)")
+    fetch_img.add_argument("--max-cloud", type=float, default=10.0,
+                           help="copertura nuvolosa massima accettata, in percentuale")
+    fetch_img.add_argument("--stream", action="store_true",
+                           help="non scaricare: restituisce percorsi /vsicurl/ che GDAL "
+                                "legge dalla rete leggendo solo le finestre che servono")
+    fetch_img.set_defaults(func=command_fetch_imagery)
+
+    build_img = subparsers.add_parser(
+        "build-imagery", help="costruisce la piramide di ortofoto")
+    build_img.add_argument("-i", "--input", nargs="+", required=True,
+                           help="raster sorgente. QUALUNQUE formato che GDAL sappia leggere: "
+                                "GeoTIFF, JPEG2000, ECW se il driver c'e', anche /vsicurl/. "
+                                "Accetta glob, es. 'ortofoto/*.tif'")
+    build_img.add_argument("-o", "--output", required=True, help="cartella radice del dataset")
+    build_img.add_argument("--work", help="cartella degli intermedi (default: <output>/_work)")
+    build_img.add_argument("--name", default="senza nome")
+    build_img.add_argument("--source-description", default="non dichiarata")
+    build_img.add_argument("--min-level", type=int, default=0)
+    build_img.add_argument("--max-level", type=int, default=None,
+                           help="default: il livello che eguaglia la risoluzione della sorgente. "
+                                "A parita' di livello un'immagine e' il doppio piu' fine di un "
+                                "terreno, perche' 256 pixel contro 128 celle")
+    build_img.add_argument("--quality", type=int, default=imageformat.DEFAULT_QUALITY,
+                           help="qualita' JPEG (default 85)")
+    build_img.add_argument("--source-crs", default=None,
+                           help="CRS del sorgente, se i file non lo dichiarano")
+    build_img.set_defaults(func=command_build_imagery)
+
+    verify_img = subparsers.add_parser(
+        "verify-imagery", help="controlla un dataset di ortofoto gia' generato")
+    verify_img.add_argument("-o", "--output", required=True)
+    verify_img.set_defaults(func=command_verify_imagery)
+
+    inspect_img = subparsers.add_parser(
+        "inspect-imagery", help="stampa il contenuto di una tile di immagine")
+    inspect_img.add_argument("tile")
+    inspect_img.set_defaults(func=command_inspect_imagery)
+
     return parser
+
 
 
 def main(argv: list[str] | None = None) -> int:

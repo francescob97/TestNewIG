@@ -279,9 +279,24 @@ Constant 0.0                           ->  Specular
 ```
 
 Una `UMaterialInstanceDynamic` per tile imposta il parametro `BaseColor` con la
-texture di quella tile. Le UV, calcolate come nella sezione 5, le scriviamo
-direttamente nella mesh: così il materiale resta banale e non serve passargli
-nessun parametro vettoriale.
+texture di quella tile.
+
+> **Revisione, fatta scrivendo il codice.** L'idea iniziale era scrivere le UV
+> ritagliate direttamente nei vertici, per tenere il materiale banale. È
+> sbagliata: quando arriva un'immagine più fine il ritaglio cambia, e con le UV
+> nei vertici bisognerebbe riscrivere 17.157 coordinate per ogni tile che si
+> affina — proprio mentre ci si sta muovendo, cioè nel momento peggiore.
+>
+> Il materiale ha quindi un secondo parametro, un vettore `UvOffsetScale` che
+> vale `(offsetU, offsetV, scala, scala)`. Aggiornarlo costa quattro float e la
+> mesh non viene toccata mai. Il prezzo sono tre nodi in più nello shader:
+
+```
+TextureCoordinate --> Multiply --> Add --> TextureSampleParameter2D("BaseColor")
+                         ^          ^                    |
+VectorParameter ---------+----------+                    v
+("UvOffsetScale")     .BA        .RG                Base Color
+```
 
 Due strade, e le prepariamo entrambe:
 
@@ -320,8 +335,29 @@ legge (QGIS con i driver completi, o il visualizzatore fornito col database), e
 poi darle in pasto alla pipeline.
 
 La scelta predefinita è **Sentinel-2**, perché è l'unica automatizzabile
-dall'inizio alla fine. Le altre due funzionano con lo stesso comando `build`, a
-partire da GeoTIFF.
+dall'inizio alla fine. Le altre due funzionano con lo stesso comando
+`build-imagery`, a partire da GeoTIFF.
+
+### L'indifferenza alla sorgente è una proprietà, non una speranza
+
+Vale la pena dirlo esplicitamente, perché è la stessa cosa che già succede per
+le quote e non è un caso: la pipeline dei DEM accetta i GeoTIFF di TINITALY
+**e** i DTED `.dt2`, senza un ramo di codice per ciascuno, perché tutto passa da
+`gdal.Open`. `build-imagery` è costruito allo stesso modo.
+
+In pratica, tutti questi comandi sono lo stesso comando:
+
+```bat
+python run.py build          -i "tinitaly/*.tif"       -o dataset/quote
+python run.py build          -i "elevation/*.dt2"      -o dataset/quote-dted
+python run.py build-imagery  -i "sentinel/*_TCI.tif"   -o dataset/ortofoto
+python run.py build-imagery  -i "imagery/*.ecw"        -o dataset/ortofoto-ecw
+```
+
+L'ultimo funziona **se e solo se** la tua installazione di GDAL ha il driver
+ECW. Non è una cosa da scoprire a metà di una build su 200 GB, quindi
+`check-env` adesso stampa la tabella dei driver disponibili e, quando l'ECW
+manca, dice cosa fare.
 
 ---
 

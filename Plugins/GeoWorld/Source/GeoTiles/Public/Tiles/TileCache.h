@@ -56,12 +56,35 @@ namespace GeoWorld::Tiles
 	 * frattempo la cache le sfratta. Senza, uno sfratto durante la generazione
 	 * di una mesh lascerebbe un puntatore pendente.
 	 */
-	class FTileCache
+	/**
+	 * =====================================================================
+	 *  PERCHE' UN TEMPLATE (dalla Fase 6)
+	 * =====================================================================
+	 *  Fino alla Fase 5 questa classe conteneva solo FHeightTile. Con le
+	 *  ortofoto serve la stessa identica cache per un payload diverso, e le
+	 *  alternative erano tre:
+	 *
+	 *    - duplicare il file: due copie che divergono al primo bug corretto
+	 *      in una sola delle due;
+	 *    - un'interfaccia virtuale sul payload: una chiamata indiretta per
+	 *      ogni accesso, in un percorso che la selezione LOD attraversa
+	 *      migliaia di volte per frame;
+	 *    - un template.
+	 *
+	 *  Il template non costa niente a runtime e qui non costa niente nemmeno
+	 *  in leggibilita', perche' il codice della cache non guarda MAI dentro
+	 *  il payload: gli chiede solo GetByteSize(). E' l'unico requisito.
+	 *
+	 *  FTileCache resta come alias, cosi' tutto il codice delle Fasi 3-5
+	 *  continua a compilare senza una modifica.
+	 */
+	template <typename PayloadType>
+	class TTileCache
 	{
 	public:
-		using FTilePtr = std::shared_ptr<const FHeightTile>;
+		using FTilePtr = std::shared_ptr<const PayloadType>;
 
-		explicit FTileCache(size_t BudgetBytes = 256ull * 1024 * 1024)
+		explicit TTileCache(size_t BudgetBytes = 256ull * 1024 * 1024)
 			: Budget(BudgetBytes) {}
 
 		/** Cerca senza modificare l'ordine LRU. Per statistiche e test. */
@@ -202,10 +225,21 @@ namespace GeoWorld::Tiles
 			}
 		}
 
-		std::list<FEntry> Entries;                                        // testa = usata di recente
-		std::unordered_map<FTileKey, std::list<FEntry>::iterator> Lookup; // O(1)
+		std::list<FEntry> Entries;   // testa = usata di recente
+
+		// NOTA C++: dentro un template, std::list<FEntry>::iterator dipende dal
+		// parametro (FEntry contiene PayloadType) e il compilatore non sa da
+		// solo che sia un TIPO: senza "typename" lo interpreta come un valore e
+		// produce una cascata di errori che sembrano venire da tutta la classe.
+		// E' l'unica riga che il passaggio a template ha richiesto di cambiare.
+		using FEntryIterator = typename std::list<FEntry>::iterator;
+		std::unordered_map<FTileKey, FEntryIterator> Lookup;   // O(1)
 		size_t Budget = 0;
 		size_t UsedBytes = 0;
 		FCacheStats Stats;
 	};
+
+	/** La cache delle quote: il nome usato dalle Fasi 3, 4 e 5. */
+	using FTileCache = TTileCache<FHeightTile>;
+
 }

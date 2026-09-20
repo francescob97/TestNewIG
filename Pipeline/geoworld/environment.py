@@ -49,6 +49,32 @@ def _python_info() -> dict:
     }
 
 
+# I driver che vale la pena controllare, con il motivo per cui importano.
+#
+# PERCHE' ESISTE QUESTA TABELLA. "GDAL legge le ECW" e "la TUA installazione di
+# GDAL legge le ECW" sono affermazioni diverse: il driver ECW richiede l'SDK
+# proprietario ERDAS e NON e' incluso nelle build di conda-forge. Scoprirlo dopo
+# aver lanciato una build su 200 GB di dati e' la cosa da evitare.
+INTERESTING_DRIVERS = {
+    "GTiff": "GeoTIFF: il formato di lavoro della pipeline",
+    "VRT": "mosaici virtuali: indispensabile",
+    "DTED": "DTED .dt2: i DEM militari",
+    "EHdr": "ESRI BIL/hdr",
+    "AAIGrid": "ESRI ASCII grid: i file di TINITALY",
+    "JP2OpenJPEG": "JPEG2000: molte ortofoto pubbliche",
+    "ECW": "ECW: richiede l'SDK ERDAS, di norma ASSENTE",
+    "MrSID": "MrSID: anch'esso con SDK proprietario",
+    "JPEG": "JPEG: il payload delle tile di immagine",
+    "PNG": "PNG",
+    "WMS": "servizi WMS remoti",
+}
+
+
+def _driver_availability(gdal) -> dict:
+    return {name: gdal.GetDriverByName(name) is not None
+            for name in INTERESTING_DRIVERS}
+
+
 def _gdal_info() -> dict:
     try:
         from osgeo import gdal
@@ -62,6 +88,7 @@ def _gdal_info() -> dict:
             "version": gdal.__version__,
             "driverGTiff": gdal.GetDriverByName("GTiff") is not None,
             "driverVRT": gdal.GetDriverByName("VRT") is not None,
+            "drivers": _driver_availability(gdal),
             "dataPath": gdal.GetConfigOption("GDAL_DATA") or "(default interno)",
         }
     except Exception as error:                      # noqa: BLE001
@@ -175,6 +202,20 @@ def format_report(report: Report) -> str:
     if report.gdal.get("available"):
         lines.append(f"{mark(True)}GDAL {report.gdal['version']}")
         lines.append(f"    driver GTiff: {report.gdal['driverGTiff']}, VRT: {report.gdal['driverVRT']}")
+
+        drivers = report.gdal.get("drivers") or {}
+        if drivers:
+            lines.append("    formati leggibili:")
+            for name, description in INTERESTING_DRIVERS.items():
+                present = drivers.get(name, False)
+                mark = "si" if present else "NO"
+                lines.append(f"      [{mark:>2}] {name:<12} {description}")
+            if not drivers.get("ECW", False):
+                lines.append("")
+                lines.append("    Nota sulle ECW: il driver manca, come nella quasi totalita'")
+                lines.append("    delle installazioni. Converti le ECW in GeoTIFF una volta sola")
+                lines.append("    (QGIS, o il visualizzatore fornito col database) e poi passa")
+                lines.append("    i GeoTIFF a build-imagery: la pipeline non guarda il formato.")
     else:
         lines.append(f"{mark(False)}GDAL non importabile: {report.gdal.get('error')}")
 

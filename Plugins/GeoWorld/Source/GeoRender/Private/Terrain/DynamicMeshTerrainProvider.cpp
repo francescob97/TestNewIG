@@ -8,6 +8,8 @@
 #include "DynamicMesh/DynamicMeshAttributeSet.h"
 #include "Engine/World.h"
 #include "GameFramework/Actor.h"
+#include "Engine/Texture2D.h"
+#include "Materials/MaterialInstanceDynamic.h"
 #include "Materials/MaterialInterface.h"
 #include "UObject/ConstructorHelpers.h"
 
@@ -64,6 +66,22 @@ void FDynamicMeshTerrainProvider::Initialize(UWorld* World)
 	// materiale vero arriva in Fase 6, quando ci sara' l'imagery da mostrare.
 	Material.Reset(LoadObject<UMaterialInterface>(
 		nullptr, TEXT("/Engine/BasicShapes/BasicShapeMaterial.BasicShapeMaterial")));
+
+	// Il materiale del drappeggio vive nel Content del plugin. Non esiste finche'
+	// non lo si crea, perche' un .uasset e' un file binario: non puo' nascere da
+	// una riga di codice sorgente. Se manca, il terreno resta grigio e il
+	// messaggio dice come ottenerlo, invece di lasciare l'utente davanti a un
+	// drappeggio che "non funziona".
+	DrapeMaterial.Reset(LoadObject<UMaterialInterface>(
+		nullptr, TEXT("/GeoWorld/Materials/M_GeoTerrain.M_GeoTerrain")));
+
+	if (!DrapeMaterial.IsValid())
+	{
+		UE_LOG(LogGeoWorld, Warning,
+			TEXT("[GeoTerrain] manca /GeoWorld/Materials/M_GeoTerrain: le ortofoto non ")
+			TEXT("si vedranno. Crealo con geo.Imagery.CreateMaterial, oppure a mano ")
+			TEXT("seguendo docs/fase6-verifica.md."));
+	}
 
 	UE_LOG(LogGeoWorld, Log, TEXT("[GeoTerrain] Provider '%s' pronto."), *GetName());
 }
@@ -270,4 +288,70 @@ void FDynamicMeshTerrainProvider::GetDiagnostics(TArray<FGeoTerrainTileDiagnosti
 		const UMaterialInterface* TileMaterial = Component->GetMaterial(0);
 		Entry.MaterialName = TileMaterial ? TileMaterial->GetName() : TEXT("(nessuno)");
 	}
+}
+
+// ---------------------------------------------------------------------------
+//  Drappeggio
+// ---------------------------------------------------------------------------
+
+void FDynamicMeshTerrainProvider::SetTileDrape(const Tiles::FTileKey& Key,
+                                               UTexture2D* Texture,
+                                               const GeoWorld::Imagery::FDrapeTransform& Drape)
+{
+	FTileEntry* Entry = Tiles.Find(PackKey(Key));
+	if (!Entry) { return; }
+
+	UDynamicMeshComponent* Component = Entry->Component.Get();
+	if (!Component) { return; }
+
+	// Togliere il drappeggio: si torna al materiale grigio di base.
+	if (!Texture)
+	{
+		if (Entry->bDraped)
+		{
+			if (UMaterialInterface* BaseMaterial = Material.Get())
+			{
+				Component->SetMaterial(0, BaseMaterial);
+			}
+			Entry->Material.Reset();
+			Entry->bDraped = false;
+		}
+		return;
+	}
+
+	UMaterialInterface* Parent = DrapeMaterial.Get();
+	if (!Parent) { return; }     // gia' segnalato in Initialize: non si insiste
+
+	UMaterialInstanceDynamic* Instance = Entry->Material.Get();
+	if (!Instance)
+	{
+		// NOTA UE: l'outer dell'istanza e' il COMPONENTE, non l'attore. Cosi'
+		// quando il componente viene distrutto l'istanza lo segue, senza doverla
+		// liberare a mano e senza che il garbage collector la trovi orfana.
+		Instance = UMaterialInstanceDynamic::Create(Parent, Component);
+		if (!Instance) { return; }
+
+		Entry->Material = Instance;
+		Component->SetMaterial(0, Instance);
+	}
+
+	Instance->SetTextureParameterValue(TEXT("BaseColor"), Texture);
+
+	// (offsetU, offsetV, scala, scala). La quarta componente ripete la scala
+	// perche' il materiale la usa come vettore 2D per moltiplicare le UV, e
+	// duplicarla qui evita un nodo di mascheratura in piu' nello shader.
+	Instance->SetVectorParameterValue(TEXT("UvOffsetScale"),
+		FLinearColor(Drape.OffsetU, Drape.OffsetV, Drape.Scale, Drape.Scale));
+
+	Entry->bDraped = true;
+}
+
+int32 FDynamicMeshTerrainProvider::GetDrapedTileCount() const
+{
+	int32 Count = 0;
+	for (const TPair<uint64, FTileEntry>& Pair : Tiles)
+	{
+		if (Pair.Value.bDraped) { ++Count; }
+	}
+	return Count;
 }
