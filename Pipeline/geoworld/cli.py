@@ -596,6 +596,8 @@ def command_build_imagery(args: argparse.Namespace) -> int:
             name=args.name, source_description=args.source_description,
             min_level=args.min_level, max_level=args.max_level,
             quality=args.quality, source_crs=args.source_crs,
+            source_nodata=(None if args.src_nodata.lower() == "none"
+                           else float(args.src_nodata)),
             report=log)
     except (FileNotFoundError, RuntimeError, ValueError) as error:
         log(f"ERRORE: {error}")
@@ -809,6 +811,10 @@ def build_parser() -> argparse.ArgumentParser:
                            help="qualita' JPEG (default 85)")
     build_img.add_argument("--source-crs", default=None,
                            help="CRS del sorgente, se i file non lo dichiarano")
+    build_img.add_argument("--src-nodata", default="0",
+                           help="valore che nei sorgenti significa 'nessun dato' "
+                                "(default 0, la convenzione di Sentinel-2). Usa 'none' "
+                                "se nelle tue ortofoto il nero e' un colore vero")
     build_img.set_defaults(func=command_build_imagery)
 
     verify_img = subparsers.add_parser(

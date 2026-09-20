@@ -194,6 +194,25 @@ def build_source_vrt(inputs: list[str], vrt_path: str,
             geotransform[3]),
     }
     vrt = None
+
+    # Nessun file deve essere stato scartato in silenzio.
+    #
+    # gdalbuildvrt, davanti a proiezioni diverse, tiene la prima e salta le
+    # altre stampando un warning. Chi guarda l'output vede una riga gialla fra
+    # tante e si ritrova un dataset che copre meta' del territorio, senza che
+    # niente si sia rotto. Meglio fermarsi.
+    used = count_vrt_sources(vrt_path)
+    if used != len(inputs):
+        raise RuntimeError(
+            f"il mosaico usa {used} sorgenti su {len(inputs)}: "
+            f"{len(inputs) - used} sono stati SCARTATI da GDAL, quasi sempre "
+            "perche' hanno proiezioni diverse fra loro. Il dataset coprirebbe "
+            "solo una parte del territorio.\n"
+            "Le ortofoto usano build_reprojected_vrt, che li riproietta tutti "
+            "prima di mosaicarli; per le quote, riproietta i sorgenti in un "
+            "CRS comune con gdalwarp e rilancia.")
+    info["sourcesUsed"] = used
+
     return info
 
 
@@ -620,3 +639,142 @@ def read_undulation_geotiff(path: str) -> tuple[np.ndarray, tuple[float, float, 
     result = (grid, (geotransform[0] + spacing / 2.0, geotransform[3] - spacing / 2.0, spacing))
     dataset = None
     return result
+
+
+# ===========================================================================
+#  Sorgenti con proiezioni diverse fra loro
+# ===========================================================================
+
+def count_vrt_sources(vrt_path: str) -> int:
+    """
+    Quanti file il VRT sta davvero usando.
+
+    PERCHE' SERVE CONTARLI. gdalbuildvrt, davanti a file con proiezioni
+    diverse, tiene la prima che incontra e SALTA tutte le altre. Non fallisce:
+    stampa un warning e continua. Chi guarda l'output vede una riga gialla in
+    mezzo ad altre e ottiene un mosaico che copre meta' del territorio, senza
+    che niente si sia rotto.
+
+    Contare le sorgenti nel VRT e confrontarle con i file dati in pasto e'
+    l'unico modo per accorgersene subito.
+    """
+    with open(vrt_path, "r", encoding="utf-8", errors="replace") as handle:
+        return handle.read().count("<SourceFilename")
+
+
+def projections_of(inputs: list[str]) -> dict[str, list[str]]:
+    """Raggruppa i file per proiezione. Chiave: nome leggibile del CRS."""
+    from osgeo import gdal, osr
+    gdal.UseExceptions()
+
+    groups: dict[str, list[str]] = {}
+    for path in inputs:
+        dataset = gdal.Open(path)
+        if dataset is None:
+            continue
+        wkt = dataset.GetProjection()
+        dataset = None
+
+        if not wkt:
+            name = "(nessuna proiezione dichiarata)"
+        else:
+            srs = osr.SpatialReference(wkt=wkt)
+            name = srs.GetName() or wkt[:60]
+        groups.setdefault(name, []).append(path)
+
+    return groups
+
+
+def build_reprojected_vrt(inputs: list[str], vrt_path: str, work_dir: str,
+                          target_crs: str = "EPSG:4326",
+                          resample: str = "cubic",
+                          source_nodata: float | None = 0.0,
+                          report=print) -> dict:
+    """
+    Mosaico virtuale di sorgenti che possono avere proiezioni DIVERSE.
+
+    PERCHE' ESISTE, SEPARATO DA build_source_vrt. Per le quote i sorgenti sono
+    un dataset solo, tutto nello stesso CRS, e un VRT diretto basta. Per le
+    ortofoto no: le scene Sentinel-2 sono organizzate per quadrato MGRS, e i
+    quadrati MGRS attraversano le zone UTM per costruzione. Bastano quattro
+    scene sull'Italia centrale per averne due in UTM 32N e due in 33N.
+    Mescolarle in un VRT diretto non e' un caso limite: e' il caso NORMALE.
+
+    COME. Ogni sorgente diventa un "warped VRT": un altro file XML che dichiara
+    "questo raster, visto in EPSG:4326". Non copia un pixel e pesa pochi
+    kilobyte, ma da quel momento tutti i sorgenti condividono la proiezione e
+    il VRT complessivo li accetta tutti.
+
+    Alla fine si CONTA che nessuno sia stato saltato.
+    """
+    from osgeo import gdal
+    gdal.UseExceptions()
+
+    os.makedirs(work_dir, exist_ok=True)
+    os.makedirs(os.path.dirname(os.path.abspath(vrt_path)), exist_ok=True)
+
+    groups = projections_of(inputs)
+    if len(groups) > 1:
+        report(f"      {len(groups)} proiezioni diverse fra i sorgenti:")
+        for name, files in sorted(groups.items()):
+            report(f"        {name}: {len(files)} file")
+        report(f"      li riproietto tutti in {target_crs} (VRT, nessuna copia di pixel)")
+
+    # NODATA: quattro scene Sentinel-2 non tassellano un rettangolo. Fra una e
+    # l'altra, e attorno ai bordi obliqui delle orbite, restano zone senza dato.
+    # Sentinel-2 le marca con lo zero, ed e' la convenzione documentata del
+    # prodotto TCI. Senza dichiararlo, quelle zone entrerebbero nel mosaico come
+    # NERO VERO e finirebbero nelle tile come pezzi di terreno neri.
+    #
+    # Su un'ortofoto generica lo zero puo' invece essere un'ombra legittima: per
+    # questo il valore e' un parametro e si puo' disattivare con None.
+    warped = []
+    for path in inputs:
+        name = os.path.splitext(os.path.basename(path))[0]
+        destination = os.path.join(work_dir, f"{name}_4326.vrt")
+
+        result = gdal.Warp(destination, path, options=gdal.WarpOptions(
+            format="VRT", dstSRS=target_crs, resampleAlg=resample,
+            srcNodata=source_nodata, dstNodata=source_nodata))
+        if result is None:
+            raise RuntimeError(f"non riesco a riproiettare {path}")
+        result = None
+        warped.append(destination)
+
+    # resolution="highest": i sorgenti riproiettati possono avere pixel di
+    # dimensione leggermente diversa a latitudini diverse. Con la media (il
+    # default di gdalbuildvrt) il mosaico sarebbe piu' grossolano del migliore
+    # dei sorgenti, e si butterebbe dettaglio prima ancora di cominciare.
+    vrt = gdal.BuildVRT(vrt_path, warped, options=gdal.BuildVRTOptions(
+        resampleAlg="nearest", addAlpha=False,
+        resolution="highest",
+        VRTNodata=source_nodata))
+    if vrt is None:
+        raise RuntimeError(f"gdal.BuildVRT ha fallito su {len(warped)} sorgenti")
+
+    geotransform = vrt.GetGeoTransform()
+    band = vrt.GetRasterBand(1)
+    info = {
+        "driver": "VRT",
+        "fileCount": len(inputs),
+        "width": vrt.RasterXSize,
+        "height": vrt.RasterYSize,
+        "crs": vrt.GetProjection(),
+        "pixelSizeX": abs(geotransform[1]),
+        "pixelSizeY": abs(geotransform[5]),
+        "nodata": band.GetNoDataValue(),
+        "dataType": gdal.GetDataTypeName(band.DataType),
+        "sourceGroups": {name: len(files) for name, files in groups.items()},
+    }
+    vrt = None
+
+    used = count_vrt_sources(vrt_path)
+    if used != len(inputs):
+        raise RuntimeError(
+            f"il mosaico usa {used} sorgenti su {len(inputs)}: {len(inputs) - used} "
+            "sono stati SCARTATI da GDAL. Il dataset coprirebbe solo una parte "
+            "del territorio. Controlla che i file siano leggibili e "
+            "georeferenziati (gdalinfo su quelli mancanti).")
+
+    info["sourcesUsed"] = used
+    return info

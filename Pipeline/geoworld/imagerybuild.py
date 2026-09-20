@@ -55,6 +55,7 @@ def build(*, inputs: list[str], output: str, work: str | None = None,
           min_level: int = 0, max_level: int | None = None,
           quality: int = imageformat.DEFAULT_QUALITY,
           source_crs: str | None = None,
+          source_nodata: float | None = 0.0,
           report=print) -> dict:
     """Costruisce la piramide di ortofoto. Riprende da dove era rimasta."""
     files = expand_inputs(inputs)
@@ -64,17 +65,27 @@ def build(*, inputs: list[str], output: str, work: str | None = None,
     started = time.time()
 
     # --- 1. mosaico virtuale -------------------------------------------
+    #
+    # Le scene Sentinel-2 sono organizzate per quadrato MGRS, e i quadrati MGRS
+    # attraversano le zone UTM: bastano quattro scene sull'Italia centrale per
+    # averne due in UTM 32N e due in 33N. Un VRT diretto, davanti a proiezioni
+    # diverse, tiene la prima e SCARTA le altre con un semplice warning.
+    # build_reprojected_vrt le riproietta tutte e poi verifica che nessuna sia
+    # rimasta fuori.
     report(f"[1/3] mosaico virtuale di {len(files)} file")
     vrt_path = os.path.join(work, "imagery_source.vrt")
-    vrt_info = raster.build_source_vrt(files, vrt_path, source_crs=source_crs)
+    vrt_info = raster.build_reprojected_vrt(
+        files, vrt_path, work_dir=os.path.join(work, "warped"),
+        source_nodata=source_nodata, report=report)
 
     bbox = raster.source_bounds_wgs84(vrt_path)
     west, south, east, north = bbox
     centre_latitude = (south + north) * 0.5
 
     resolution = raster.source_ground_resolution(vrt_path)
-    ground_metres = min(resolution["x_metres"], resolution["y_metres"])
+    ground_metres = resolution["finestMetres"]
 
+    report(f"      sorgenti usati: {vrt_info['sourcesUsed']}/{len(files)}")
     report(f"      area: {west:.4f} {south:.4f} {east:.4f} {north:.4f}")
     report(f"      risoluzione sul terreno: {ground_metres:.2f} m")
 
@@ -139,7 +150,8 @@ def build(*, inputs: list[str], output: str, work: str | None = None,
             "description": source_description,
             "files": len(files),
             "firstFile": os.path.basename(files[0]),
-            "driver": vrt_info.get("driver", "sconosciuto") if isinstance(vrt_info, dict) else "sconosciuto",
+            "driver": vrt_info.get("driver", "sconosciuto"),
+            "projections": vrt_info.get("sourceGroups", {}),
             "groundResolutionMetres": round(ground_metres, 3),
         },
         quality=quality,

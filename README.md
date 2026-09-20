@@ -81,7 +81,7 @@ le classi di errore di compilazione gia' incontrate su Windows -- shadowing,
 simboli non esportati fra moduli, tipi di comando console inesistenti,
 collisioni da build unity, metodi inesistenti chiamati sulle nostre classi.
 
-164 test C++ in totale, piu' 72 test Python della pipeline.
+164 test C++ in totale, piu' 76 test Python della pipeline.
 
 ## Pipeline dati
 

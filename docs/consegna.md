@@ -21,7 +21,7 @@ compilata con Unreal Engine. L'ambiente in cui e' stato scritto e' Linux senza
 il motore. Quello che **e'** stato verificato:
 
 * tutta la matematica pura, con test numerici eseguiti: **164 test C++** in
-  totale (37 Fase 1 + 23 Fase 3 + 37 Fase 4 + 28 Fase 5 + 44 Fase 6), piu' 72
+  totale (37 Fase 1 + 23 Fase 3 + 37 Fase 4 + 28 Fase 5 + 44 Fase 6), piu' 76
   test Python;
 * le convenzioni UE controllate staticamente (bilanciamento parentesi,
   posizione dei `.generated.h`, guardie `WITH_EDITOR`, macro di export);

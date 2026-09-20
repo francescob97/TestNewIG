@@ -40,7 +40,7 @@ cd Pipeline
 python -m unittest discover -s tests
 ```
 
-Attesi **72 test** (erano 41). I nuovi coprono il formato `.gim`, la riduzione
+Attesi **76 test** (erano 41). I nuovi coprono il formato `.gim`, la riduzione
 della piramide, il drappeggio, i quadrati MGRS e la struttura degli import.
 
 Senza Pillow ne saltano 14 invece di fallire: quelli che comprimono un JPEG. La
@@ -123,6 +123,44 @@ da `gdal.Open` e nessuna riga della pipeline guarda il formato del file.
 python run.py build -i "tinitaly/*.tif" -o dataset/quote
 python run.py build -i "Elevation/*.dt2" -o dataset/quote-dted
 ```
+
+### Scene in zone UTM diverse: e' il caso normale
+
+Le scene Sentinel-2 sono organizzate per quadrato MGRS, e **i quadrati MGRS
+attraversano le zone UTM per costruzione**. Bastano quattro scene sull'Italia
+centrale per averne due in UTM 32N e due in 33N.
+
+`gdalbuildvrt`, davanti a proiezioni diverse, tiene la prima e **scarta le
+altre** con un semplice warning:
+
+```
+Warning 1: gdalbuildvrt does not support heterogeneous projection:
+expected WGS 84 / UTM zone 32N, got WGS 84 / UTM zone 33N. Skipping ...
+```
+
+Non e' un errore: il comando prosegue e produce un dataset che copre meta' del
+territorio. La pipeline adesso riproietta ogni sorgente in EPSG:4326 prima di
+mosaicare — sono file VRT da pochi kilobyte, nessun pixel viene copiato — e poi
+**conta** che nessuno sia rimasto fuori, fermandosi se il conto non torna. Lo
+stadio 1 lo dichiara:
+
+```
+      2 proiezioni diverse fra i sorgenti:
+        WGS 84 / UTM zone 32N: 2 file
+        WGS 84 / UTM zone 33N: 2 file
+      li riproietto tutti in EPSG:4326 (VRT, nessuna copia di pixel)
+      sorgenti usati: 4/4
+```
+
+### Il nero fra una scena e l'altra
+
+Quattro scene non tassellano un rettangolo: fra l'una e l'altra, e lungo i
+bordi obliqui delle orbite, restano zone senza dato. Sentinel-2 le marca con lo
+**zero**, ed e' il default di `--src-nodata`. Senza dichiararlo finirebbero
+nelle tile come pezzi di terreno neri invece che come copertura mancante.
+
+Su un'ortofoto generica lo zero puo' essere un'ombra legittima: in quel caso
+`--src-nodata none`.
 
 ### Costruire la piramide
 
