@@ -55,6 +55,13 @@ static FViewParameters MakeDownwardView(double LatDeg, double LonDeg, double Alt
 	View.AspectRatio = 16.0 / 9.0;
 	View.ScreenHeightPixels = 1080.0;
 	View.MaxScreenSpaceError = 4.0;
+
+	// Frustum ESATTO, senza margine. Il margine di precaricamento (1.2 di
+	// default nel motore) serve a chiedere le tile prima che entrino in vista,
+	// e allarga apposta il frustum: un test che misura la geometria vera deve
+	// spegnerlo, altrimenti misura il margine. I test del margine se lo
+	// impostano da soli.
+	View.FrustumMarginFactor = 1.0;
 	return View;
 }
 
@@ -493,6 +500,69 @@ int main()
 	TestHorizon();
 	TestScreenSpaceError();
 	TestSelection();
+
+	// ------------------------------------------------------------------
+	Section("6. Margine del frustum: chiedere PRIMA che serva");
+
+	{
+		FViewParameters View = MakeDownwardView(41.89, 12.49, 10000.0);
+		View.FrustumMarginFactor = 1.0;
+
+		// Un punto appena FUORI dal bordo laterale: con frustum esatto e' scartato.
+		const double HalfH = std::atan(std::tan(View.VerticalFovRad * 0.5) * View.AspectRatio);
+		const double JustOutside = HalfH * 1.08;
+
+		// Direzione gia' unitaria: Forward e Right sono ortonormali, e
+		// cos^2 + sin^2 = 1.
+		const FEcef Direction =
+			View.Forward * std::cos(JustOutside) + View.Right * std::sin(JustOutside);
+		const FEcef Point = View.CameraEcef + Direction * 50000.0;
+
+		const FFrustumPlanes Exact = MakeFrustumPlanes(View);
+		Check(!IsSphereInFrustum(Exact, Point, 1.0),
+			"con margine 1.0 una tile appena fuori dal bordo viene scartata");
+
+		View.FrustumMarginFactor = 1.2;
+		const FFrustumPlanes Widened = MakeFrustumPlanes(View);
+		Check(IsSphereInFrustum(Widened, Point, 1.0),
+			"con margine 1.2 la stessa tile viene selezionata, e quindi caricata prima");
+	}
+
+	{
+		// Il margine non deve spostare cio' che sta DENTRO: una tile al centro
+		// resta dentro con qualunque margine.
+		FViewParameters View = MakeDownwardView(41.89, 12.49, 10000.0);
+		const FEcef Ahead = View.CameraEcef + View.Forward * 50000.0;
+
+		bool bAlwaysInside = true;
+		for (double Margin : { 1.0, 1.2, 1.5, 2.0 })
+		{
+			View.FrustumMarginFactor = Margin;
+			if (!IsSphereInFrustum(MakeFrustumPlanes(View), Ahead, 1.0)) { bAlwaysInside = false; }
+		}
+		Check(bAlwaysInside, "cio' che e' davanti resta dentro con qualunque margine");
+	}
+
+	{
+		// Un margine assurdo non deve produrre piani degeneri.
+		FViewParameters View = MakeDownwardView(41.89, 12.49, 10000.0);
+		View.FrustumMarginFactor = 50.0;
+		const FFrustumPlanes Planes = MakeFrustumPlanes(View);
+
+		bool bNormalsFinite = true;
+		for (int32_t Index = 0; Index < 5; ++Index)
+		{
+			const FEcef& N = Planes.Normals[Index];
+			const double Length = std::sqrt(N.X * N.X + N.Y * N.Y + N.Z * N.Z);
+			if (!std::isfinite(Length) || std::fabs(Length - 1.0) > 1e-9) { bNormalsFinite = false; }
+		}
+		Check(bNormalsFinite, "un margine assurdo non degenera i piani (semiangolo limitato a 85 gradi)");
+
+		// E cio' che sta DIETRO la camera resta fuori: il piano vicino non si allarga.
+		const FEcef Behind = View.CameraEcef - View.Forward * 50000.0;
+		Check(!IsSphereInFrustum(Planes, Behind, 1.0),
+			"e quello che sta dietro resta dietro");
+	}
 
 	std::printf("\n=====================================================\n");
 	std::printf(" RISULTATO: %d passati, %d falliti\n", GPassed, GFailed);

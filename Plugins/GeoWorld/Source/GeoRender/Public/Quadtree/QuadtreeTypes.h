@@ -66,6 +66,32 @@ namespace GeoWorld::Quadtree
 
 		/** Errore su schermo tollerato, in PIXEL. E' la manopola principale. */
 		double MaxScreenSpaceError = 4.0;
+
+		/**
+		 * Quanto allargare il frustum PER LA SOLA SELEZIONE.
+		 *
+		 * =================================================================
+		 *  PERCHE' UN MARGINE, E PERCHE' NON E' UN TRUCCO
+		 * =================================================================
+		 *  Con un frustum esatto, una tile viene chiesta allo streaming nel
+		 *  momento in cui e' GIA' visibile. Ma fra la richiesta e il disegno
+		 *  c'e' una lettura da disco, una decodifica e la costruzione della
+		 *  mesh: diversi frame. Nel frattempo, al bordo dello schermo, non c'e'
+		 *  niente da disegnare, e si vede il vuoto.
+		 *
+		 *  Ruotando la camera il bordo che entra e' sempre "appena chiesto", e
+		 *  il vuoto lo segue: e' esattamente il bordo nero che si vede girando.
+		 *
+		 *  Il rimedio non e' caricare piu' in fretta, e' chiedere PRIMA. Un
+		 *  frustum allargato del 20% seleziona una corona di tile appena fuori
+		 *  dalla vista, che sono gia' pronte quando ci arrivi. Il renderer di
+		 *  Unreal le scartera' comunque dal disegno: il costo e' qualche tile
+		 *  in piu' in memoria, non un pixel in piu' a schermo.
+		 *
+		 *  1.0 disattiva il margine ed e' utile per una cosa sola: vedere il
+		 *  problema che il margine risolve.
+		 */
+		double FrustumMarginFactor = 1.2;
 	};
 
 	/** Una tile scelta per il disegno. */

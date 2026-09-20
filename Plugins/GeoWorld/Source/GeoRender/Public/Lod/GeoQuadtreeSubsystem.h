@@ -78,6 +78,9 @@ public:
 	void SetMaxScreenSpaceError(double Pixels);
 	double GetMaxScreenSpaceError() const { return MaxScreenSpaceError; }
 
+	void SetFrustumMargin(double InMargin) { FrustumMargin = FMath::Clamp(InMargin, 1.0, 3.0); }
+	double GetFrustumMargin() const { return FrustumMargin; }
+
 	/** Blocca la selezione sulla vista corrente: utile per ispezionarla da fuori. */
 	void SetFrozen(bool bInFrozen) { bFrozen = bInFrozen; }
 	bool IsFrozen() const { return bFrozen; }
@@ -108,6 +111,9 @@ private:
 	FGeoQuadtreeStats Stats;
 
 	double MaxScreenSpaceError = 4.0;
+
+	/** Allargamento del frustum per la sola selezione: vedi FViewParameters. */
+	double FrustumMargin = 1.2;
 	bool bEnabled = false;
 	bool bFrozen = false;
 	bool bShowDebugOverlay = false;

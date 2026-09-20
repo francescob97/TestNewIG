@@ -21,7 +21,7 @@ compilata con Unreal Engine. L'ambiente in cui e' stato scritto e' Linux senza
 il motore. Quello che **e'** stato verificato:
 
 * tutta la matematica pura, con test numerici eseguiti: **164 test C++** in
-  totale (37 Fase 1 + 23 Fase 3 + 37 Fase 4 + 28 Fase 5 + 44 Fase 6), piu' 76
+  totale (37 Fase 1 + 23 Fase 3 + 42 Fase 4 + 28 Fase 5 + 44 Fase 6), piu' 77
   test Python;
 * le convenzioni UE controllate staticamente (bilanciamento parentesi,
   posizione dei `.generated.h`, guardie `WITH_EDITOR`, macro di export);
@@ -71,7 +71,7 @@ cmake -S Plugins/GeoWorld/Tools/StandaloneTests -B build
 cmake --build build
 build\Debug\geocore_tests.exe                       :: 37 test
 build\Debug\geotiles_tests.exe dataset\test         :: 23 test
-build\Debug\geoquadtree_tests.exe                   :: 37 test
+build\Debug\geoquadtree_tests.exe                   :: 42 test
 build\Debug\geomesh_tests.exe                       :: 28 test
 build\Debug\geoimagery_tests.exe                    :: 44 test
 Plugins\GeoWorld\Tools\CheckSourceDiscipline.sh      :: serve bash (Git Bash)
@@ -110,6 +110,7 @@ geo.Lod.Error <pixel>          soglia dell'errore su schermo (la manopola del LO
 geo.Lod.Freeze <0|1>           congela la vista: mostra cosa il culling ha scartato
 geo.Lod.Draw <0|1>             tassellatura scelta, un colore per livello
 geo.Lod.Stats                  nodi visitati, scarti, tempo di selezione
+geo.Lod.Margin <fattore>       allargamento del frustum: contro il bordo vuoto
 
 geo.Terrain.Demo <cartella>    apre un dataset e disegna il terreno vero
 geo.Terrain.Enable <0|1>       costruzione della geometria

@@ -161,8 +161,21 @@ namespace GeoWorld::Quadtree
 	{
 		FFrustumPlanes Planes;
 
-		const double HalfVertical = View.VerticalFovRad * 0.5;
-		const double HalfHorizontal = std::atan(std::tan(HalfVertical) * View.AspectRatio);
+		// Il margine si applica alla TANGENTE del semiangolo, non all'angolo:
+		// e' la tangente a misurare quanto e' largo il frustum sul piano dello
+		// schermo, quindi "il 20% piu' largo" significa questo. Moltiplicare
+		// l'angolo darebbe un allargamento che cresce in modo strano verso i
+		// 90 gradi.
+		const double Margin = (View.FrustumMarginFactor > 1.0) ? View.FrustumMarginFactor : 1.0;
+
+		// Limite a 85 gradi per semiangolo: oltre, la tangente esplode e i
+		// piani degenerano. Nessun campo visivo reale ci arriva, ma un valore
+		// di margine assurdo da console non deve produrre un frustum rotto.
+		constexpr double MaxHalfAngle = 1.4835;     // 85 gradi
+		const double HalfVertical =
+			std::min(std::atan(std::tan(View.VerticalFovRad * 0.5) * Margin), MaxHalfAngle);
+		const double HalfHorizontal =
+			std::min(std::atan(std::tan(HalfVertical) * View.AspectRatio), MaxHalfAngle);
 
 		const double SinH = std::sin(HalfHorizontal), CosH = std::cos(HalfHorizontal);
 		const double SinV = std::sin(HalfVertical), CosV = std::cos(HalfVertical);

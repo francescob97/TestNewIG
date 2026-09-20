@@ -144,6 +144,7 @@ bool UGeoQuadtreeSubsystem::BuildViewParameters(FViewParameters& OutView)
 	OutView.AspectRatio = Aspect;
 	OutView.ScreenHeightPixels = FMath::Max(1, Info.ScreenSize.Y);
 	OutView.MaxScreenSpaceError = MaxScreenSpaceError;
+	OutView.FrustumMarginFactor = FrustumMargin;
 	OutView.NearClipMetres = 1.0;
 
 	return true;
@@ -157,7 +158,10 @@ bool UGeoQuadtreeSubsystem::RunSelection()
 	if (bFrozen && bHasFrozenView)
 	{
 		View = FrozenView;
+		// Soglia e margine restano vivi anche a vista congelata: servono
+		// proprio a vedere che effetto hanno, guardando la selezione da fuori.
 		View.MaxScreenSpaceError = MaxScreenSpaceError;
+		View.FrustumMarginFactor = FrustumMargin;
 	}
 	else
 	{

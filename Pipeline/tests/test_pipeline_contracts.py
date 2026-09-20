@@ -125,25 +125,46 @@ class TestSilentSkipProtection(unittest.TestCase):
 
 class TestVrtSourceCounting(unittest.TestCase):
 
-    def test_counts_sources_in_a_vrt(self):
+    @staticmethod
+    def write_vrt(bands: int, sources: list[str]) -> str:
+        """Un VRT finto con N bande, ognuna che elenca gli stessi sorgenti."""
         import tempfile
-        from geoworld import raster
 
-        vrt = (
-            '<VRTDataset rasterXSize="10" rasterYSize="10">\n'
-            '  <VRTRasterBand band="1">\n'
-            '    <SimpleSource><SourceFilename>a.tif</SourceFilename></SimpleSource>\n'
-            '    <SimpleSource><SourceFilename>b.tif</SourceFilename></SimpleSource>\n'
-            '  </VRTRasterBand>\n'
-            '</VRTDataset>\n')
+        body = ""
+        for band in range(1, bands + 1):
+            body += f'  <VRTRasterBand band="{band}">\n'
+            for source in sources:
+                body += ('    <SimpleSource><SourceFilename relativeToVRT="1">'
+                         f'{source}</SourceFilename></SimpleSource>\n')
+            body += '  </VRTRasterBand>\n'
 
         with tempfile.NamedTemporaryFile("w", suffix=".vrt", delete=False,
                                          encoding="utf-8") as handle:
-            handle.write(vrt)
-            path = handle.name
+            handle.write('<VRTDataset rasterXSize="10" rasterYSize="10">\n'
+                         + body + '</VRTDataset>\n')
+            return handle.name
 
+    def test_counts_sources_in_a_single_band_vrt(self):
+        from geoworld import raster
+        path = self.write_vrt(bands=1, sources=["a.tif", "b.tif"])
         try:
             self.assertEqual(raster.count_vrt_sources(path), 2)
+        finally:
+            os.unlink(path)
+
+    def test_rgb_vrt_repeats_sources_once_per_band(self):
+        """
+        LA REGRESSIONE. Un VRT RGB elenca ogni sorgente tre volte, una per
+        banda. Contare le occorrenze di <SourceFilename> dava 6 per 2 immagini,
+        e la pipeline si fermava dicendo che ne erano state scartate -4.
+        Sui DEM, con una banda sola, l'errore era invisibile.
+        """
+        from geoworld import raster
+        path = self.write_vrt(bands=3, sources=["a.tif", "b.tif"])
+        try:
+            self.assertEqual(raster.count_vrt_sources(path), 2,
+                             "sta contando le bande invece dei file")
+            self.assertEqual(raster.vrt_source_files(path), {"a.tif", "b.tif"})
         finally:
             os.unlink(path)
 

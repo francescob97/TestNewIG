@@ -849,6 +849,26 @@ static FAutoConsoleCommandWithWorldAndArgs GeoImageryDemoCommand(
 		GeoTerrainConsole::Report(TEXT("Se resta grigio: serve il materiale, geo.Imagery.CreateMaterial"));
 	}));
 
+static FAutoConsoleCommandWithWorldAndArgs GeoLodMarginCommand(
+	TEXT("geo.Lod.Margin"),
+	TEXT("geo.Lod.Margin <fattore> - allarga il frustum per caricare PRIMA le tile ai bordi."),
+	FConsoleCommandWithWorldAndArgsDelegate::CreateStatic(
+		[](const TArray<FString>& Args, UWorld* World)
+	{
+		UGeoQuadtreeSubsystem* Quadtree = World ? World->GetSubsystem<UGeoQuadtreeSubsystem>() : nullptr;
+		if (!Quadtree) { return; }
+
+		if (Args.Num() >= 1) { Quadtree->SetFrustumMargin(FCString::Atod(*Args[0])); }
+
+		GeoTerrainConsole::Report(FString::Printf(
+			TEXT("Margine del frustum: %.2f  (1.0 = esatto, nessun precaricamento)"),
+			Quadtree->GetFrustumMargin()));
+		GeoTerrainConsole::Report(
+			TEXT("  Con 1.0 le tile vengono chieste quando sono GIA' visibili, e"), FColor::White);
+		GeoTerrainConsole::Report(
+			TEXT("  ruotando la camera il bordo resta vuoto finche' non arrivano."), FColor::White);
+	}));
+
 // --- geo.Terrain.Diag -------------------------------------------------------
 //
 //  "Disegna 108 tile e 3,5 milioni di triangoli, ma non vedo niente" e' un

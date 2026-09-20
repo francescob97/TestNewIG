@@ -8,7 +8,7 @@ cmake --build build
 build\Debug\geoquadtree_tests.exe
 ```
 
-Attesi **37 test verdi**, in cinque gruppi:
+Attesi **42 test verdi**, in sei gruppi:
 
 | Gruppo | Cosa dimostra |
 |---|---|
@@ -16,6 +16,7 @@ Attesi **37 test verdi**, in cinque gruppi:
 | Frustum | punti davanti/dietro/di lato; il bordo laterale coincide con il semiangolo analitico; una sfera grande che interseca viene tenuta |
 | Orizzonte | distanza misurata **113.0 km** contro **112.9 km** teorici di `sqrt(2Rh)`; una vetta a 10 km resta visibile a 300 km e sparisce a 600; gli antipodi sono occlusi; **la tile di livello 0 che contiene la camera non viene scartata** (regressione) |
 | Errore su schermo | l'errore geometrico raddoppia per livello; raddoppiare la distanza lo dimezza; la formula coincide con la proiezione calcolata a mano |
+| Margine | con 1.0 una tile appena fuori dal bordo e' scartata, con 1.2 e' selezionata; cio' che e' davanti resta dentro con qualunque margine; un margine assurdo non degenera i piani |
 | Selezione | soglia enorme → solo radici; soglia severa da vicino → livello 14; salendo di quota il livello non aumenta mai; guardando a nord non si sceglie nulla a sud; **niente buchi** con i figli non caricati |
 
 La progressione del LOD misurata dai test, a soglia 4 px:
@@ -84,6 +85,30 @@ dietro la curvatura. Poi `geo.Lod.Freeze 0` e tutto torna a seguirti.
 `Nodi visitati`: un numero enorme significa che il culling non sta scartando, e
 il sospetto va prima all'orientamento della camera in ECEF.
 
+### Il bordo nero, e il margine
+
+Con un frustum esatto una tile viene chiesta allo streaming nel momento in cui
+e' **gia'** visibile. Fra la richiesta e il disegno ci sono una lettura da
+disco, una decodifica e la costruzione della mesh: diversi frame. Nel frattempo
+il bordo dello schermo resta vuoto, e ruotando la camera il vuoto ti segue.
+
+Il rimedio non e' caricare piu' in fretta, e' chiedere prima:
+
+```
+geo.Lod.Margin 1.2      (default: frustum allargato del 20% per la SELEZIONE)
+geo.Lod.Margin 1.0      (frustum esatto: serve a VEDERE il problema)
+```
+
+Le tile in piu' non vengono disegnate -- il renderer di Unreal le scarta
+comunque -- ma sono gia' pronte quando ci arrivi. Il costo e' qualche tile in
+memoria, non un pixel a schermo.
+
+Se anche con il margine il bordo resta vuoto, allora non e' latenza:
+`geo.Lod.Freeze 1`, poi allontanati e guarda la selezione da fuori. Se si ferma
+esattamente al bordo del cono visivo, il problema e' nel frustum; se invece si
+estende oltre, le tile ci sono e il problema e' nella costruzione della mesh
+(`geo.Terrain.Diag`).
+
 ### Comandi
 
 ```
@@ -94,6 +119,7 @@ geo.Lod.Freeze <0|1>       congela la vista usata dal LOD
 geo.Lod.Debug <0|1>        overlay statistiche
 geo.Lod.Draw <0|1>         tassellatura selezionata
 geo.Lod.Stats              statistiche dell'ultima selezione
+geo.Lod.Margin <fattore>   allargamento del frustum per il precaricamento
 ```
 
 ---

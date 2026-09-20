@@ -645,21 +645,36 @@ def read_undulation_geotiff(path: str) -> tuple[np.ndarray, tuple[float, float, 
 #  Sorgenti con proiezioni diverse fra loro
 # ===========================================================================
 
+def vrt_source_files(vrt_path: str) -> set[str]:
+    """
+    I file DISTINTI che il VRT sta usando.
+
+    PERCHE' SERVONO. gdalbuildvrt, davanti a file con proiezioni diverse, tiene
+    la prima che incontra e SALTA tutte le altre. Non fallisce: stampa un
+    warning e continua. Chi guarda l'output vede una riga gialla in mezzo ad
+    altre e ottiene un mosaico che copre meta' del territorio, senza che niente
+    si sia rotto.
+
+    ATTENZIONE AL CONTEGGIO, ed e' l'errore che ho fatto la prima volta: un VRT
+    ripete <SourceFilename> UNA VOLTA PER BANDA. Su un'ortofoto RGB sono tre
+    righe per file, e contare le occorrenze dava 6 sorgenti per 2 immagini.
+    Sui DEM, che hanno una banda sola, l'errore non si vedeva.
+    """
+    import xml.etree.ElementTree as ElementTree
+
+    try:
+        tree = ElementTree.parse(vrt_path)
+    except ElementTree.ParseError as error:
+        raise RuntimeError(f"{vrt_path} non e' un VRT leggibile: {error}") from error
+
+    return {(element.text or "").strip()
+            for element in tree.iter("SourceFilename")
+            if (element.text or "").strip()}
+
+
 def count_vrt_sources(vrt_path: str) -> int:
-    """
-    Quanti file il VRT sta davvero usando.
-
-    PERCHE' SERVE CONTARLI. gdalbuildvrt, davanti a file con proiezioni
-    diverse, tiene la prima che incontra e SALTA tutte le altre. Non fallisce:
-    stampa un warning e continua. Chi guarda l'output vede una riga gialla in
-    mezzo ad altre e ottiene un mosaico che copre meta' del territorio, senza
-    che niente si sia rotto.
-
-    Contare le sorgenti nel VRT e confrontarle con i file dati in pasto e'
-    l'unico modo per accorgersene subito.
-    """
-    with open(vrt_path, "r", encoding="utf-8", errors="replace") as handle:
-        return handle.read().count("<SourceFilename")
+    """Quanti file DISTINTI il VRT sta usando."""
+    return len(vrt_source_files(vrt_path))
 
 
 def projections_of(inputs: list[str]) -> dict[str, list[str]]:
