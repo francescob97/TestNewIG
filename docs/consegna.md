@@ -412,10 +412,12 @@ arbitrari e non lo sono. Le motivazioni estese sono in `docs/fase5-design.md`.
   mesh.** Scriverli nei vertici obbligherebbe a riscrivere 17.157 coordinate
   ogni volta che una tile si affina, cioe' proprio mentre ci si muove.
 * **La cache e' diventata un template** (`TTileCache<Payload>`) e il pool di
-  thread e' uscito dal subsystem (`FGeoLoaderPool`). Il pool si condivide, il
+  thread e' stato estratto in `FGeoLoaderPool`. Il pool si condivide, il
   lavoro no: come si legge e si interpreta un file dipende dal payload, e una
   classe base che provasse a condividerlo avrebbe un metodo virtuale per ogni
-  differenza.
+  differenza. **Attenzione**: oggi `FGeoLoaderPool` lo usa solo lo streaming
+  delle ortofoto; quello delle quote ha ancora il pool interno della Fase 3.
+  Migrarlo e' il primo lavoro di pulizia da fare.
 
 Limitazioni note, lasciate aperte di proposito:
 
@@ -436,6 +438,7 @@ Limitazioni note, lasciate aperte di proposito:
 
 | Cosa | Dove |
 |---|---|
+| Manuale di studio: tutto il progetto spiegato, capitolo per capitolo | `docs/manuale/00-indice.md` |
 | Programma delle sei fasi | `docs/programma.md` |
 | Da dove vengono i dati, licenze, ortofoto | `docs/dati.md` |
 | Design e motivazioni Fase 1 | `docs/fase1-design.md` |

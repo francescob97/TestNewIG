@@ -106,6 +106,7 @@ Su Windows serve conda: vedi `Pipeline/README.md`.
 Da dove vengono i dati (DEM e ortofoto): `docs/dati.md`.
 Quadro d'insieme delle sei fasi: `docs/programma.md`.
 **Per riprendere il lavoro: `docs/consegna.md`.**
+**Per studiare il progetto (e Unreal) da zero: `docs/manuale/00-indice.md`.**
 
 ## Verifica in Unreal
 

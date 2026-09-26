@@ -220,8 +220,14 @@ Oggi tre pezzi sono legati alle quote e non dovrebbero esserlo:
 | Pezzo | Com'è | Come diventa |
 |---|---|---|
 | `FTileCache` | cache di `FHeightTile` | `TTileCache<Payload>`, template, resta header-only |
-| pool di caricamento | dentro `UGeoTileStreamingSubsystem` | `FGeoTileLoaderPool`, classe a sé, usata da entrambi |
+| pool di caricamento | dentro `UGeoTileStreamingSubsystem` | `FGeoLoaderPool`, classe a sé (*vedi la nota sotto*) |
 | `FGeoTileDataset` | manifest e indice delle quote | resta; nasce `FGeoImageryDataset`, gemello |
+
+> **Nota a posteriori.** `FGeoLoaderPool` è stato estratto e lo usa lo streaming
+> delle ortofoto. Quello delle quote ha ancora il pool interno della Fase 3: non
+> è stato migrato, per non toccare codice funzionante che in quell'ambiente non
+> si poteva compilare. La migrazione è meccanica ed è il primo lavoro di pulizia
+> da fare.
 
 **Perché non un unico streaming generico.** I subsystem di Unreal sono
 `UObject` e gli `UObject` non possono essere template. Si potrebbe aggirare
@@ -371,18 +377,16 @@ geo.Imagery.Demo <cartella>    apre, si posiziona, accende tutto
 geo.Imagery.Open <cartella>    apre un dataset di immagini
 geo.Imagery.Enable <0|1>       drappeggio acceso o spento
 geo.Imagery.Stats              tile con texture, memoria video, tempi
-geo.Imagery.Diag               cosa il renderer ha davvero, per le prime tile
-geo.Imagery.ShowLevels <0|1>   colora le tile per LIVELLO DELL'IMMAGINE
 geo.Imagery.Checker <0|1>      sostituisce le ortofoto con una scacchiera
 ```
 
-Gli ultimi due meritano una riga a testa, perché sono quelli che dimostrano le
-decisioni di questo documento.
-
-**`ShowLevels`** colora ogni tile in base al livello dell'immagine che sta
-usando, non a quello del terreno. Se il ritaglio della sezione 5 funziona, salendo
-di quota si vedono comparire zone di colore diverso dove la piramide delle
-immagini si è fermata prima di quella del terreno.
+> **Nota a posteriori.** Questo elenco prevedeva anche `geo.Imagery.Diag` e
+> `geo.Imagery.ShowLevels` (colorare le tile per livello dell'immagine usata).
+> **Nessuno dei due è stato implementato.** L'overlay (`geo.Imagery.Debug 1`)
+> mostra comunque l'intervallo di livelli in uso e quante tile stanno usando un
+> antenato, che è l'informazione che `ShowLevels` avrebbe dato a colori. Sono
+> stati implementati invece `geo.Imagery.Open`, `geo.Imagery.Debug`,
+> `geo.Imagery.Budget` e `geo.Imagery.CreateMaterial`.
 
 **`Checker`** sostituisce le ortofoto con una scacchiera generata sul momento.
 È il modo per vedere le UV: su una scacchiera un disallineamento di mezzo pixel
