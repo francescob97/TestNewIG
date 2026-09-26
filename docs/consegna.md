@@ -15,6 +15,7 @@ Ultimo aggiornamento: 2026-09-20. Branch: `claude/charming-goodall-xd2r3g`.
 | 4 | Quadtree, selezione LOD, culling | **codice completo, mai compilato in UE** |
 | 5 | Mesh, gonne, terreno a schermo | **codice completo, mai compilato in UE** |
 | 6 | Ortofoto drappeggiate | **codice completo, mai compilato in UE** |
+| 7 | Entità e interoperabilità (CIGI, DIS, HLA, memoria condivisa) | **solo design** |
 
 **Avvertenza sul C++:** nessuna riga di C++ di questo progetto e' mai stata
 compilata con Unreal Engine. L'ambiente in cui e' stato scritto e' Linux senza
@@ -448,6 +449,7 @@ Limitazioni note, lasciate aperte di proposito:
 | Design e motivazioni Fase 5 | `docs/fase5-design.md` |
 | Verifica Fase 5, con la demo visiva | `docs/fase5-verifica.md` |
 | Verifica Fase 6, con la demo visiva | `docs/fase6-verifica.md` |
+| Design Fase 7 (entità, protocolli) | `docs/fase7-design.md` |
 | Design e motivazioni Fase 6 | `docs/fase6-design.md` |
 | Issue aperte | `docs/issues-aperte.md` |
 | Uso della pipeline, installazione Windows | `Pipeline/README.md` |

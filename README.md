@@ -32,6 +32,8 @@ Il progetto `TestNewIG` e' un guscio vuoto: tutto il codice vive in
 - [x] **Fase 4** — quadtree, selezione LOD, culling *(mai compilata in UE)*
 - [x] **Fase 5** — generazione mesh, gonne, terreno a schermo *(mai compilata in UE)*
 - [x] **Fase 6** — ortofoto drappeggiate *(mai compilata in UE)*
+- [ ] Fase 7 — entità e interoperabilità (CIGI, DIS, HLA, memoria condivisa)
+      *(solo design: `docs/fase7-design.md`)*
 
 ## Formato dei dati
 
