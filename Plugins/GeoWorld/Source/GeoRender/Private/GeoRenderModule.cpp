@@ -604,7 +604,7 @@ static FAutoConsoleCommandWithWorldAndArgs GeoTerrainFlipCommand(
 
 static FAutoConsoleCommandWithWorldAndArgs GeoTerrainBudgetCommand(
 	TEXT("geo.Terrain.Budget"),
-	TEXT("geo.Terrain.Budget <N> - tile di cui costruire la geometria per frame."),
+	TEXT("geo.Terrain.Budget <N> - mesh CONSEGNATE al renderer per frame (la costruzione e' su thread)."),
 	FConsoleCommandWithWorldAndArgsDelegate::CreateStatic(
 		[](const TArray<FString>& Args, UWorld* World)
 	{
@@ -965,7 +965,7 @@ static FAutoConsoleCommandWithWorldAndArgs GeoLodSafetyCommand(
 // --- geo.Terrain.MeshBudget -------------------------------------------------
 static FAutoConsoleCommandWithWorldAndArgs GeoTerrainMeshBudgetCommand(
 	TEXT("geo.Terrain.MeshBudget"),
-	TEXT("geo.Terrain.MeshBudget <N> - mesh da tenere costruite in tutto, visibili + nascoste (default 2000)."),
+	TEXT("geo.Terrain.MeshBudget <N> - mesh da tenere costruite in tutto, visibili + nascoste (default in base alla RAM)."),
 	FConsoleCommandWithWorldAndArgsDelegate::CreateStatic(
 		[](const TArray<FString>& Args, UWorld* World)
 	{
@@ -977,10 +977,38 @@ static FAutoConsoleCommandWithWorldAndArgs GeoTerrainMeshBudgetCommand(
 			Terrain->GetMeshBudget()));
 	}));
 
+// --- geo.Terrain.Shadows ----------------------------------------------------
+static FAutoConsoleCommandWithWorldAndArgs GeoTerrainShadowsCommand(
+	TEXT("geo.Terrain.Shadows"),
+	TEXT("geo.Terrain.Shadows <0|1> - ombre proiettate dal terreno (default 0: le foto le hanno gia', e costano molto)."),
+	FConsoleCommandWithWorldAndArgsDelegate::CreateStatic(
+		[](const TArray<FString>& Args, UWorld* World)
+	{
+		GeoTerrainConsole::Toggle(Args, World, TEXT("Ombre del terreno"),
+			[](UGeoTerrainSubsystem* T, bool b) { T->SetCastShadows(b); },
+			[](UGeoTerrainSubsystem* T) { return T->IsCastingShadows(); });
+		GeoTerrainConsole::Report(
+			TEXT("  (accese costano: centinaia di mesh non Nanite ridisegnate nelle mappe d'ombra)"), FColor::White);
+	}));
+
+// --- geo.Terrain.Threads ----------------------------------------------------
+static FAutoConsoleCommandWithWorldAndArgs GeoTerrainThreadsCommand(
+	TEXT("geo.Terrain.Threads"),
+	TEXT("geo.Terrain.Threads <N> - mesh in costruzione contemporanea sui thread di lavoro (default 6)."),
+	FConsoleCommandWithWorldAndArgsDelegate::CreateStatic(
+		[](const TArray<FString>& Args, UWorld* World)
+	{
+		UGeoTerrainSubsystem* Terrain = GeoTerrainConsole::Get(World);
+		if (!Terrain) { return; }
+		if (Args.Num() >= 1) { Terrain->SetBuildsInFlight(FCString::Atoi(*Args[0])); }
+		GeoTerrainConsole::Report(FString::Printf(
+			TEXT("Costruzioni in parallelo: %d (il doppio in riscaldamento)"), Terrain->GetBuildsInFlight()));
+	}));
+
 // --- geo.Terrain.Warmup -----------------------------------------------------
 static FAutoConsoleCommandWithWorldAndArgs GeoTerrainWarmupCommand(
 	TEXT("geo.Terrain.Warmup"),
-	TEXT("geo.Terrain.Warmup <N> - mesh per frame durante il riscaldamento (dopo un salto). 0 = spento."),
+	TEXT("geo.Terrain.Warmup <N> - mesh CONSEGNATE per frame durante il riscaldamento (dopo un salto, default 16). 0 = spento."),
 	FConsoleCommandWithWorldAndArgsDelegate::CreateStatic(
 		[](const TArray<FString>& Args, UWorld* World)
 	{

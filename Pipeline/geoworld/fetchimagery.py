@@ -18,6 +18,32 @@ L'asset TCI ("True Colour Image"): le tre bande visibili gia' combinate in un
 GeoTIFF a 8 bit, 10 m di risoluzione, circa 230 MB per scena. E' esattamente
 cio' che serve per drappeggiare, senza dover comporre le bande a mano.
 
+COME SI SCELGONO LE SCENE (e perche' la prima versione faceva un mosaico)
+-----------------------------------------------------------------------
+Ogni quadrato MGRS (100 x 100 km) viene fotografato ogni pochi giorni, ma non
+sempre per intero: il satellite passa su una striscia larga 290 km, e i
+quadrati al bordo della striscia restano coperti a meta'. Il resto della scena
+e' "nessun dato". La prima versione sceglieva la scena meno nuvolosa, senza
+guardare quanto fosse piena: su Torino aveva preso una scena vuota al 37% e una
+vuota al 58%, di giorni diversi. Risultato a schermo: grandi zone grigie (il
+colore di riempimento) e pezzi di colore diverso accostati.
+
+Ora, in ordine:
+
+1. si scartano le scene piu' vuote di --max-nodata (1%) o piu' nuvolose di
+   --max-cloud;
+2. fra quelle rimaste si preferisce lo STESSO GIORNO per quadrati vicini: due
+   quadrati fotografati nello stesso passaggio hanno la stessa luce, e il
+   confine fra i due non si vede. Si sceglie il giorno che copre piu' quadrati,
+   poi il successivo per quelli rimasti, e cosi' via;
+3. un quadrato senza nessuna scena piena prende la migliore disponibile piu'
+   fino a due scene di RIEMPIMENTO di altri giorni, che vanno SOTTO di lei nel
+   mosaico e ne coprono i buchi.
+
+L'ordine conta: nel mosaico virtuale di GDAL chi viene dopo copre chi viene
+prima. Per questo fetch-imagery scrive `ordine_scene.txt` (riempimenti prima,
+principali dopo), da passare a build-imagery con `-i @cartella/ordine_scene.txt`.
+
 DUE MODI
 --------
 Scaricare, oppure NON scaricare e passare alla pipeline gli URL preceduti da
@@ -32,7 +58,8 @@ import json
 import os
 import re
 import urllib.request
-from dataclasses import dataclass
+from concurrent.futures import ThreadPoolExecutor
+from dataclasses import dataclass, field
 
 from . import mgrs
 
@@ -46,7 +73,40 @@ NAMED_AREAS = {
     "torino": (7.55, 45.00, 7.80, 45.15),
     "milano": (9.05, 45.40, 9.30, 45.55),
     "napoli": (14.15, 40.78, 14.40, 40.92),
+    "italia": (6.6, 35.4, 18.6, 47.1),
 }
+
+#: Contorni APPROSSIMATI (lon, lat) per le aree grandi: servono a non scaricare
+#: centinaia di quadrati di solo mare. Sono volutamente grossolani e larghi:
+#: un quadrato si tiene se un punto qualunque della griglia di campionamento
+#: cade dentro, o a meno di COAST_MARGIN_DEG dal bordo.
+AREA_POLYGONS = {
+    "italia": [
+        # penisola e arco alpino, in senso orario da Ventimiglia
+        [(7.5, 43.8), (6.6, 45.1), (7.0, 45.9), (8.4, 46.5), (9.3, 46.5), (10.5, 46.9),
+         (12.2, 47.1), (13.7, 46.5), (13.9, 45.6), (12.4, 45.4), (12.3, 44.6),
+         (13.6, 43.5), (14.7, 42.1), (16.2, 41.9), (18.5, 40.2), (18.3, 39.8),
+         (17.0, 40.4), (16.5, 39.6), (17.2, 39.0), (16.1, 37.9), (15.6, 38.0),
+         (15.7, 39.8), (14.9, 40.3), (14.0, 40.8), (12.9, 41.3), (11.1, 42.4),
+         (10.5, 43.0), (10.2, 43.9), (8.8, 44.4)],
+        # Sicilia
+        [(12.4, 37.8), (13.3, 38.2), (15.6, 38.3), (15.1, 37.0), (15.1, 36.6),
+         (14.3, 37.0), (12.7, 37.6)],
+        # Sardegna
+        [(8.2, 40.9), (9.2, 41.3), (9.8, 40.9), (9.6, 39.1), (9.0, 39.0),
+         (8.4, 38.9), (8.4, 39.9)],
+        # isole piccole lontane dalla costa: triangoli attorno all'isola
+        [(11.90, 36.72), (12.07, 36.78), (11.95, 36.85)],        # Pantelleria
+        [(12.53, 35.48), (12.64, 35.51), (12.55, 35.53)],        # Lampedusa
+    ],
+}
+
+#: Quanto lontano dal contorno approssimato si tiene ancora un punto, in gradi.
+COAST_MARGIN_DEG = 0.15
+
+#: Richieste HTTP in parallelo per elenchi e metadati: sono piccole, e per
+#: l'Italia intera sono migliaia. In serie ci vorrebbe mezz'ora.
+METADATA_WORKERS = 16
 
 SCENE_PATTERN = re.compile(r"S2[AB]_[A-Z0-9]+_\d{8}_\d+_L2A")
 
@@ -61,6 +121,17 @@ class Scene:
     month: int
     cloud_cover: float | None = None
     datetime: str | None = None
+    #: Percentuale della scena senza dati (bordo della striscia del satellite).
+    nodata: float | None = None
+
+    @property
+    def date(self) -> str:
+        """Il giorno di acquisizione, AAAAMMGG, dal nome della scena."""
+        return self.name.split("_")[2]
+
+    @property
+    def square_key(self) -> str:
+        return f"{self.zone}{self.band}{self.square}"
 
     @property
     def directory_url(self) -> str:
@@ -114,6 +185,7 @@ def load_metadata(scene: Scene, timeout: float = 60.0) -> Scene:
         properties = document.get("properties", {})
         scene.cloud_cover = properties.get("eo:cloud_cover")
         scene.datetime = properties.get("datetime")
+        scene.nodata = properties.get("s2:nodata_pixel_percentage")
     except Exception:
         # Una scena senza metadati leggibili non e' un errore fatale: resta
         # utilizzabile, semplicemente non si sa quanto sia nuvolosa e finira'
@@ -122,53 +194,208 @@ def load_metadata(scene: Scene, timeout: float = 60.0) -> Scene:
     return scene
 
 
+# =============================================================================
+#  Quali quadrati
+# =============================================================================
+
+def _point_in_polygon(lon: float, lat: float, polygon: list[tuple[float, float]]) -> bool:
+    """Ray casting: quante volte una semiretta verso est attraversa il bordo."""
+    inside = False
+    count = len(polygon)
+    for index in range(count):
+        x1, y1 = polygon[index]
+        x2, y2 = polygon[(index + 1) % count]
+        if (y1 > lat) != (y2 > lat):
+            crossing = x1 + (lat - y1) * (x2 - x1) / (y2 - y1)
+            if lon < crossing:
+                inside = not inside
+    return inside
+
+
+def _distance_to_polygon(lon: float, lat: float, polygon: list[tuple[float, float]]) -> float:
+    """Distanza (in gradi, sul piano) dal bordo del poligono. Basta per un margine."""
+    best = float("inf")
+    count = len(polygon)
+    for index in range(count):
+        x1, y1 = polygon[index]
+        x2, y2 = polygon[(index + 1) % count]
+        dx, dy = x2 - x1, y2 - y1
+        length2 = dx * dx + dy * dy
+        t = 0.0 if length2 == 0 else max(0.0, min(1.0, ((lon - x1) * dx + (lat - y1) * dy) / length2))
+        px, py = x1 + t * dx, y1 + t * dy
+        best = min(best, ((lon - px) ** 2 + (lat - py) ** 2) ** 0.5)
+    return best
+
+
+def squares_for_polygons(polygons: list, step_deg: float = 0.1,
+                         margin_deg: float = COAST_MARGIN_DEG) -> list[tuple[int, str, str]]:
+    """I quadrati MGRS che toccano i poligoni (o gli stanno a meno di margin_deg)."""
+    west = min(x for polygon in polygons for x, _ in polygon) - margin_deg
+    east = max(x for polygon in polygons for x, _ in polygon) + margin_deg
+    south = max(-80.0, min(y for polygon in polygons for _, y in polygon) - margin_deg)
+    north = min(84.0, max(y for polygon in polygons for _, y in polygon) + margin_deg)
+
+    found: list[tuple[int, str, str]] = []
+    seen = set()
+    latitude = south
+    while latitude <= north + 1e-9:
+        longitude = west
+        while longitude <= east + 1e-9:
+            near = any(_point_in_polygon(longitude, latitude, polygon)
+                       or _distance_to_polygon(longitude, latitude, polygon) < margin_deg
+                       for polygon in polygons)
+            if near:
+                key = mgrs.square(latitude, longitude)
+                if key not in seen:
+                    seen.add(key)
+                    found.append(key)
+            longitude += step_deg
+        latitude += step_deg
+    return found
+
+
+# =============================================================================
+#  Quali scene
+# =============================================================================
+
+def _parallel(function, items: list, workers: int = METADATA_WORKERS) -> list:
+    """map() in parallelo, che conserva l'ordine. Per richieste HTTP piccole."""
+    if not items:
+        return []
+    with ThreadPoolExecutor(max_workers=min(workers, len(items))) as pool:
+        return list(pool.map(function, items))
+
+
+def gather_candidates(squares: list[tuple[int, str, str]], *, year: int, months: list[int],
+                      report=print) -> dict[str, list[Scene]]:
+    """Tutte le scene dei quadrati nei mesi richiesti, con i metadati letti."""
+    jobs = [(zone, band, square, month) for zone, band, square in squares for month in months]
+    report(f"elenco le scene: {len(squares)} quadrati x {len(months)} mesi")
+    listed = _parallel(lambda job: list_scenes(job[0], job[1], job[2], year, job[3]), jobs)
+
+    scenes = [scene for batch in listed for scene in batch]
+    report(f"leggo i metadati di {len(scenes)} scene")
+    _parallel(load_metadata, scenes)
+
+    by_square: dict[str, list[Scene]] = {f"{z}{b}{s}": [] for z, b, s in squares}
+    for scene in scenes:
+        by_square[scene.square_key].append(scene)
+    return by_square
+
+
+@dataclass
+class Choice:
+    """Una scena scelta, e il suo ruolo nel mosaico."""
+    scene: Scene
+    role: str                 # "principale" o "riempimento"
+    reason: str = ""
+
+
+def _usable(scene: Scene, max_cloud: float, max_nodata: float) -> bool:
+    return (scene.cloud_cover is not None and scene.cloud_cover <= max_cloud
+            and (scene.nodata or 0.0) <= max_nodata)
+
+
+def _badness(scene: Scene) -> float:
+    """Quanta parte della scena non serve: nuvole piu' vuoto. Piu' basso e' meglio."""
+    cloud = scene.cloud_cover if scene.cloud_cover is not None else 100.0
+    return cloud + (scene.nodata or 0.0)
+
+
+def choose_scenes(candidates: dict[str, list[Scene]], *, max_cloud: float = 10.0,
+                  max_nodata: float = 1.0, max_fillers: int = 2) -> list[Choice]:
+    """
+    Sceglie le scene del mosaico. Funzione PURA: nessuna rete, testabile.
+
+    Ritorna le scelte nell'ordine in cui vanno messe nel mosaico: prima i
+    riempimenti, poi le principali, cosi' che le principali stiano sopra.
+    """
+    good = {key: [s for s in scenes if _usable(s, max_cloud, max_nodata)]
+            for key, scenes in candidates.items()}
+    unassigned = {key for key, scenes in candidates.items() if scenes}
+    primary: dict[str, Choice] = {}
+
+    # --- Stesso giorno per piu' quadrati possibile ------------------------
+    while True:
+        by_date: dict[str, dict[str, Scene]] = {}
+        for key in unassigned:
+            for scene in good[key]:
+                current = by_date.setdefault(scene.date, {}).get(key)
+                if current is None or _badness(scene) < _badness(current):
+                    by_date[scene.date][key] = scene
+        if not by_date:
+            break
+
+        def rank(date: str):
+            chosen = by_date[date]
+            mean_badness = sum(_badness(s) for s in chosen.values()) / len(chosen)
+            return (len(chosen), -mean_badness)
+
+        best_date = max(sorted(by_date), key=rank)
+        for key, scene in by_date[best_date].items():
+            primary[key] = Choice(scene, "principale",
+                                  f"giorno {best_date}, condiviso da {len(by_date[best_date])} quadrati")
+            unassigned.discard(key)
+
+    # --- Quadrati senza una scena piena: la migliore piu' i riempimenti ----
+    fillers: list[Choice] = []
+    for key in sorted(unassigned):
+        # Prima le scene SERENE, anche se vuote a meta': due meta' serene di
+        # giorni diversi fanno un'immagine migliore di una scena piena con un
+        # terzo di nuvole, che a schermo sono macchie bianche. Fra le serene,
+        # la meno vuota fa da principale e le altre riempiono i suoi buchi.
+        # Solo se non ce n'e' nessuna serena si ripiega sulla meno peggio.
+        with_metadata = [s for s in candidates[key] if s.cloud_cover is not None]
+        clear = [s for s in with_metadata if s.cloud_cover <= max_cloud]
+        ranked = (sorted(clear, key=lambda s: ((s.nodata or 0.0), s.cloud_cover)) if clear
+                  else sorted(with_metadata, key=_badness))
+        if not ranked:
+            continue
+        best = ranked[0]
+        primary[key] = Choice(best, "principale",
+                              f"nessuna scena piena e serena: la migliore disponibile "
+                              f"(nuvole {best.cloud_cover:.1f}%, vuoto {best.nodata or 0:.1f}%)")
+        if (best.nodata or 0.0) > max_nodata:
+            added = 0
+            used_dates = {best.date}
+            for other in ranked[1:]:
+                if added >= max_fillers:
+                    break
+                if other.date in used_dates or (other.nodata or 0.0) >= 99.0:
+                    continue
+                fillers.append(Choice(other, "riempimento", f"copre i buchi di {best.name}"))
+                used_dates.add(other.date)
+                added += 1
+
+    return fillers + [primary[key] for key in sorted(primary)]
+
+
 def find_best_scenes(bbox: tuple[float, float, float, float], *,
                      year: int, months: list[int], max_cloud: float = 10.0,
-                     report=print) -> list[Scene]:
-    """
-    Per ogni quadrato MGRS che tocca il bbox, la scena meno nuvolosa.
+                     max_nodata: float = 1.0, area: str | None = None,
+                     report=print) -> list[Choice]:
+    """Quadrati dell'area, loro scene, scelta. Ritorna le scelte in ordine di mosaico."""
+    if area in AREA_POLYGONS:
+        squares = squares_for_polygons(AREA_POLYGONS[area])
+        report(f"area '{area}': {len(squares)} quadrati MGRS sulla terraferma (mare escluso)")
+    else:
+        west, south, east, north = bbox
+        squares = mgrs.squares_for_bbox(west, south, east, north)
+        report(f"quadrati MGRS da coprire: {', '.join(f'{z}{b}{s}' for z, b, s in squares)}")
 
-    Una scena per quadrato e non tutte: due scene dello stesso quadrato coprono
-    lo stesso territorio in giorni diversi, e mosaicarle significherebbe avere
-    meta' immagine con le ombre di giugno e meta' con quelle di agosto.
-    """
-    west, south, east, north = bbox
-    squares = mgrs.squares_for_bbox(west, south, east, north)
-    report(f"quadrati MGRS da coprire: {', '.join(f'{z}{b}{s}' for z, b, s in squares)}")
+    candidates = gather_candidates(squares, year=year, months=months, report=report)
 
-    best: list[Scene] = []
+    for key, scenes in sorted(candidates.items()):
+        if not scenes:
+            report(f"  {key}: nessuna scena nei mesi richiesti (mare aperto?)")
 
-    for zone, band, square in squares:
-        candidates: list[Scene] = []
-        for month in months:
-            candidates.extend(list_scenes(zone, band, square, year, month))
-
-        if not candidates:
-            report(f"  {zone}{band}{square}: nessuna scena nei mesi richiesti")
-            continue
-
-        for scene in candidates:
-            load_metadata(scene)
-
-        usable = [s for s in candidates
-                  if s.cloud_cover is not None and s.cloud_cover <= max_cloud]
-        if not usable:
-            clearest = min((s for s in candidates if s.cloud_cover is not None),
-                           key=lambda s: s.cloud_cover, default=None)
-            if clearest is None:
-                report(f"  {zone}{band}{square}: {len(candidates)} scene, metadati illeggibili")
-                continue
-            report(f"  {zone}{band}{square}: nessuna sotto il {max_cloud:.0f}% di nuvole; "
-                   f"la migliore e' al {clearest.cloud_cover:.1f}%")
-            best.append(clearest)
-            continue
-
-        chosen = min(usable, key=lambda s: s.cloud_cover)
-        report(f"  {zone}{band}{square}: {chosen.name}  nuvole {chosen.cloud_cover:.1f}%  "
-               f"({len(candidates)} candidate)")
-        best.append(chosen)
-
-    return best
+    choices = choose_scenes(candidates, max_cloud=max_cloud, max_nodata=max_nodata)
+    for choice in choices:
+        scene = choice.scene
+        report(f"  {scene.square_key}: {choice.role:<12} {scene.name}  "
+               f"nuvole {scene.cloud_cover if scene.cloud_cover is not None else -1:5.1f}%  "
+               f"vuoto {scene.nodata or 0:5.1f}%  ({choice.reason})")
+    return choices
 
 
 def remote_size(url: str, timeout: float = 30.0) -> int | None:
@@ -213,27 +440,65 @@ def download_scene(scene: Scene, directory: str, report=print,
     return destination
 
 
+ORDER_FILENAME = "ordine_scene.txt"
+
+
+def write_order_file(directory: str, paths: list[str]) -> str:
+    """Scrive l'ordine del mosaico: una riga per file, dal basso verso l'alto."""
+    os.makedirs(directory, exist_ok=True)
+    path = os.path.join(directory, ORDER_FILENAME)
+    with open(path, "w", encoding="utf-8") as handle:
+        handle.write("# Ordine del mosaico per build-imagery: chi viene dopo copre chi viene prima.\n")
+        handle.write("# Uso: python run.py build-imagery -i @" + path + " -o dataset/ortofoto\n")
+        for entry in paths:
+            # Percorsi relativi alla cartella del file: la si puo' spostare.
+            relative = entry if entry.startswith("/vsi") else os.path.relpath(entry, directory)
+            handle.write(relative + "\n")
+    return path
+
+
 def fetch(bbox: tuple[float, float, float, float], directory: str, *,
           year: int, months: list[int], max_cloud: float = 10.0,
-          stream: bool = False, report=print) -> list[str]:
+          max_nodata: float = 1.0, area: str | None = None,
+          stream: bool = False, dry_run: bool = False, download_workers: int = 4,
+          report=print) -> list[str]:
     """
-    Trova e procura le scene. Ritorna i percorsi da passare a build-imagery.
+    Trova e procura le scene. Ritorna i percorsi da passare a build-imagery, in
+    ordine di mosaico, e scrive lo stesso elenco in ordine_scene.txt.
 
     Con `stream` non scarica niente: restituisce percorsi /vsicurl/ che GDAL
-    legge direttamente dalla rete.
+    legge direttamente dalla rete. Con `dry_run` dice solo cosa scaricherebbe
+    e quanto pesa.
     """
-    scenes = find_best_scenes(bbox, year=year, months=months,
-                              max_cloud=max_cloud, report=report)
-    if not scenes:
+    choices = find_best_scenes(bbox, year=year, months=months, max_cloud=max_cloud,
+                               max_nodata=max_nodata, area=area, report=report)
+    if not choices:
         raise RuntimeError(
             "nessuna scena trovata. Prova ad allargare i mesi, ad alzare "
             "--max-cloud, o a controllare che l'area sia sulla terraferma.")
 
+    scenes = [choice.scene for choice in choices]
+
+    if dry_run:
+        sizes = _parallel(lambda scene: remote_size(scene.visual_url), scenes)
+        known = [size for size in sizes if size]
+        total = sum(known) + (len(sizes) - len(known)) * 230 * 1024 * 1024
+        report("")
+        report(f"Scaricherei {len(scenes)} scene, circa {total / 1024 ** 3:.1f} GB "
+               f"({len(sizes) - len(known)} dimensioni stimate a 230 MB).")
+        report("Nessun file scaricato: togli --dry-run per procedere.")
+        return []
+
     if stream:
         report("")
         report("Modalita' streaming: niente da scaricare, GDAL leggera' dalla rete.")
-        return [scene.vsicurl_path for scene in scenes]
+        paths = [scene.vsicurl_path for scene in scenes]
+        report(f"Ordine del mosaico in {write_order_file(directory, paths)}")
+        return paths
 
     report("")
-    report(f"Scarico {len(scenes)} scene in {directory}")
-    return [download_scene(scene, directory, report=report) for scene in scenes]
+    report(f"Scarico {len(scenes)} scene in {directory} ({download_workers} alla volta)")
+    paths = _parallel(lambda scene: download_scene(scene, directory, report=report),
+                      scenes, workers=max(1, download_workers))
+    report(f"Ordine del mosaico in {write_order_file(directory, paths)}")
+    return paths

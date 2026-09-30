@@ -461,6 +461,106 @@ int main()
 	}
 
 	// ------------------------------------------------------------------
+	Section("7. Mipmap, mediate in luce lineare");
+
+	{
+		const int32_t Side = Tiles::TilePixels;
+		std::vector<uint8_t> Uniform(static_cast<size_t>(Side) * Side * 4);
+		for (size_t Index = 0; Index < Uniform.size(); Index += 4)
+		{
+			Uniform[Index + 0] = 40; Uniform[Index + 1] = 120; Uniform[Index + 2] = 200; Uniform[Index + 3] = 255;
+		}
+		std::vector<std::vector<uint8_t>> Mips;
+		Tiles::BuildMipChain(Uniform, Side, Side, Mips);
+
+		bool bSizesRight = (Mips.size() == 8);
+		for (size_t Level = 0; Level < Mips.size(); ++Level)
+		{
+			const size_t Expected = static_cast<size_t>(Side >> (Level + 1)) * static_cast<size_t>(Side >> (Level + 1)) * 4;
+			if (Mips[Level].size() != Expected) { bSizesRight = false; }
+		}
+		Check(bSizesRight, "otto livelli, da 128x128 a 1x1", std::to_string(Mips.size()) + " livelli");
+
+		const std::vector<uint8_t>& Last = Mips.back();
+		Check(Last.size() == 4 && Last[0] == 40 && Last[1] == 120 && Last[2] == 200 && Last[3] == 255,
+			"un colore uniforme resta identico fino all'ultimo livello (nessuna deriva di arrotondamento)");
+
+		// Scacchiera bianco/nero a 1 pixel: la media GIUSTA e' meta' luce, che in
+		// sRGB vale ~188. La media ingenua dei valori darebbe 128: troppo scuro.
+		std::vector<uint8_t> Checker(static_cast<size_t>(Side) * Side * 4);
+		for (int32_t Row = 0; Row < Side; ++Row)
+		{
+			for (int32_t Column = 0; Column < Side; ++Column)
+			{
+				const uint8_t Value = ((Row + Column) % 2 == 0) ? 255 : 0;
+				uint8_t* P = Checker.data() + (static_cast<size_t>(Row) * Side + Column) * 4;
+				P[0] = P[1] = P[2] = Value;
+				P[3] = 255;
+			}
+		}
+		Tiles::BuildMipChain(Checker, Side, Side, Mips);
+		Check(!Mips.empty() && Mips[0][0] >= 186 && Mips[0][0] <= 190,
+			"una scacchiera bianco/nero diventa grigio 188, non 128 (media in luce lineare)",
+			Mips.empty() ? std::string("nessun mip") : std::to_string(Mips[0][0]));
+
+		std::vector<std::vector<uint8_t>> None;
+		Tiles::BuildMipChain(std::vector<uint8_t>(10), Side, Side, None);
+		Check(None.empty(), "dimensioni incoerenti: nessuna mipmap, nessun crash");
+
+		auto Tile = std::make_shared<FImageTile>();
+		Tile->Pixels = Uniform;
+		const size_t Without = Tile->GetByteSize();
+		Tiles::BuildMipChain(Tile->Pixels, Side, Side, Tile->Mips);
+		const double Growth = static_cast<double>(Tile->GetByteSize() - Without) / static_cast<double>(Uniform.size());
+		Check(std::abs(Growth - 1.0 / 3.0) < 0.01, "le mipmap costano un terzo in piu', e la cache le conta",
+			Fmt("+%.1f%%", Growth * 100.0));
+	}
+
+	// ------------------------------------------------------------------
+	Section("8. La formula del materiale: l'offset e' un float2");
+
+	{
+		// Il materiale calcola uv_tex = uv_mesh * DrapeUv.B + DrapeUv.RG. La
+		// prima versione sommava DrapeUv.R a ENTRAMBE le componenti. Questi
+		// test descrivono la formula giusta, e mostrano su quale tile quella
+		// sbagliata avrebbe preso il quarto d'immagine sbagliato.
+		const FDrapeTransform Drape = MakeDrapeTransform(FTileKey{ 14, 8701, 2400 }, 13);   // X dispari, Y pari
+
+		auto Correct = [&](float U, float V, float& OutU, float& OutV)
+		{
+			OutU = U * Drape.Scale + Drape.OffsetU;
+			OutV = V * Drape.Scale + Drape.OffsetV;
+		};
+		auto Buggy = [&](float U, float V, float& OutU, float& OutV)
+		{
+			OutU = U * Drape.Scale + Drape.OffsetU;
+			OutV = V * Drape.Scale + Drape.OffsetU;     // l'errore: R anche su V
+		};
+
+		float CU = 0, CV = 0, BU = 0, BV = 0;
+		Correct(0.0f, 0.0f, CU, CV);
+		Buggy(0.0f, 0.0f, BU, BV);
+		Check(CU == 0.5f && CV == 0.0f, "tile (8701, 2400) sotto l'antenato di livello 13: quarto NORD-EST",
+			Fmt("u %.2f", CU) + Fmt(" v %.2f", CV));
+		Check(BV == 0.5f, "(con la formula sbagliata sarebbe finita nel quarto SUD-EST)",
+			Fmt("v %.2f", BV));
+
+		// Su quante tile sbagliava: tutte quelle con parita' di X diversa da Y.
+		int Wrong = 0, Total = 0;
+		for (uint32_t Y = 2400; Y < 2408; ++Y)
+		{
+			for (uint32_t X = 8700; X < 8708; ++X)
+			{
+				const FDrapeTransform Each = MakeDrapeTransform(FTileKey{ 14, X, Y }, 13);
+				++Total;
+				if (Each.OffsetU != Each.OffsetV) { ++Wrong; }
+			}
+		}
+		Check(Wrong * 2 == Total, "con un antenato di un livello, la formula sbagliata sbagliava META' delle tile",
+			std::to_string(Wrong) + " su " + std::to_string(Total));
+	}
+
+	// ------------------------------------------------------------------
 	std::printf("\n=====================================================\n");
 	std::printf(" RISULTATO: %d passati, %d falliti\n", GPassed, GFailed);
 	std::printf("=====================================================\n");

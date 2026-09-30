@@ -33,15 +33,54 @@ from . import imagecut, imageformat, imagerymanifest, raster, tiling
 PIPELINE_VERSION = "1.0"
 
 
+def read_list_file(path: str) -> list[str]:
+    """
+    Un file di elenco (@elenco.txt): un raster per riga, nell'ordine del mosaico.
+    Righe vuote e commenti (#) si saltano; i percorsi relativi sono relativi
+    alla cartella del file, cosi' la cartella si puo' spostare intera.
+    """
+    base = os.path.dirname(os.path.abspath(path))
+    entries = []
+    with open(path, encoding="utf-8") as handle:
+        for line in handle:
+            entry = line.strip()
+            if not entry or entry.startswith("#"):
+                continue
+            if not entry.startswith("/vsi") and not os.path.isabs(entry):
+                entry = os.path.join(base, entry)
+            entries.append(entry)
+    return entries
+
+
 def expand_inputs(patterns: list[str]) -> list[str]:
-    """Espande i glob e verifica che qualcosa esista davvero."""
+    """
+    Espande i glob e gli elenchi @file, e verifica che qualcosa esista davvero.
+
+    L'ORDINE CONTA: nel mosaico virtuale chi viene dopo copre chi viene prima.
+    Un glob si ordina per nome; un elenco @file resta nell'ordine scritto.
+    """
     files: list[str] = []
     for pattern in patterns:
+        if pattern.startswith("@"):
+            for entry in read_list_file(pattern[1:]):
+                if entry.startswith("/vsi") or os.path.exists(entry):
+                    files.append(entry)
+            continue
         matched = sorted(glob.glob(pattern))
         if matched:
             files.extend(matched)
         elif os.path.exists(pattern):
             files.append(pattern)
+
+    # Senza doppioni (un file citato da due pattern), mantenendo l'ULTIMA
+    # posizione: e' quella che decide chi sta sopra nel mosaico.
+    seen: set[str] = set()
+    unique_reversed = []
+    for entry in reversed(files):
+        if entry not in seen:
+            seen.add(entry)
+            unique_reversed.append(entry)
+    files = list(reversed(unique_reversed))
 
     if not files:
         raise FileNotFoundError(

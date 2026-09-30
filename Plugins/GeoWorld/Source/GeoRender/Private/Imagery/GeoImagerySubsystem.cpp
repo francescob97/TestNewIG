@@ -17,9 +17,9 @@ using GeoWorld::Tiles::FTileKey;
 
 namespace
 {
-	/** Byte occupati in memoria video da una texture 256x256 BGRA senza mipmap. */
+	/** Byte occupati in memoria video da una texture 256x256 BGRA con le mipmap (+1/3). */
 	constexpr double TextureBytes =
-		static_cast<double>(Tiles::TilePixels) * Tiles::TilePixels * 4.0;
+		static_cast<double>(Tiles::TilePixels) * Tiles::TilePixels * 4.0 * 4.0 / 3.0;
 
 	/**
 	 * Adatta lo streaming all'interfaccia che la matematica del drappeggio si
@@ -282,14 +282,55 @@ UTexture2D* UGeoImagerySubsystem::GetOrCreateTexture(const FTileKey& ImageKey, i
 	if (!Texture) { return nullptr; }
 
 	Texture->SRGB = true;
-	Texture->Filter = TextureFilter::TF_Bilinear;
 	Texture->AddressX = TextureAddress::TA_Clamp;
 	Texture->AddressY = TextureAddress::TA_Clamp;
 	Texture->NeverStream = true;
 
-	void* Destination = Texture->GetPlatformData()->Mips[0].BulkData.Lock(LOCK_READ_WRITE);
+	// FILTRO. La prima versione era TF_Bilinear senza mipmap: da lontano il
+	// terreno brulicava, e a viste radenti (cioe' sempre, da un aereo) le foto
+	// diventavano una poltiglia. Ora ci sono le mipmap, e il filtro lo decide il
+	// gruppo "World" delle impostazioni del motore: anisotropico, cioe' capace di
+	// campionare di piu' lungo la direzione in cui la superficie si allontana.
+	Texture->LODGroup = TextureGroup::TEXTUREGROUP_World;
+	Texture->Filter = TextureFilter::TF_Default;
+
+	FTexturePlatformData* Platform = Texture->GetPlatformData();
+
+	void* Destination = Platform->Mips[0].BulkData.Lock(LOCK_READ_WRITE);
 	FMemory::Memcpy(Destination, Tile->Pixels.data(), Tile->Pixels.size());
-	Texture->GetPlatformData()->Mips[0].BulkData.Unlock();
+	Platform->Mips[0].BulkData.Unlock();
+
+	// ------------------------------------------------------------------
+	//  NOTA UE: le mipmap di una texture creata a runtime.
+	//
+	//  CreateTransient crea solo il livello 0. Gli altri si aggiungono a mano
+	//  alla lista dei mip della FTexturePlatformData, PRIMA di UpdateResource:
+	//  e' li' che la risorsa della scheda video viene creata, e prende tutti i
+	//  livelli presenti in quel momento. I pixel sono gia' pronti: li ha
+	//  calcolati il worker (BuildMipChain), mediando in luce lineare.
+	//
+	//  TIndirectArray possiede i puntatori che riceve: il new qui non ha un
+	//  delete corrispondente perche' lo fa la texture quando viene distrutta.
+	// ------------------------------------------------------------------
+	int32 MipWidth = Tile->Width;
+	int32 MipHeight = Tile->Height;
+	for (const std::vector<uint8_t>& MipPixels : Tile->Mips)
+	{
+		MipWidth = FMath::Max(1, MipWidth / 2);
+		MipHeight = FMath::Max(1, MipHeight / 2);
+		if (MipPixels.size() != static_cast<size_t>(MipWidth) * MipHeight * 4) { break; }
+
+		FTexture2DMipMap* Mip = new FTexture2DMipMap();
+		Mip->SizeX = MipWidth;
+		Mip->SizeY = MipHeight;
+		Platform->Mips.Add(Mip);
+
+		Mip->BulkData.Lock(LOCK_READ_WRITE);
+		void* MipData = Mip->BulkData.Realloc(static_cast<int64>(MipPixels.size()));
+		FMemory::Memcpy(MipData, MipPixels.data(), MipPixels.size());
+		Mip->BulkData.Unlock();
+	}
+
 	Texture->UpdateResource();
 
 	Textures.Add(Packed, TStrongObjectPtr<UTexture2D>(Texture));
@@ -369,6 +410,15 @@ void UGeoImagerySubsystem::DrawDebugOverlay()
 	{
 		Line(FColor::Red, TEXT("Nessun dataset di immagini aperto: geo.Imagery.Open <cartella>"));
 		return;
+	}
+
+	if (Terrain)
+	{
+		if (const IGeoTerrainMeshProvider* Provider = Terrain->GetProvider())
+		{
+			const FString Problem = Provider->GetMaterialProblem();
+			if (!Problem.IsEmpty()) { Line(FColor::Red, Problem); }
+		}
 	}
 
 	Line(FColor::Green, FString::Printf(TEXT("Tile vestite  : %d   senza immagine %d"),

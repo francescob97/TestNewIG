@@ -304,6 +304,12 @@ VectorParameter ---------+----------+                    v
 ("UvOffsetScale")     .BA        .RG                Base Color
 ```
 
+> **Nota a posteriori (prima prova su Torino).** Il disegno qui sopra era
+> giusto: `.RG` è una maschera a due canali. L'implementazione invece collegò
+> all'Add il solo pin R, "risparmiando" la maschera, e l'offset U finì anche
+> in V. Il parametro ora si chiama `DrapeUv`, così un materiale vecchio si
+> riconosce. Vedi `docs/prova-torino.md`.
+
 Due strade, e le prepariamo entrambe:
 
 1. **`geo.Imagery.CreateMaterial`** — un comando nel modulo `GeoWorldEditor`

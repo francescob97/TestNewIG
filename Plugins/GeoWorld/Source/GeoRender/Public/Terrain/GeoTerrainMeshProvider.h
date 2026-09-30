@@ -14,6 +14,37 @@
 class UTexture2D;
 
 /**
+ * Una mesh gia' convertita nella forma interna del provider, pronta da
+ * consegnare al renderer. Opaca per chi sta sopra: la produce la funzione di
+ * preparazione del provider e la consuma CommitPreparedTile dello stesso.
+ *
+ * PERCHE' ESISTE. Costruire la geometria di una tile ha due parti costose: la
+ * geodesia (BuildTileMesh, C++ puro) e la conversione nella struttura del
+ * provider (per UDynamicMeshComponent una FDynamicMesh3, con la sua topologia
+ * di spigoli). Entrambe si possono fare su un thread di lavoro, perche' non
+ * toccano UObject. Resta sul game thread solo la consegna al componente.
+ */
+struct FGeoPreparedTileMesh
+{
+	virtual ~FGeoPreparedTileMesh() = default;
+
+	/** Origine del frame locale: serve per calcolare la trasformazione alla consegna. */
+	GeoWorld::Core::FGeodetic Origin;
+	int32 TriangleCount = 0;
+};
+
+using FGeoPreparedTileMeshPtr = TSharedPtr<FGeoPreparedTileMesh, ESPMode::ThreadSafe>;
+
+/**
+ * Funzione di preparazione: gira su un thread di lavoro.
+ *
+ * E' un puntatore a funzione LIBERA e non un metodo virtuale di proposito: un
+ * lavoro in volo non deve tenere un puntatore al provider, che potrebbe
+ * essere distrutto mentre il lavoro gira. Una funzione libera non ha stato.
+ */
+using FGeoPrepareTileMeshFunction = FGeoPreparedTileMeshPtr (*)(const GeoWorld::Mesh::FTileMeshData& Mesh);
+
+/**
  * =============================================================================
  *  PERCHE' UN'INTERFACCIA
  * =============================================================================
@@ -88,8 +119,33 @@ public:
 	                                const GeoWorld::Mesh::FTileMeshData& Mesh,
 	                                const FTransform& Transform) = 0;
 
+	/** La funzione che prepara una mesh fuori dal game thread (vedi FGeoPreparedTileMesh). */
+	virtual FGeoPrepareTileMeshFunction GetPrepareFunction() const = 0;
+
+	/**
+	 * Consegna al renderer una mesh preparata. GAME THREAD. `Prepared` deve
+	 * venire dalla funzione di preparazione di QUESTO provider, e viene
+	 * consumata (i dati si spostano, non si copiano).
+	 */
+	virtual bool CommitPreparedTile(const GeoWorld::Tiles::FTileKey& Key,
+	                                FGeoPreparedTileMesh& Prepared,
+	                                const FTransform& Transform) = 0;
+
 	virtual void RemoveTile(const GeoWorld::Tiles::FTileKey& Key) = 0;
 	virtual void RemoveAllTiles() = 0;
+
+	/**
+	 * Il terreno proietta ombre? Default NO, per due ragioni.
+	 *
+	 * 1. Le ortofoto le ombre le hanno gia': sono fotografie fatte con il sole.
+	 *    Aggiungerne di calcolate le raddoppia, spesso in una direzione diversa.
+	 * 2. Costano moltissimo: centinaia di mesh da decine di migliaia di
+	 *    triangoli, non Nanite, disegnate di nuovo nelle mappe d'ombra (le
+	 *    Virtual Shadow Maps di UE5 in particolare soffrono la geometria non
+	 *    Nanite). Su un portatile e' spesso la voce piu' pesante del frame.
+	 */
+	virtual void SetCastShadows(bool bInCastShadows) = 0;
+	virtual bool IsCastingShadows() const = 0;
 
 	/**
 	 * Mostra o nasconde una tile gia' costruita, senza distruggerla.
@@ -130,6 +186,13 @@ public:
 
 	/** Quante tile hanno davvero una texture addosso. */
 	virtual int32 GetDrapedTileCount() const = 0;
+
+	/**
+	 * Un problema noto del materiale del drappeggio, da mostrare a schermo, o
+	 * stringa vuota. Esiste perche' un materiale sbagliato non da' errori: da'
+	 * un'immagine sbagliata, e il primo sospettato non e' mai il materiale.
+	 */
+	virtual FString GetMaterialProblem() const { return FString(); }
 
 	virtual int32 GetTileCount() const = 0;
 	virtual void SetWireframe(bool bInWireframe) = 0;

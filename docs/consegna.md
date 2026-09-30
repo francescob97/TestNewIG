@@ -17,14 +17,15 @@ Ultimo aggiornamento: 2026-09-20. Branch: `claude/charming-goodall-xd2r3g`.
 | 6 | Ortofoto drappeggiate | **codice completo, mai compilato in UE** |
 | 7 | Entità e interoperabilità (CIGI, DIS, HLA, memoria condivisa) | **solo design** |
 | dopo | **Residenza**: selezione indipendente dalla vista, precarico da posizione e velocità, mesh nascoste | **codice completo, mai compilato in UE** — `docs/residenza-design.md` |
+| dopo | **Prima prova su Torino**: materiale corretto, scene Sentinel, mipmap, mesh su thread, tutta Italia | **codice completo, da ricompilare e riprovare** — `docs/prova-torino.md` |
 
 **Avvertenza sul C++:** nessuna riga di C++ di questo progetto e' mai stata
 compilata con Unreal Engine. L'ambiente in cui e' stato scritto e' Linux senza
 il motore. Quello che **e'** stato verificato:
 
-* tutta la matematica pura, con test numerici eseguiti: **205 test C++** in
-  totale (37 Fase 1 + 22 Fase 3 + 74 Fase 4 e residenza + 28 Fase 5 + 44
-  Fase 6), piu' 77 test Python;
+* tutta la matematica pura, con test numerici eseguiti: **213 test C++** in
+  totale (37 Fase 1 + 22 Fase 3 + 74 Fase 4 e residenza + 28 Fase 5 + 52
+  Fase 6), piu' 90 test Python;
 * le convenzioni UE controllate staticamente (bilanciamento parentesi,
   posizione dei `.generated.h`, guardie `WITH_EDITOR`, macro di export);
 * il formato dei file, letto dal codice C++ vero contro un dataset vero.
@@ -60,7 +61,7 @@ python run.py check-env                              :: SEMPRE per primo
 python run.py fetch --area test -o dati/copernicus   :: DEM libero, 19 MB
 python run.py build -i "dati/copernicus/*.tif" -o dataset/test
 python run.py verify -o dataset/test
-python -m unittest discover -s tests                 :: 32 test
+python -m unittest discover -s tests                 :: 90 test
 ```
 
 `check-env` e' l'unico comando che sta fra te e un dataset sbagliato di 48
@@ -120,7 +121,9 @@ geo.Lod.Prefetch <0|1>         piano di residenza e precarico (default 1)
 geo.Lod.Lookahead <s>          quanti secondi avanti prevedere (default 12)
 geo.Lod.Safety <fattore>       anello di sicurezza in RAM (default 0.5; 0 = spento)
 geo.Terrain.MeshBudget <N>     mesh tenute costruite, visibili + nascoste (default 2000)
-geo.Terrain.Warmup <N>         mesh per frame dopo un salto (default 24; 0 = spento)
+geo.Terrain.Warmup <N>         mesh consegnate per frame dopo un salto (default 16; 0 = spento)
+geo.Terrain.Shadows <0|1>      ombre del terreno (default 0: le foto le hanno gia', e costano)
+geo.Terrain.Threads <N>        mesh in costruzione sui thread di lavoro (default 6)
 
 geo.Terrain.Demo <cartella>    apre un dataset e disegna il terreno vero
 geo.Terrain.Enable <0|1>       costruzione della geometria
@@ -435,16 +438,17 @@ arbitrari e non lo sono. Le motivazioni estese sono in `docs/fase5-design.md`.
 
 Limitazioni note, lasciate aperte di proposito:
 
-* la mesh si costruisce **sul game thread** con un budget di 4 tile per frame.
-  `BuildTileMesh` e' puro e senza stato: spostarlo sul pool della Fase 3 e' una
-  modifica localizzata, da fare quando `Costruzione` nell'overlay lo chiedera';
+* ~~la mesh si costruisce sul game thread~~: **spostata sui thread di lavoro**
+  dopo la prima prova su Torino (`docs/prova-torino.md`, sezione 6). Sul game
+  thread resta la consegna, 4 mesh per frame;
 * le normali ai bordi usano differenze unilaterali: possibile cucitura di
   illuminazione, geometria comunque continua;
 * `bFlipWinding` ha un default scelto senza mai aver visto lo schermo. Se il
   terreno e' invisibile dall'alto, `geo.Terrain.FlipWinding 0` e poi si cambia
   il default in `FTileMeshParameters`;
-* le ortofoto non hanno mipmap ne' trasparenza sulle tile parziali, e ogni tile
-  ha la propria texture e la propria material instance.
+* le ortofoto non hanno trasparenza sulle tile parziali, e ogni tile ha la
+  propria texture e la propria material instance. Le **mipmap** ci sono dalla
+  prima prova su Torino.
 
 ---
 
@@ -454,6 +458,7 @@ Limitazioni note, lasciate aperte di proposito:
 |---|---|
 | Manuale di studio: tutto il progetto spiegato, capitolo per capitolo | `docs/manuale/00-indice.md` |
 | Residenza: cosa tenere pronto, design e motivazioni | `docs/residenza-design.md` |
+| Prima prova su Torino: mosaico, prestazioni, tutta Italia | `docs/prova-torino.md` |
 | Verifica della residenza in Unreal | `docs/residenza-verifica.md` |
 | Programma delle sei fasi | `docs/programma.md` |
 | Da dove vengono i dati, licenze, ortofoto | `docs/dati.md` |

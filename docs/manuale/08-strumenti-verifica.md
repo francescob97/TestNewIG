@@ -265,8 +265,8 @@ python Plugins\GeoWorld\Tools\CheckOwnApiCalls.py
 
 ## Riepilogo
 
-* **205 test C++** senza Unreal (dopo la residenza, capitolo 11), **77 test
-  Python**, **sette controlli statici**.
+* **213 test C++** senza Unreal (dopo la residenza e la prima prova su Torino),
+  **90 test Python**, **sette controlli statici**.
 * I test migliori confrontano con **qualcosa di indipendente**: la fisica, un
   algoritmo diverso, il mondo reale.
 * I test **saltano** quando manca una libreria opzionale, non falliscono.

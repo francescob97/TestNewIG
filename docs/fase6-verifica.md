@@ -165,7 +165,7 @@ Su un'ortofoto generica lo zero puo' essere un'ombra legittima: in quel caso
 ### Costruire la piramide
 
 ```bat
-python run.py build-imagery -i "dati/sentinel/*_TCI.tif" -o dataset/ortofoto --name "Sentinel-2 Roma"
+python run.py build-imagery -i @dati/sentinel/ordine_scene.txt -o dataset/ortofoto --name "Sentinel-2 Roma"
 python run.py verify-imagery -o dataset/ortofoto
 python run.py inspect-imagery dataset/ortofoto/13/4332/1012.gim
 ```
@@ -197,15 +197,25 @@ minuto. Nel Content Browser, cartella `GeoWorld Content/Materials`, nuovo
 Material chiamato **`M_GeoTerrain`**:
 
 1. **TextureCoordinate** (nessuna impostazione da cambiare).
-2. **VectorParameter**, nome **`UvOffsetScale`**, valore di default
-   `(0, 0, 1, 1)`.
-3. **Multiply**: A = TextureCoordinate, B = `UvOffsetScale` mascherato **BA**.
-4. **Add**: A = uscita del Multiply, B = `UvOffsetScale` mascherato **RG**.
-5. **TextureSampleParameter2D**, nome **`BaseColor`**, con l'ingresso **UVs**
+2. **VectorParameter**, nome **`DrapeUv`**, valore di default `(0, 0, 1, 1)`.
+3. **Multiply**: A = TextureCoordinate, B = il pin **B** (blu) di `DrapeUv`.
+4. **ComponentMask** con **R e G** spuntati (B e A no), ingresso = il pin
+   principale (bianco) di `DrapeUv`.
+5. **Add**: A = uscita del Multiply, B = uscita della **ComponentMask**.
+6. **TextureSampleParameter2D**, nome **`BaseColor`**, con l'ingresso **UVs**
    collegato all'uscita dell'Add.
-6. L'uscita RGB del sampler va in **Base Color**.
+7. L'uscita RGB del sampler va in **Base Color**.
 
 I nomi dei due parametri devono essere esatti: sono quelli che il codice cerca.
+
+> ⚠️ **Correzione dopo la prima prova.** La prima versione di queste istruzioni
+> (e del comando) si chiamava `UvOffsetScale` e collegava all'Add il pin **R**
+> invece di una maschera RG. Un pin di un solo canale è uno scalare, e Unreal
+> lo somma a entrambe le componenti: l'offset U finiva anche in V, e metà delle
+> tile prendeva il pezzo d'immagine sbagliato. Se hai il materiale vecchio,
+> rilancia `geo.Imagery.CreateMaterial`: ora rifà quello esistente. Finché non
+> lo fai, l'overlay `geo.Imagery.Debug 1` lo segnala in rosso. Dettagli in
+> `docs/prova-torino.md`.
 
 ### La demo
 
@@ -304,9 +314,9 @@ geo.Imagery.CreateMaterial            costruisce M_GeoTerrain (solo editor)
   che qui non c'è. Sono provati il formato, la riduzione della piramide, gli
   indici e il manifest. Il primo `build-imagery` su dati veri è la prima volta
   che quel codice gira.
-* **Niente mipmap**: a viste radenti il terreno sfarfalla. Il LOD tiene il
-  rapporto texel/pixel vicino a 1:1, quindi il problema è contenuto, ma esiste.
-  La soluzione è scrivere i mip nel file e caricarli tutti.
+* ~~**Niente mipmap**~~ — **risolto dopo la prima prova**: le mipmap si
+  calcolano sul worker, mediate in luce lineare, e la texture usa il filtro
+  anisotropico del gruppo World (`docs/prova-torino.md`).
 * **Niente trasparenza** sulle tile parzialmente coperte: dove l'ortofoto non
   arriva si vede il grigio di riempimento. Serve un canale alfa, che il JPEG non
   ha.

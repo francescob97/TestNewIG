@@ -139,7 +139,7 @@ geo.Goto Roma
 ```
 
 Ora il frame resta fluido ma il terreno si riempie a pezzi, per più tempo. Torna
-al default con `geo.Terrain.Warmup 24`. Dimmi quale dei due preferisci: il
+al default con `geo.Terrain.Warmup 16`. Dimmi quale dei due preferisci: il
 valore 24 è una stima, e si può cambiare.
 
 ---

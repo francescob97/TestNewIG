@@ -350,10 +350,12 @@ Si potrebbe spostare la costruzione sui thread di caricamento: `BuildTileMesh()`
 perché nessuna misura dice che serve, e aggiungere concorrenza prima di avere un
 numero è il modo classico di pagare complessità per niente.
 
-Con la residenza questa è diventata la cosa da fare dopo: il precarico
-nasconde il costo della costruzione (la fa prima, con il budget che avanza), ma
-non lo toglie, e nel riscaldamento dopo un salto il frame rallenta proprio per
-questo.
+Con la residenza questa è diventata la cosa da fare dopo, e alla prima prova
+su un portatile si è visto perché: il gioco laggava appena ci si muoveva. **È
+stata fatta**: geodesia e `FDynamicMesh3` ora si costruiscono su `UE::Tasks`, e
+il budget per frame vale solo per la consegna al componente (capitolo 11,
+sezione 11.10). La lezione resta valida al contrario: la misura che mancava è
+arrivata dal primo utente vero.
 
 ### Un bug trovato scrivendo
 

@@ -178,10 +178,10 @@ private:
 
 	FGeoTileDataset Dataset;
 	/**
-	 * 1 GB di default: ~16.000 tile da 66 KB. Il piano di residenza ne vuole
-	 * tipicamente 1.500-3.000, quindi resta molto spazio per la memoria
-	 * "a lungo termine" (zone gia' visitate). Sulla macchina da 64 GB si puo'
-	 * alzare con geo.Tiles.Budget senza pensarci troppo.
+	 * Il budget vero si decide in Initialize in base alla RAM: 512 MB fino a
+	 * 16 GB (~8.000 tile da 66 KB), 1 GB fino a 32, 4 GB oltre. Il piano di
+	 * residenza ne vuole tipicamente 1.500-3.000; il resto e' memoria "a lungo
+	 * termine" per le zone gia' visitate. Si cambia con geo.Tiles.Budget.
 	 */
 	GeoWorld::Tiles::FTileCache Cache{ 1024ull * 1024 * 1024 };
 

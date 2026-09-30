@@ -574,18 +574,22 @@ def command_fetch_imagery(args: argparse.Namespace) -> int:
         paths = fetchimagery.fetch(
             bbox, args.output,
             year=args.year, months=args.months, max_cloud=args.max_cloud,
-            stream=args.stream, report=log)
+            max_nodata=args.max_nodata, area=(None if args.bbox else args.area),
+            stream=args.stream, dry_run=args.dry_run,
+            download_workers=args.workers, report=log)
     except RuntimeError as error:
         log(f"ERRORE: {error}")
         return 1
 
+    if args.dry_run:
+        return 0
+
+    order_file = os.path.join(args.output, fetchimagery.ORDER_FILENAME)
     log("")
-    log("Da dare in pasto alla pipeline:")
+    log("Da dare in pasto alla pipeline (l'ordine delle scene conta: vedi il file):")
+    log(f"  python run.py build-imagery -i @{order_file} -o dataset/ortofoto")
     if args.stream:
-        log(f"  python run.py build-imagery -i {' '.join(repr(p) for p in paths)} -o dataset/ortofoto")
         log("  (GDAL legge dalla rete: comodo per provare, lento su aree grandi)")
-    else:
-        log(f"  python run.py build-imagery -i \"{args.output}/*_TCI.tif\" -o dataset/ortofoto")
     return 0
 
 
@@ -778,7 +782,9 @@ def build_parser() -> argparse.ArgumentParser:
     img_area = fetch_img.add_mutually_exclusive_group()
     img_area.add_argument("--area", default="test",
                           choices=sorted(fetchimagery.NAMED_AREAS),
-                          help="area predefinita (default: test, un pezzo di Roma)")
+                          help="area predefinita (default: test, un pezzo di Roma). "
+                               "'italia' usa un contorno della penisola e delle isole per "
+                               "non scaricare il mare: ~90 quadrati, ~20-25 GB")
     img_area.add_argument("--bbox", nargs=4, type=float,
                           metavar=("OVEST", "SUD", "EST", "NORD"))
     fetch_img.add_argument("-o", "--output", required=True, help="cartella di destinazione")
@@ -787,9 +793,16 @@ def build_parser() -> argparse.ArgumentParser:
                            help="mesi in cui cercare (default: estate, poche nuvole)")
     fetch_img.add_argument("--max-cloud", type=float, default=10.0,
                            help="copertura nuvolosa massima accettata, in percentuale")
+    fetch_img.add_argument("--max-nodata", type=float, default=1.0,
+                           help="parte vuota massima di una scena principale, in percentuale "
+                                "(le scene al bordo della striscia del satellite sono coperte a meta')")
     fetch_img.add_argument("--stream", action="store_true",
                            help="non scaricare: restituisce percorsi /vsicurl/ che GDAL "
                                 "legge dalla rete leggendo solo le finestre che servono")
+    fetch_img.add_argument("--dry-run", action="store_true",
+                           help="non scaricare niente: dice quali scene e quanti GB")
+    fetch_img.add_argument("--workers", type=int, default=4,
+                           help="download in parallelo (default 4)")
     fetch_img.set_defaults(func=command_fetch_imagery)
 
     build_img = subparsers.add_parser(
@@ -797,7 +810,8 @@ def build_parser() -> argparse.ArgumentParser:
     build_img.add_argument("-i", "--input", nargs="+", required=True,
                            help="raster sorgente. QUALUNQUE formato che GDAL sappia leggere: "
                                 "GeoTIFF, JPEG2000, ECW se il driver c'e', anche /vsicurl/. "
-                                "Accetta glob, es. 'ortofoto/*.tif'")
+                                "Accetta glob, es. 'ortofoto/*.tif', e @elenco.txt: un file "
+                                "per riga, nell'ordine del mosaico (lo scrive fetch-imagery)")
     build_img.add_argument("-o", "--output", required=True, help="cartella radice del dataset")
     build_img.add_argument("--work", help="cartella degli intermedi (default: <output>/_work)")
     build_img.add_argument("--name", default="senza nome")

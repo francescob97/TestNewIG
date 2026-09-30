@@ -104,6 +104,11 @@ void UGeoTileStreamingSubsystem::Initialize(FSubsystemCollectionBase& Collection
 {
 	Super::Initialize(Collection);
 
+	// Budget della cache in base alla RAM: 1 GB e' niente su 64 GB e troppo
+	// su un portatile da 16, dove l'editor da solo ne occupa una buona parte.
+	const uint32 MemoryGB = FPlatformMemory::GetConstants().TotalPhysicalGB;
+	SetCacheBudgetMB((MemoryGB <= 16) ? 512 : (MemoryGB <= 32) ? 1024 : 4096);
+
 	LoadPool = FQueuedThreadPool::Allocate();
 	// TPri_BelowNormal: il caricamento delle tile non deve mai contendere la CPU
 	// con il game thread. Meglio una tile che arriva un frame dopo che un frame

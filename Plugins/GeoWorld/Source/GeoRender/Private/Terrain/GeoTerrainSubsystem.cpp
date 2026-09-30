@@ -34,6 +34,17 @@ void UGeoTerrainSubsystem::Initialize(FSubsystemCollectionBase& Collection)
 	Streaming = World->GetSubsystem<UGeoTileStreamingSubsystem>();
 	Quadtree = World->GetSubsystem<UGeoQuadtreeSubsystem>();
 
+	BuildQueue = MakeShared<FMeshBuildQueue, ESPMode::ThreadSafe>();
+
+	// Budget di mesh in base alla RAM. Una mesh costa qualche MB fra la copia
+	// sul game thread (la FDynamicMesh3, con la topologia) e i buffer della
+	// scheda video. Con 16 GB, di cui l'editor ne usa parecchi da solo, 2.000
+	// mesh avrebbero mandato la macchina a usare il file di paging.
+	const uint32 MemoryGB = FPlatformMemory::GetConstants().TotalPhysicalGB;
+	MeshBudget = (MemoryGB <= 16) ? 700 : (MemoryGB <= 32) ? 1500 : 3000;
+	UE_LOG(LogGeoWorld, Log, TEXT("[GeoTerrain] RAM %u GB: budget di %d mesh (geo.Terrain.MeshBudget)"),
+		MemoryGB, MeshBudget);
+
 	// Il rebasing non tocca i vertici: si limita a ricalcolare le
 	// trasformazioni dei componenti. E' il guadagno del frame locale alla tile,
 	// e qui e' una riga.
@@ -57,6 +68,11 @@ void UGeoTerrainSubsystem::Deinitialize()
 	// La funzione registrata nel quadtree cattura "this": va tolta prima che
 	// questo oggetto sparisca, altrimenti il quadtree chiamerebbe un morto.
 	if (Quadtree) { Quadtree->ClearRenderReadiness(); }
+
+	// I lavori in volo eseguono codice di questo modulo. Chiudere l'editor (e
+	// scaricare la DLL) mentre uno gira vorrebbe dire eseguire codice che non
+	// c'e' piu': si aspetta che finiscano. Durano pochi millisecondi.
+	WaitForAllBuilds();
 
 	if (Provider.IsValid()) { Provider->Shutdown(); }
 	Provider.Reset();
@@ -82,6 +98,7 @@ void UGeoTerrainSubsystem::SetEnabled(bool bInEnabled)
 		{
 			Provider = MakeUnique<FDynamicMeshTerrainProvider>();
 			Provider->Initialize(GetWorld());
+			Provider->SetCastShadows(bCastShadowsWanted);
 		}
 		// Il quadtree deve girare: senza selezione non c'e' niente da costruire.
 		if (Quadtree)
@@ -198,45 +215,49 @@ void UGeoTerrainSubsystem::SynchroniseWithSelection()
 	else if (ReadyFraction < 0.60) { bWarmingUp = true; }
 	else if (ReadyFraction >= 0.95) { bWarmingUp = false; }
 
-	// --- 4. Costruire, in ordine di urgenza, entro il budget del frame ---------
-	int32 Budget = bWarmingUp ? FMath::Max(MaxTilesPerFrame, WarmupTilesPerFrame) : MaxTilesPerFrame;
+	// --- 4. Consegnare le mesh pronte, entro il budget del frame --------------
+	//
+	// Il budget per frame ora vale per la CONSEGNA (SetMesh sul componente e,
+	// a fine frame, la creazione del proxy di scena): la costruzione vera sta
+	// sui thread di lavoro e non pesa sul frame.
+	const int32 CommitBudget = bWarmingUp ? FMath::Max(MaxTilesPerFrame, WarmupTilesPerFrame) : MaxTilesPerFrame;
+	CommitCompletedBuilds(Snapshot, Visible, CommitBudget);
+
+	// --- 5. Mandare in costruzione, entro il tetto dei lavori in volo ---------
+	OrphanBuilds.RemoveAll([](const UE::Tasks::FTask& Task) { return Task.IsCompleted(); });
+
+	const int32 MaxInFlight = bWarmingUp ? BuildsInFlight * 2 : BuildsInFlight;
 	int32 Waiting = 0;
 
-	// 4a. Urgenti: servono al disegno adesso. Nessun tetto di memoria: una
+	// 5a. Urgenti: servono al disegno adesso. Nessun tetto di memoria: una
 	// tile che manca a schermo e' un buco, e un buco e' peggio di un budget
 	// sforato.
 	for (const FTileKey& Key : Urgent)
 	{
-		if (BuiltTiles.Contains(Key.Pack())) { continue; }   // doppione fra le due liste
-		if (Budget <= 0) { ++Waiting; continue; }
-		if (!Streaming->FindLoadedTile(Key)) { ++Waiting; continue; }
-		// Le tile della selezione vanno mostrate subito; quelle attese dal
-		// padre restano nascoste finche' il quadtree non scende su di loro.
-		if (BuildTile(Key, Snapshot, Visible.Contains(Key.Pack()))) { ++Stats.CostruiteQuestoFrame; --Budget; }
+		const uint64 Packed = Key.Pack();
+		if (BuiltTiles.Contains(Packed) || InFlightBuilds.Contains(Packed)) { continue; }
+		if (InFlightBuilds.Num() >= MaxInFlight) { ++Waiting; continue; }
+		if (!DispatchBuild(Key, /*bUrgent=*/true)) { ++Waiting; }
 	}
 
-	// 4b. Il piano: prima "adesso", poi le posizioni previste, in ordine. Qui
+	// 5b. Il piano: prima "adesso", poi le posizioni previste, in ordine. Qui
 	// si' che vale il budget di memoria: sono costruzioni in anticipo, e se
 	// non c'e' posto e' meglio aspettare che buttare via qualcosa che serve.
 	for (const Quadtree::FResidencyEntry& Entry : Plan.Entries)
 	{
-		if (Budget <= 0) { break; }
+		if (InFlightBuilds.Num() >= MaxInFlight) { break; }
 		if (Entry.Tier > Plan.PredictionTiers) { break; }   // la sicurezza resta in RAM
-		if (BuiltTiles.Num() >= MeshBudget) { break; }
+		if (BuiltTiles.Num() + InFlightBuilds.Num() >= MeshBudget) { break; }
 
 		const uint64 Packed = Entry.Key.Pack();
-		if (BuiltTiles.Contains(Packed)) { continue; }
-		if (!Streaming->FindLoadedTile(Entry.Key)) { continue; }   // le quote arriveranno
-
-		if (BuildTile(Entry.Key, Snapshot, /*bVisible=*/false))
-		{
-			++Stats.PrecostruiteQuestoFrame;
-			--Budget;
-		}
+		if (BuiltTiles.Contains(Packed) || InFlightBuilds.Contains(Packed)) { continue; }
+		DispatchBuild(Entry.Key, /*bUrgent=*/false);   // senza quote torna false: arriveranno
 	}
 
 	// --- Statistiche -------------------------------------------------------------
 	Stats.TileInAttesa = Waiting;
+	Stats.InCostruzione = InFlightBuilds.Num();
+	Stats.OmbreAccese = Provider->IsCastingShadows();
 	Stats.TileConGeometria = Provider->GetTileCount();
 	Stats.InRiscaldamento = bWarmingUp;
 	Stats.PronteAdesso = ReadyNow;
@@ -282,37 +303,129 @@ void UGeoTerrainSubsystem::RefreshPlanSet()
 	}
 }
 
-bool UGeoTerrainSubsystem::BuildTile(const FTileKey& Key, const FGeoreferenceSnapshot& Snapshot, bool bVisible)
+bool UGeoTerrainSubsystem::DispatchBuild(const FTileKey& Key, bool bUrgent)
 {
-	const auto TileData = Streaming->FindLoadedTile(Key);
-	if (!TileData) { return false; }
+	// Le quote devono essere in RAM: il lavoro ne prende un riferimento
+	// condiviso (shared_ptr a una tile immutabile), quindi la cache puo'
+	// sfrattarle nel frattempo senza che il lavoro se ne accorga.
+	GeoWorld::Tiles::FTileCache::FTilePtr TileData = Streaming->FindLoadedTile(Key);
+	if (!TileData || !Provider.IsValid() || !BuildQueue.IsValid()) { return false; }
+
+	// Tutto cio' che il lavoro usa viene COPIATO nella lambda: parametri,
+	// generazione, funzione di preparazione, coda. Niente "this": il lavoro
+	// non deve poter toccare il subsystem, che vive sul game thread.
+	const Mesh::FTileMeshParameters Parameters = MeshParameters;
+	const FGeoPrepareTileMeshFunction Prepare = Provider->GetPrepareFunction();
+	const int32 Generation = BuildGeneration;
+	TSharedPtr<FMeshBuildQueue, ESPMode::ThreadSafe> Queue = BuildQueue;
+
+	// ------------------------------------------------------------------
+	//  NOTA UE: UE::Tasks::Launch mette il lavoro nel task graph del motore,
+	//  che lo esegue su uno dei suoi thread. Qui e' la scelta giusta, mentre
+	//  per le letture da disco (Fase 3) avevamo scelto un pool nostro: il
+	//  task graph e' fatto per lavoro che CALCOLA, e costruire una mesh e'
+	//  calcolo puro, senza attese. Priorita' "Background": non deve rubare i
+	//  thread a chi prepara il frame (animazioni, fisica, rendering).
+	// ------------------------------------------------------------------
+	UE::Tasks::FTask Task = UE::Tasks::Launch(TEXT("GeoTerrainMeshBuild"),
+		[TileData, Parameters, Prepare, Generation, Key, Queue]()
+		{
+			const double Started = FPlatformTime::Seconds();
+
+			FMeshBuildResult Result;
+			Result.Key = Key;
+			Result.Generation = Generation;
+
+			Mesh::FTileMeshData MeshData;
+			Mesh::BuildTileMesh(*TileData, Parameters, MeshData);
+			if (MeshData.IsValid() && Prepare)
+			{
+				Result.Prepared = Prepare(MeshData);
+			}
+
+			Result.Seconds = FPlatformTime::Seconds() - Started;
+			Queue->Completed.Enqueue(MoveTemp(Result));
+		},
+		UE::Tasks::ETaskPriority::BackgroundNormal);
+
+	InFlightBuilds.Add(Key.Pack(), FInFlightBuild{ Task, bUrgent });
+	return true;
+}
+
+void UGeoTerrainSubsystem::CommitCompletedBuilds(const FGeoreferenceSnapshot& Snapshot,
+                                                 const TSet<uint64>& Visible, int32 Budget)
+{
+	Stats.ConsegnaMsQuestoFrame = 0.0f;
+	if (!BuildQueue.IsValid()) { return; }
 
 	const double Started = FPlatformTime::Seconds();
+	int32 Committed = 0;
 
-	Mesh::FTileMeshData MeshData;
-	Mesh::BuildTileMesh(*TileData, MeshParameters, MeshData);
-	if (!MeshData.IsValid()) { return false; }
+	FMeshBuildResult Result;
+	while (Committed < Budget && BuildQueue->Completed.Dequeue(Result))
+	{
+		const uint64 Packed = Result.Key.Pack();
 
-	// La trasformazione porta il frame locale della tile nello spazio di
-	// Unreal. La SCALA fa la conversione metri -> unita': i vertici restano
-	// in metri, quindi piccoli, e la regola del punto unico di conversione
-	// resta rispettata.
-	FTransform Transform = Snapshot.GetLocalNeuTransform(MeshData.Origin);
-	Transform.SetScale3D(FVector(GeoWorld::Units::MetersToUu));
+		bool bUrgent = false;
+		if (const FInFlightBuild* InFlight = InFlightBuilds.Find(Packed))
+		{
+			bUrgent = InFlight->bUrgent;
+		}
 
-	if (!Provider->CreateOrUpdateTile(Key, MeshData, Transform)) { return false; }
+		// Un risultato di una generazione vecchia e' orfano: la sua voce in
+		// InFlightBuilds, se c'e', appartiene a un lavoro nuovo per la stessa
+		// tile, e non va toccata.
+		if (Result.Generation != BuildGeneration) { continue; }
+		InFlightBuilds.Remove(Packed);
 
-	FBuiltTile& Built = BuiltTiles.Add(Key.Pack(),
-		FBuiltTile{ Key, static_cast<int32>(MeshData.TriangleCount), /*bVisible=*/true, FPlatformTime::Seconds() });
+		if (!Result.Prepared.IsValid() || BuiltTiles.Contains(Packed)) { continue; }
 
-	// Il provider crea i componenti visibili. Una mesh costruita in anticipo
-	// va nascosta subito, nello stesso frame: il renderer non la vedra' mai.
-	SetBuiltVisible(Built, bVisible);
-	if (bVisible) { Streaming->SetTilePinned(Key, true); }
+		// La trasformazione si calcola ADESSO, non quando il lavoro e' partito:
+		// se nel frattempo c'e' stato un rebase, l'origine e' cambiata. I vertici
+		// invece sono nel frame locale della tile e non dipendono dall'origine.
+		FTransform Transform = Snapshot.GetLocalNeuTransform(Result.Prepared->Origin);
+		Transform.SetScale3D(FVector(GeoWorld::Units::MetersToUu));
 
-	TotalBuildSeconds += FPlatformTime::Seconds() - Started;
-	++BuildCount;
-	return true;
+		const int32 Triangles = Result.Prepared->TriangleCount;
+		if (!Provider->CommitPreparedTile(Result.Key, *Result.Prepared, Transform)) { continue; }
+
+		FBuiltTile& Built = BuiltTiles.Add(Packed,
+			FBuiltTile{ Result.Key, Triangles, /*bVisible=*/true, FPlatformTime::Seconds() });
+
+		// Il provider crea i componenti visibili. Una mesh costruita in anticipo
+		// va nascosta subito, nello stesso frame: il renderer non la vedra' mai.
+		const bool bShow = Visible.Contains(Packed);
+		SetBuiltVisible(Built, bShow);
+		if (bShow) { Streaming->SetTilePinned(Result.Key, true); }
+
+		TotalBuildSeconds += Result.Seconds;
+		++BuildCount;
+		++Committed;
+		if (bUrgent) { ++Stats.CostruiteQuestoFrame; } else { ++Stats.PrecostruiteQuestoFrame; }
+	}
+
+	Stats.ConsegnaMsQuestoFrame = static_cast<float>((FPlatformTime::Seconds() - Started) * 1000.0);
+}
+
+void UGeoTerrainSubsystem::WaitForAllBuilds()
+{
+	for (TPair<uint64, FInFlightBuild>& Pair : InFlightBuilds) { Pair.Value.Task.Wait(); }
+	for (UE::Tasks::FTask& Task : OrphanBuilds) { Task.Wait(); }
+	InFlightBuilds.Empty();
+	OrphanBuilds.Empty();
+
+	// I risultati rimasti in coda non servono piu': si buttano.
+	if (BuildQueue.IsValid())
+	{
+		FMeshBuildResult Discarded;
+		while (BuildQueue->Completed.Dequeue(Discarded)) {}
+	}
+}
+
+void UGeoTerrainSubsystem::SetCastShadows(bool bInCastShadows)
+{
+	bCastShadowsWanted = bInCastShadows;
+	if (Provider.IsValid()) { Provider->SetCastShadows(bInCastShadows); }
 }
 
 void UGeoTerrainSubsystem::SetBuiltVisible(FBuiltTile& Built, bool bVisible)
@@ -397,6 +510,13 @@ void UGeoTerrainSubsystem::RebuildAll()
 		}
 	}
 
+	// I lavori in volo sono stati lanciati con i parametri di prima: si
+	// abbandonano (restano da attendere solo alla chiusura) e i loro risultati
+	// verranno riconosciuti come vecchi dalla generazione.
+	++BuildGeneration;
+	for (TPair<uint64, FInFlightBuild>& Pair : InFlightBuilds) { OrphanBuilds.Add(Pair.Value.Task); }
+	InFlightBuilds.Empty();
+
 	Provider->RemoveAllTiles();
 	BuiltTiles.Empty();
 
@@ -469,11 +589,17 @@ void UGeoTerrainSubsystem::DrawDebugOverlay()
 		Stats.CostruiteQuestoFrame, Stats.PrecostruiteQuestoFrame,
 		Stats.RimosseQuestoFrame, Stats.SfrattateQuestoFrame));
 
-	Line(Stats.TempoCostruzioneMediaMs > 8.0f ? FColor::Yellow : FColor::White,
-		FString::Printf(TEXT("Costruzione   : %.2f ms per tile"), Stats.TempoCostruzioneMediaMs));
+	// Due tempi diversi, su thread diversi. La costruzione (sui thread di
+	// lavoro) non rallenta il frame; la consegna (sul game thread) si'. Se il
+	// gioco scatta e la consegna e' alta, abbassa geo.Terrain.Budget.
+	Line(FColor::White, FString::Printf(TEXT("Costruzione   : %.2f ms per tile, su thread   (%d in corso)"),
+		Stats.TempoCostruzioneMediaMs, Stats.InCostruzione));
+	Line(Stats.ConsegnaMsQuestoFrame > 4.0f ? FColor::Yellow : FColor::White,
+		FString::Printf(TEXT("Consegna      : %.2f ms questo frame, sul game thread"), Stats.ConsegnaMsQuestoFrame));
 
-	Line(FColor::White, FString::Printf(TEXT("Gonne         : %s   rebase gestiti: %d"),
-		IsSkirtEnabled() ? TEXT("on") : TEXT("OFF"), Stats.Rebase));
+	Line(FColor::White, FString::Printf(TEXT("Gonne         : %s   ombre: %s   rebase gestiti: %d"),
+		IsSkirtEnabled() ? TEXT("on") : TEXT("OFF"),
+		Stats.OmbreAccese ? TEXT("ON") : TEXT("off"), Stats.Rebase));
 }
 
 // ---------------------------------------------------------------------------

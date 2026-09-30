@@ -336,4 +336,5 @@ il primo comando da provare quando non si vede niente. (6)
 | `docs/fase7-design.md` | entità e interoperabilità (solo design) |
 | `docs/residenza-design.md` | cosa tenere pronto: posizione, velocità, mesh nascoste |
 | `docs/residenza-verifica.md` | come verificare la residenza |
+| `docs/prova-torino.md` | la prima prova vera: cause del mosaico, prestazioni, tutta Italia |
 | `docs/issues-aperte.md` | problemi noti non risolti |

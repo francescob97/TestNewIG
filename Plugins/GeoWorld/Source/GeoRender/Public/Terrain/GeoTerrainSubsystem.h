@@ -4,7 +4,9 @@
 #pragma once
 
 #include "CoreMinimal.h"
+#include "Containers/Queue.h"
 #include "Subsystems/WorldSubsystem.h"
+#include "Tasks/Task.h"
 
 #include "Mesh/TileMesh.h"
 #include "Terrain/GeoTerrainMeshProvider.h"
@@ -48,6 +50,13 @@ struct FGeoTerrainStats
 	UPROPERTY() int32 ProntePreviste = 0;
 	UPROPERTY() int32 PianoPreviste = 0;
 	UPROPERTY() bool InRiscaldamento = false;
+
+	// --- Costruzione su thread -------------------------------------------
+	/** Mesh in costruzione sui thread di lavoro (o pronte, in attesa di consegna). */
+	UPROPERTY() int32 InCostruzione = 0;
+	/** Millisecondi spesi SUL GAME THREAD per consegnare le mesh, questo frame. */
+	UPROPERTY() float ConsegnaMsQuestoFrame = 0.0f;
+	UPROPERTY() bool OmbreAccese = false;
 };
 
 /**
@@ -65,11 +74,12 @@ struct FGeoTerrainStats
  *  Nel frattempo non si vedono buchi, perche' il quadtree continua a
  *  selezionare il padre finche' i figli non sono pronti (regola della Fase 4).
  *
- *  La costruzione sta comunque sul game thread. E' il limite principale di
- *  questa fase, ed e' un limite VOLUTO per ora: FTileMeshData e BuildTileMesh
- *  sono C++ puro senza alcuno stato condiviso, quindi spostarli sul thread pool
- *  della Fase 3 e' un lavoro localizzato. Farlo adesso avrebbe aggiunto
- *  asincronia a una fase che ha gia' abbastanza modi di essere sbagliata.
+ *  AGGIORNAMENTO: la costruzione NON sta piu' sul game thread. Nella Fase 5
+ *  era un limite voluto ("aggiungere asincronia dopo, quando servira'"); e'
+ *  servito alla prima prova su un portatile, dove 4 mesh per frame a qualche
+ *  millisecondo l'una facevano girare il gioco a scatti appena ci si muoveva.
+ *  Ora geodesia e FDynamicMesh3 si costruiscono sui thread di lavoro
+ *  (UE::Tasks) e il budget per frame vale per la sola CONSEGNA al componente.
  */
 UCLASS()
 class GEORENDER_API UGeoTerrainSubsystem : public UTickableWorldSubsystem
@@ -109,6 +119,17 @@ public:
 	 * decimo di secondo il frame rate scende, e in cambio il terreno arriva
 	 * tutto insieme invece di riempirsi a pezzi per secondi.
 	 */
+	/**
+	 * Mesh in costruzione contemporaneamente sui thread di lavoro. Oltre, si
+	 * aspetta che se ne liberi uno. Il doppio in riscaldamento.
+	 */
+	void SetBuildsInFlight(int32 Count) { BuildsInFlight = FMath::Clamp(Count, 1, 64); }
+	int32 GetBuildsInFlight() const { return BuildsInFlight; }
+
+	/** Ombre proiettate dal terreno. Default spente: vedi IGeoTerrainMeshProvider::SetCastShadows. */
+	void SetCastShadows(bool bInCastShadows);
+	bool IsCastingShadows() const { return Provider.IsValid() ? Provider->IsCastingShadows() : bCastShadowsWanted; }
+
 	void SetWarmupTilesPerFrame(int32 Count) { WarmupTilesPerFrame = FMath::Clamp(Count, 0, 256); }
 	int32 GetWarmupTilesPerFrame() const { return WarmupTilesPerFrame; }
 	bool IsWarmingUp() const { return bWarmingUp; }
@@ -179,7 +200,9 @@ public:
 
 private:
 	void SynchroniseWithSelection();
-	bool BuildTile(const GeoWorld::Tiles::FTileKey& Key, const FGeoreferenceSnapshot& Snapshot, bool bVisible);
+	bool DispatchBuild(const GeoWorld::Tiles::FTileKey& Key, bool bUrgent);
+	void CommitCompletedBuilds(const FGeoreferenceSnapshot& Snapshot, const TSet<uint64>& Visible, int32 Budget);
+	void WaitForAllBuilds();
 	void EvictHiddenMeshes(const TSet<uint64>& Visible);
 	void RefreshPlanSet();
 	void DrawDebugOverlay();
@@ -225,14 +248,67 @@ private:
 	int32 PlanGenerationSeen = -1;
 	int32 TeleportsSeen = 0;
 
+	// --- Costruzione su thread ----------------------------------------------
+	//
+	//  game thread                         thread di lavoro (UE::Tasks)
+	//  -----------                         ----------------------------
+	//  DispatchBuild(tile) ------------->  BuildTileMesh (geodesia)
+	//                                      PrepareTileMesh (FDynamicMesh3)
+	//  CommitCompletedBuilds  <---coda---  risultato
+	//    SetMesh + trasformazione
+	//
+	//  Il game thread fa solo le due estremita'. Tutto il resto, cioe' quasi
+	//  tutto il costo, sta sui thread di lavoro.
+
+	/** Risultato di una costruzione, consegnato al game thread. */
+	struct FMeshBuildResult
+	{
+		GeoWorld::Tiles::FTileKey Key;
+		int32 Generation = 0;
+		FGeoPreparedTileMeshPtr Prepared;
+		double Seconds = 0.0;
+	};
+
+	/**
+	 * La coda sta in un oggetto CONDIVISO, non dentro il subsystem: ogni lavoro
+	 * in volo ne tiene un riferimento. Se il subsystem venisse distrutto con un
+	 * lavoro ancora in corso, il lavoro scriverebbe comunque in una coda viva,
+	 * invece che nella memoria di un oggetto morto.
+	 */
+	struct FMeshBuildQueue
+	{
+		TQueue<FMeshBuildResult, EQueueMode::Mpsc> Completed;
+	};
+	TSharedPtr<FMeshBuildQueue, ESPMode::ThreadSafe> BuildQueue;
+
+	struct FInFlightBuild
+	{
+		UE::Tasks::FTask Task;
+		/** Chiesta dal disegno (true) o costruzione in anticipo (false). Solo statistica. */
+		bool bUrgent = false;
+	};
+	TMap<uint64, FInFlightBuild> InFlightBuilds;
+
+	/** Lavori di una generazione scaduta: non servono piu', ma vanno attesi alla chiusura. */
+	TArray<UE::Tasks::FTask> OrphanBuilds;
+
+	/**
+	 * Cresce a ogni RebuildAll (gonne, orientamento...): un risultato con una
+	 * generazione vecchia e' stato costruito con i parametri di prima e si butta.
+	 */
+	int32 BuildGeneration = 0;
+
 	GeoWorld::Mesh::FTileMeshParameters MeshParameters;
 	FGeoTerrainStats Stats;
 	bool bDrawBounds = false;
 	FDelegateHandle RebaseHandle;
 
 	int32 MaxTilesPerFrame = 4;
+	/** Si ridimensiona in Initialize in base alla RAM della macchina. */
 	int32 MeshBudget = 2000;
-	int32 WarmupTilesPerFrame = 24;
+	int32 WarmupTilesPerFrame = 16;
+	int32 BuildsInFlight = 6;
+	bool bCastShadowsWanted = false;
 	bool bWarmingUp = false;
 	bool bTerrainEnabled = false;
 	bool bShowDebugOverlay = false;

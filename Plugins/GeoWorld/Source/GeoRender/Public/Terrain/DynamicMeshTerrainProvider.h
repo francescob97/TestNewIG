@@ -32,8 +32,18 @@ public:
 	                                const GeoWorld::Mesh::FTileMeshData& Mesh,
 	                                const FTransform& Transform) override;
 
+	virtual FGeoPrepareTileMeshFunction GetPrepareFunction() const override { return &PrepareTileMesh; }
+	virtual bool CommitPreparedTile(const GeoWorld::Tiles::FTileKey& Key,
+	                                FGeoPreparedTileMesh& Prepared,
+	                                const FTransform& Transform) override;
+
+	/** Thread-safe: costruisce la FDynamicMesh3, senza toccare UObject. */
+	static FGeoPreparedTileMeshPtr PrepareTileMesh(const GeoWorld::Mesh::FTileMeshData& Mesh);
+
 	virtual void RemoveTile(const GeoWorld::Tiles::FTileKey& Key) override;
 	virtual void RemoveAllTiles() override;
+	virtual void SetCastShadows(bool bInCastShadows) override;
+	virtual bool IsCastingShadows() const override { return bCastShadows; }
 	virtual void SetTileVisible(const GeoWorld::Tiles::FTileKey& Key, bool bVisible) override;
 	virtual void RefreshTransforms(const FGeoreferenceSnapshot& Snapshot) override;
 
@@ -45,6 +55,7 @@ public:
 	                          UTexture2D* Texture,
 	                          const GeoWorld::Imagery::FDrapeTransform& Drape) override;
 	virtual int32 GetDrapedTileCount() const override;
+	virtual FString GetMaterialProblem() const override { return MaterialProblem; }
 
 	virtual int32 GetRealizedTriangleCount() const override;
 	virtual void GetDiagnostics(TArray<FGeoTerrainTileDiagnostic>& Out,
@@ -84,4 +95,8 @@ private:
 	TStrongObjectPtr<UMaterialInterface> DrapeMaterial;
 	TMap<uint64, FTileEntry> Tiles;
 	bool bWireframe = false;
+	bool bCastShadows = false;
+
+	/** Vuota se il materiale del drappeggio e' quello giusto. */
+	FString MaterialProblem;
 };

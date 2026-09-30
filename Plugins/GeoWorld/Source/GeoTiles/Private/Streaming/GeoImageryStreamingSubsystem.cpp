@@ -125,6 +125,10 @@ private:
 		}
 
 		Tile.Pixels.assign(Raw.GetData(), Raw.GetData() + Raw.Num());
+
+		// Le mipmap si calcolano qui, sul worker, insieme alla decodifica: sul
+		// game thread resterebbero un costo per ogni texture creata.
+		GeoWorld::Tiles::BuildMipChain(Tile.Pixels, Tile.Width, Tile.Height, Tile.Mips);
 		return true;
 	}
 
@@ -172,10 +176,12 @@ void UGeoImageryStreamingSubsystem::Initialize(FSubsystemCollectionBase& Collect
 	// aggiunge un membro non assegnabile e il punto di rottura e' qui, lontano
 	// dalla causa.
 	//
-	// 1 GB: ~4.000 tile decodificate. Con il piano di residenza il terreno
-	// tiene costruite (e quindi vestite) anche le tile nascoste pronte
-	// all'uso, fino a ~1.500-2.000: 512 MB sarebbero stati al limite.
-	Cache.SetBudgetBytes(1024ull * 1024 * 1024);
+	// Budget in base alla RAM. Una tile decodificata con le sue mipmap occupa
+	// ~340 KB: 512 MB sono ~1.500 tile, abbastanza per le mesh che un
+	// portatile da 16 GB tiene costruite (~700). Con piu' RAM si sale.
+	const uint32 MemoryGB = FPlatformMemory::GetConstants().TotalPhysicalGB;
+	const uint64 BudgetMB = (MemoryGB <= 16) ? 512 : (MemoryGB <= 32) ? 1024 : 3072;
+	Cache.SetBudgetBytes(BudgetMB * 1024ull * 1024ull);
 
 	Pool.Startup(LoadThreadCount, TEXT("GeoImageryLoadPool"));
 

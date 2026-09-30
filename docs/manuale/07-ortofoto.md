@@ -243,11 +243,35 @@ le scene di quelle città.
 
 ### Cosa si scarica
 
-Per ogni quadrato, si leggono i metadati di tutte le scene del periodo richiesto
-(estate di default, meno nuvole) e si sceglie **la meno nuvolosa**. Una scena per
-quadrato, non tutte: due scene dello stesso quadrato coprono lo stesso territorio
-in giorni diversi, e mosaicarle darebbe metà immagine con le ombre di giugno e
-metà con quelle di agosto.
+Per ogni quadrato si leggono i metadati di tutte le scene del periodo richiesto
+(estate di default, meno nuvole). La **prima versione** sceglieva la meno
+nuvolosa, e basta. Sembra ragionevole; alla prima prova su Torino ha prodotto
+un mosaico.
+
+> ⚠️ **Trappola: una scena può essere vuota a metà.** Il satellite fotografa
+> una striscia larga 290 km, e i quadrati al bordo della striscia restano
+> coperti solo in parte: il resto è "nessun dato" (il metadato
+> `s2:nodata_pixel_percentage`). Su Torino la regola vecchia aveva scelto una
+> scena vuota al **37%** e una vuota al **58%**, di giorni diversi. A schermo:
+> grandi zone grigie (il colore di riempimento) e pezzi di colore diverso.
+
+La regola di adesso, in tre passi:
+
+1. si scartano le scene più vuote dell'1% (`--max-nodata`) o più nuvolose del
+   10% (`--max-cloud`);
+2. fra quelle rimaste si preferisce lo **stesso giorno** per quadrati vicini:
+   stesso passaggio del satellite, stessa luce, nessuna cucitura di colore. Si
+   prende il giorno che copre più quadrati, poi il successivo per i rimasti;
+3. un quadrato senza scene piene prende la migliore **serena** (anche se vuota
+   a metà) più fino a due scene di **riempimento** di altri giorni, che vanno
+   *sotto* di lei nel mosaico e ne coprono i buchi.
+
+L'ordine nel mosaico conta (chi viene dopo copre chi viene prima), quindi
+`fetch-imagery` scrive `ordine_scene.txt`, da passare a `build-imagery` con
+`-i @cartella/ordine_scene.txt`. Su tutta Italia (`--area italia`) sono 89
+quadrati e 96 scene, **24,7 GB**; la maggior parte dei quadrati condivide il
+giorno con altri 12-15. La funzione di scelta è pura e testata sui dati veri
+di Torino (`Pipeline/tests/test_fetchimagery.py`).
 
 Si scarica il file `TCI.tif`: le tre bande visibili già combinate, 10 m, circa
 230 MB per scena.
@@ -386,16 +410,25 @@ questo codice non aveva il motore.
 
 ```
 TextureCoordinate ──► Multiply ──► Add ──► TextureSampleParameter2D("BaseColor")
-                         ▲          ▲                    │
-VectorParameter ─────────┴──────────┘                    ▼
-("UvOffsetScale")     .BA        .RG                Base Color
+                         ▲ .B       ▲ .RG               │
+VectorParameter ─────────┴──► ComponentMask(R,G)        ▼
+("DrapeUv")                                          Base Color
 ```
 
 Due parametri, con nomi **esatti** perché il codice li cerca per nome:
 
 * **`BaseColor`**: la texture della tile;
-* **`UvOffsetScale`**: il ritaglio della sezione 7.6, come
+* **`DrapeUv`**: il ritaglio della sezione 7.6, come
   `(offsetU, offsetV, scala, scala)`.
+
+> ⚠️ **Trappola, pagata alla prima prova.** La prima versione si chiamava
+> `UvOffsetScale` e collegava all'Add il pin **R** del parametro, senza
+> maschera. In un materiale di Unreal un pin di un canale solo è uno
+> **scalare**, e sommare uno scalare a un vettore lo somma a **tutte** le
+> componenti: l'offset U finiva anche in V. Con Sentinel a 10 m quasi ogni
+> tile usa un'immagine antenata, e metà prendevano il quarto sbagliato: un
+> mosaico di rettangoli fuori posto. Il design diceva ".RG"; il codice aveva
+> "risparmiato un nodo". Il racconto completo è in `docs/prova-torino.md`.
 
 ### Una revisione fatta scrivendo il codice
 
@@ -491,8 +524,9 @@ solo lo streaming delle ortofoto.
 
 Elencato apposta, per non scoprirlo dopo:
 
-* **niente mipmap**: a viste radenti il terreno sfarfalla. Il LOD tiene il
-  rapporto texel/pixel vicino a 1:1, quindi il problema è contenuto, ma esiste;
+* ~~**niente mipmap**~~: aggiunte dopo la prima prova, calcolate sul worker e
+  mediate in **luce lineare** (una media dei valori sRGB le renderebbe più
+  scure: una scacchiera bianco/nero deve diventare grigio 188, non 128);
 * **niente trasparenza** sulle tile parziali: si vede il grigio di riempimento;
 * **niente BC1**: più memoria video e una decodifica per tile;
 * **niente dissolvenza** fra livelli: il passaggio è uno stacco netto;
@@ -530,7 +564,7 @@ Elencato apposta, per non scoprirlo dopo:
 ```bat
 :: pipeline
 python run.py fetch-imagery --area roma -o dati/sentinel [--stream]
-python run.py build-imagery -i "dati/sentinel/*_TCI.tif" -o dataset/ortofoto
+python run.py build-imagery -i @dati/sentinel/ordine_scene.txt -o dataset/ortofoto
 python run.py verify-imagery -o dataset/ortofoto
 python run.py inspect-imagery dataset/ortofoto/13/.../....gim
 ```

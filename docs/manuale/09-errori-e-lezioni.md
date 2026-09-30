@@ -62,6 +62,8 @@ giusto.
 | `geo.Terrain.FlipWinding 1` che rispondeva "ON" | non aveva cambiato niente |
 | l'orizzonte sulla sfera di contenimento | rinunciava sulle tile grandi, e il frustum copriva il buco: visto solo togliendo il frustum (capitolo 11) |
 | la regola anti-buchi sulle quote invece che sulle mesh | un buco di qualche frame, confuso con gli scatti (capitolo 11) |
+| scene Sentinel scelte solo per le nuvole | una scena vuota al 58% ha zero nuvole: il vuoto diventava grigio di riempimento, senza un avviso (`docs/prova-torino.md`) |
+| `--stream`: tutte le scene si chiamano `TCI.tif` | i VRT intermedi si sovrascrivevano; il mosaico era l'ultima scena ripetuta, e la pipeline finiva "con successo" |
 
 **La difesa:**
 
@@ -107,6 +109,7 @@ e organizza il codice.
 |---|---|
 | `unresolved external symbol GeodeticToEcef` | ogni modulo è una **DLL**: senza `_API` il codice non è visibile agli altri |
 | `C2084: PackKey already has a body` | la **build unity** unisce più `.cpp`: i namespace anonimi si fondono |
+| nel materiale, il pin **R** di un vettore sommato a un `float2` | un pin di un canale è uno **scalare**, e Unreal lo somma a **tutte** le componenti: l'offset U finiva anche in V (`docs/prova-torino.md`) |
 | `Detail::PriorityFromError` definita in un header senza `inline` | mai esploso, ma due `.cpp` fuori dallo stesso blocco unity avrebbero dato `LNK2005`: ora lo sorveglia la regola 3 di `CheckModuleExports.py` |
 | parametro `bEnabled` che nasconde il campo `bEnabled` | lo **shadowing** in Unreal è un errore, non un avviso |
 | `cannot open source file` su file appena aggiunti | bisogna **rigenerare i file di progetto** |
@@ -131,7 +134,19 @@ ha due.
 * il design della Fase 6 dice che `FGeoLoaderPool` è "usato da entrambi" gli
   streaming: **lo usa solo quello delle ortofoto**;
 * il design della Fase 6 prevede `geo.Imagery.ShowLevels`: **non è stato
-  implementato**.
+  implementato**;
+* il design della Fase 6 disegna la maschera **`.RG`** nel materiale; il codice
+  la "risparmiò", con un commento che se ne vantava ("evita un nodo in più"), e
+  metà delle tile prese il pezzo d'immagine sbagliato. È il caso peggiore
+  della categoria: il design era **giusto**, e rileggerlo accanto al codice lo
+  avrebbe mostrato.
+
+**Ottimizzare prima di aver visto.** Lo stesso commento sul nodo risparmiato è
+anche un'ottimizzazione senza misura: un nodo in uno shader non costa niente di
+misurabile. All'opposto, la costruzione delle mesh sul game thread era stata
+lasciata lì "finché una misura non lo chiederà" — ed è stata la prima cosa che
+il primo portatile vero ha chiesto. La regola che ne esce: **non ottimizzare
+senza un numero, ma procurarsi il numero presto**.
 
 **Verifiche invalide.** Due volte un controllo è stato "verificato" in modo che
 non poteva fallire: `CheckUnityCollisions.py`, provato reintroducendo **una sola**

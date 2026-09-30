@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import math
 import os
+import re
 from dataclasses import dataclass
 
 import numpy as np
@@ -700,6 +701,23 @@ def projections_of(inputs: list[str]) -> dict[str, list[str]]:
     return groups
 
 
+def warped_vrt_name(index: int, path: str) -> str:
+    """
+    Nome del VRT riproiettato di un sorgente, UNICO per sorgente.
+
+    La prima versione usava il solo nome del file. Con le scene Sentinel lette
+    dalla rete (/vsicurl/.../S2A_32TLQ_20240801_0_L2A/TCI.tif) il nome e' TCI
+    per TUTTE: ogni VRT sovrascriveva il precedente e il mosaico conteneva N
+    volte l'ultima scena. Ora il nome porta la posizione nell'elenco (che e'
+    anche l'ordine del mosaico) e la cartella che lo precede.
+    """
+    parent = os.path.basename(os.path.dirname(path.rstrip("/")))
+    stem = os.path.splitext(os.path.basename(path))[0]
+    label = f"{parent}_{stem}" if parent else stem
+    label = re.sub(r"[^A-Za-z0-9_.-]", "_", label)
+    return f"{index:04d}_{label}_4326.vrt"
+
+
 def build_reprojected_vrt(inputs: list[str], vrt_path: str, work_dir: str,
                           target_crs: str = "EPSG:4326",
                           resample: str = "cubic",
@@ -744,9 +762,8 @@ def build_reprojected_vrt(inputs: list[str], vrt_path: str, work_dir: str,
     # Su un'ortofoto generica lo zero puo' invece essere un'ombra legittima: per
     # questo il valore e' un parametro e si puo' disattivare con None.
     warped = []
-    for path in inputs:
-        name = os.path.splitext(os.path.basename(path))[0]
-        destination = os.path.join(work_dir, f"{name}_4326.vrt")
+    for index, path in enumerate(inputs):
+        destination = os.path.join(work_dir, warped_vrt_name(index, path))
 
         result = gdal.Warp(destination, path, options=gdal.WarpOptions(
             format="VRT", dstSRS=target_crs, resampleAlg=resample,

@@ -112,7 +112,7 @@ Finché la memoria basta, quello che hai visto resta lì.
 ### 2.5 "Meglio un caricamento più lungo, ma una tantum"
 
 **Giusto**, ed è diventato il **riscaldamento** (sezione 8): dopo un salto, o
-quando manca più del 40% di quello che serve adesso, si costruiscono 24 mesh
+quando manca più del 40% di quello che serve adesso, si consegnano 16 mesh
 per frame invece di 4. Per qualche decimo di secondo il frame rate scende; in
 cambio il terreno arriva tutto insieme invece di riempirsi a pezzi per secondi.
 
@@ -314,7 +314,8 @@ Hai scelto la seconda, e la regola è:
 - **si entra** in riscaldamento dopo un teletrasporto, o quando le mesh pronte
   della fascia "adesso" scendono sotto il **60%**;
 - **si esce** quando superano il **95%**;
-- nel frattempo si costruiscono **24 mesh per frame** e si creano **32 texture
+- nel frattempo si consegnano **16 mesh per frame** (erano 24 quando la
+  costruzione stava sul game thread) e si creano **32 texture
   per frame** invece di 4.
 
 Due soglie invece di una (si chiama *isteresi*) per non oscillare: con una
@@ -464,7 +465,10 @@ Il riscaldamento dà il segnale; come usarlo si deciderà con la Fase 7.
 
 ## 14. Limiti noti e prossimi passi
 
-- **La costruzione delle mesh sta ancora sul game thread.** È il limite
+- ~~**La costruzione delle mesh sta ancora sul game thread.**~~ **Risolto
+  dopo la prima prova** (`docs/prova-torino.md`, sezione 6): geodesia e
+  `FDynamicMesh3` ora si costruiscono su `UE::Tasks`. Il testo originale:
+  è il limite
   principale, già dichiarato nella Fase 5. Il precarico lo nasconde (si costruisce
   prima, con il budget che avanza) ma non lo elimina: in riscaldamento il frame
   rallenta proprio per questo. Il prossimo passo naturale è spostare
@@ -492,7 +496,7 @@ Il riscaldamento dà il segnale; come usarlo si deciderà con la Fase 7.
 | `geo.Lod.Lookahead <s>` | 12 | orizzonte della previsione |
 | `geo.Lod.Safety <fattore>` | 0,5 | anello di sicurezza; 0 = spento |
 | `geo.Terrain.MeshBudget <N>` | 2000 | mesh costruite in tutto |
-| `geo.Terrain.Warmup <N>` | 24 | mesh per frame in riscaldamento; 0 = spento |
+| `geo.Terrain.Warmup <N>` | 16 | mesh consegnate per frame in riscaldamento; 0 = spento |
 
 Gli overlay `geo.Lod.Debug 1` e quello del terreno hanno righe nuove, spiegate
 in `docs/residenza-verifica.md`. `geo.Lod.Stats` e `geo.Terrain.Stats` stampano

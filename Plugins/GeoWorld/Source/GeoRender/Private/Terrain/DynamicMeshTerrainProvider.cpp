@@ -75,6 +75,21 @@ void FDynamicMeshTerrainProvider::Initialize(UWorld* World)
 	DrapeMaterial.Reset(LoadObject<UMaterialInterface>(
 		nullptr, TEXT("/GeoWorld/Materials/M_GeoTerrain.M_GeoTerrain")));
 
+	// Il materiale c'e', ma e' quello giusto? La versione con il bug dell'offset
+	// V non ha il parametro DrapeUv (si chiamava UvOffsetScale). Si controlla
+	// qui, una volta, e lo si dice chiaramente: altrimenti il sintomo e' un
+	// mosaico di pezzi di immagine fuori posto, che non fa pensare al materiale.
+	if (UMaterialInterface* Drape = DrapeMaterial.Get())
+	{
+		FLinearColor Unused;
+		if (!Drape->GetVectorParameterValue(FHashedMaterialParameterInfo(TEXT("DrapeUv")), Unused))
+		{
+			MaterialProblem = TEXT("M_GeoTerrain e' la versione VECCHIA (bug dell'offset V): ")
+			                  TEXT("rifallo con geo.Imagery.CreateMaterial");
+			UE_LOG(LogGeoWorld, Warning, TEXT("[GeoTerrain] %s"), *MaterialProblem);
+		}
+	}
+
 	if (!DrapeMaterial.IsValid())
 	{
 		UE_LOG(LogGeoWorld, Warning,
@@ -93,15 +108,100 @@ void FDynamicMeshTerrainProvider::Shutdown()
 	Container = nullptr;
 }
 
+namespace
+{
+	/** La mesh preparata di questo provider: una FDynamicMesh3 pronta da consegnare. */
+	struct FDynamicMeshPrepared : public FGeoPreparedTileMesh
+	{
+		UE::Geometry::FDynamicMesh3 Mesh;
+	};
+}
+
+FGeoPreparedTileMeshPtr FDynamicMeshTerrainProvider::PrepareTileMesh(const Mesh::FTileMeshData& MeshData)
+{
+	if (!MeshData.IsValid()) { return nullptr; }
+
+	// ------------------------------------------------------------------
+	//  NOTA UE: una FDynamicMesh3 e' una struttura dati di GeometryCore, non
+	//  un UObject. Si puo' costruire su qualunque thread, purche' nessun altro
+	//  la tocchi nel frattempo: qui e' locale al lavoro, quindi e' cosi' per
+	//  costruzione. E' la parte costosa della consegna (la topologia degli
+	//  spigoli si costruisce a ogni AppendTriangle), ed e' il motivo per cui
+	//  conviene farla qui e non sul game thread.
+	// ------------------------------------------------------------------
+	TSharedPtr<FDynamicMeshPrepared, ESPMode::ThreadSafe> Prepared =
+		MakeShared<FDynamicMeshPrepared, ESPMode::ThreadSafe>();
+	Prepared->Origin = MeshData.Origin;
+	Prepared->TriangleCount = static_cast<int32>(MeshData.TriangleCount);
+
+	using namespace UE::Geometry;
+	FDynamicMesh3& Mesh = Prepared->Mesh;
+	Mesh.EnableAttributes();
+
+	FDynamicMeshNormalOverlay* Normals = Mesh.Attributes()->PrimaryNormals();
+	FDynamicMeshUVOverlay* UVs = Mesh.Attributes()->PrimaryUV();
+
+	const int32 VertexCount = static_cast<int32>(MeshData.Positions.size() / 3);
+
+	for (int32 Index = 0; Index < VertexCount; ++Index)
+	{
+		// I vertici arrivano in METRI. La conversione in unita' Unreal non si
+		// fa qui: e' nella SCALA della trasformazione del componente, cosi' i
+		// float restano piccoli e la regola del punto unico di conversione
+		// resta valida.
+		Mesh.AppendVertex(FVector3d(MeshData.Positions[Index * 3 + 0],
+		                            MeshData.Positions[Index * 3 + 1],
+		                            MeshData.Positions[Index * 3 + 2]));
+
+		Normals->AppendElement(FVector3f(MeshData.Normals[Index * 3 + 0],
+		                                 MeshData.Normals[Index * 3 + 1],
+		                                 MeshData.Normals[Index * 3 + 2]));
+
+		UVs->AppendElement(FVector2f(MeshData.UVs[Index * 2 + 0],
+		                             MeshData.UVs[Index * 2 + 1]));
+	}
+
+	const int32 TriangleCount = static_cast<int32>(MeshData.Indices.size() / 3);
+	for (int32 Index = 0; Index < TriangleCount; ++Index)
+	{
+		const int32 A = static_cast<int32>(MeshData.Indices[Index * 3 + 0]);
+		const int32 B = static_cast<int32>(MeshData.Indices[Index * 3 + 1]);
+		const int32 C = static_cast<int32>(MeshData.Indices[Index * 3 + 2]);
+
+		const int32 TriangleId = Mesh.AppendTriangle(A, B, C);
+		if (TriangleId >= 0)
+		{
+			// Normali e UV usano gli stessi indici dei vertici: ogni post ha
+			// una normale sola, quindi non servono elementi separati.
+			Normals->SetTriangle(TriangleId, FIndex3i(A, B, C));
+			UVs->SetTriangle(TriangleId, FIndex3i(A, B, C));
+		}
+	}
+
+	return Prepared;
+}
+
 bool FDynamicMeshTerrainProvider::CreateOrUpdateTile(
 	const Tiles::FTileKey& Key, const Mesh::FTileMeshData& MeshData, const FTransform& Transform)
 {
+	// La via sincrona e' la stessa di quella asincrona, fatta tutta qui.
+	const FGeoPreparedTileMeshPtr Prepared = PrepareTileMesh(MeshData);
+	return Prepared.IsValid() && CommitPreparedTile(Key, *Prepared, Transform);
+}
+
+bool FDynamicMeshTerrainProvider::CommitPreparedTile(
+	const Tiles::FTileKey& Key, FGeoPreparedTileMesh& Prepared, const FTransform& Transform)
+{
 	AActor* Actor = Container.Get();
-	if (!Actor || !MeshData.IsValid()) { return false; }
+	if (!Actor) { return false; }
+
+	// Il cast e' sicuro per contratto: CommitPreparedTile riceve solo cio' che
+	// ha prodotto la funzione di preparazione di questo stesso provider.
+	FDynamicMeshPrepared& Ready = static_cast<FDynamicMeshPrepared&>(Prepared);
 
 	const uint64 Packed = Key.Pack();
 	FTileEntry& Entry = Tiles.FindOrAdd(Packed);
-	Entry.Origin = MeshData.Origin;
+	Entry.Origin = Ready.Origin;
 	Entry.Key = Key;
 
 	UDynamicMeshComponent* Component = Entry.Component.Get();
@@ -113,6 +213,15 @@ bool FDynamicMeshTerrainProvider::CreateOrUpdateTile(
 		// Niente collisione: il terreno serve a essere guardato. Generarla per
 		// 33.000 triangoli per tile costerebbe piu' della geometria stessa.
 		Component->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+
+		// Niente ombre (vedi SetCastShadows nell'interfaccia) e niente ray
+		// tracing: con il ray tracing attivo nel progetto, ogni componente
+		// costruirebbe la propria struttura di accelerazione, a ogni tile.
+		// NOTA: se SetEnableRaytracing non compila sulla tua versione di UE,
+		// togli la riga: e' un'ottimizzazione, non una necessita'.
+		Component->SetCastShadow(bCastShadows);
+		Component->SetEnableRaytracing(false);
+
 		if (UMaterialInterface* BaseMaterial = Material.Get())
 		{
 			Component->SetMaterial(0, BaseMaterial);
@@ -123,62 +232,31 @@ bool FDynamicMeshTerrainProvider::CreateOrUpdateTile(
 	}
 
 	// ------------------------------------------------------------------
-	//  NOTA UE: EditMesh prende una lambda che riceve la FDynamicMesh3 vera e
-	//  propria. E' il modo corretto di modificarla: il componente sa cosi'
-	//  quando deve invalidare il proprio proxy di scena. Modificare la mesh
-	//  fuori da qui lascerebbe il renderer con la versione vecchia.
+	//  NOTA UE: SetMesh con uno spostamento (&&). La FDynamicMesh3 preparata
+	//  sul worker passa al componente senza essere copiata: e' un paio di
+	//  puntatori che cambiano proprietario. Il componente sa cosi' di dover
+	//  ricostruire il proprio proxy di scena, che avverra' a fine frame.
+	//
+	//  La versione precedente costruiva la mesh qui dentro, con EditMesh: stessa
+	//  geometria, ma tutto il costo sul game thread.
 	// ------------------------------------------------------------------
-	Component->EditMesh([&MeshData](UE::Geometry::FDynamicMesh3& Mesh)
-	{
-		using namespace UE::Geometry;
-
-		Mesh.Clear();
-		Mesh.EnableAttributes();
-
-		FDynamicMeshNormalOverlay* Normals = Mesh.Attributes()->PrimaryNormals();
-		FDynamicMeshUVOverlay* UVs = Mesh.Attributes()->PrimaryUV();
-
-		const int32 VertexCount = static_cast<int32>(MeshData.Positions.size() / 3);
-
-		for (int32 Index = 0; Index < VertexCount; ++Index)
-		{
-			// I vertici arrivano in METRI. La conversione in unita' Unreal non
-			// si fa qui: e' nella SCALA della trasformazione del componente,
-			// cosi' i float restano piccoli e la regola del punto unico di
-			// conversione resta valida.
-			Mesh.AppendVertex(FVector3d(MeshData.Positions[Index * 3 + 0],
-			                            MeshData.Positions[Index * 3 + 1],
-			                            MeshData.Positions[Index * 3 + 2]));
-
-			Normals->AppendElement(FVector3f(MeshData.Normals[Index * 3 + 0],
-			                                 MeshData.Normals[Index * 3 + 1],
-			                                 MeshData.Normals[Index * 3 + 2]));
-
-			UVs->AppendElement(FVector2f(MeshData.UVs[Index * 2 + 0],
-			                             MeshData.UVs[Index * 2 + 1]));
-		}
-
-		const int32 TriangleCount = static_cast<int32>(MeshData.Indices.size() / 3);
-		for (int32 Index = 0; Index < TriangleCount; ++Index)
-		{
-			const int32 A = static_cast<int32>(MeshData.Indices[Index * 3 + 0]);
-			const int32 B = static_cast<int32>(MeshData.Indices[Index * 3 + 1]);
-			const int32 C = static_cast<int32>(MeshData.Indices[Index * 3 + 2]);
-
-			const int32 TriangleId = Mesh.AppendTriangle(A, B, C);
-			if (TriangleId >= 0)
-			{
-				// Normali e UV usano gli stessi indici dei vertici: ogni post ha
-				// una normale sola, quindi non servono elementi separati.
-				Normals->SetTriangle(TriangleId, FIndex3i(A, B, C));
-				UVs->SetTriangle(TriangleId, FIndex3i(A, B, C));
-			}
-		}
-	});
-
+	Component->SetMesh(MoveTemp(Ready.Mesh));
 	Component->NotifyMeshUpdated();
 	Component->SetWorldTransform(Transform);
 	return true;
+}
+
+void FDynamicMeshTerrainProvider::SetCastShadows(bool bInCastShadows)
+{
+	if (bCastShadows == bInCastShadows) { return; }
+	bCastShadows = bInCastShadows;
+	for (TPair<uint64, FTileEntry>& Pair : Tiles)
+	{
+		if (UDynamicMeshComponent* Component = Pair.Value.Component.Get())
+		{
+			Component->SetCastShadow(bCastShadows);
+		}
+	}
 }
 
 void FDynamicMeshTerrainProvider::RemoveTile(const Tiles::FTileKey& Key)
@@ -360,10 +438,15 @@ void FDynamicMeshTerrainProvider::SetTileDrape(const Tiles::FTileKey& Key,
 
 	Instance->SetTextureParameterValue(TEXT("BaseColor"), Texture);
 
-	// (offsetU, offsetV, scala, scala). La quarta componente ripete la scala
-	// perche' il materiale la usa come vettore 2D per moltiplicare le UV, e
-	// duplicarla qui evita un nodo di mascheratura in piu' nello shader.
-	Instance->SetVectorParameterValue(TEXT("UvOffsetScale"),
+	// (offsetU, offsetV, scala, scala). Il materiale prende la scala dalla
+	// componente B e l'offset da R e G attraverso una ComponentMask.
+	//
+	// La prima versione si chiamava UvOffsetScale e risparmiava proprio quella
+	// maschera ("un nodo in meno nello shader"): il risultato era che l'offset
+	// U finiva anche in V, e le tile vestite con un'immagine antenata
+	// prendevano il quarto sbagliato. Un nodo risparmiato, un mosaico di
+	// rettangoli fuori posto. Vedi GeoTerrainMaterialFactory.cpp.
+	Instance->SetVectorParameterValue(TEXT("DrapeUv"),
 		FLinearColor(Drape.OffsetU, Drape.OffsetV, Drape.Scale, Drape.Scale));
 
 	Entry->bDraped = true;

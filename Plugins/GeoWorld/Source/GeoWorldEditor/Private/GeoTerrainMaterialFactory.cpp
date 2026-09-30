@@ -15,15 +15,25 @@
 //  IL MATERIALE CHE COSTRUISCE
 //
 //      TextureCoordinate ---> Multiply ---> Add ---> TextureSampleParameter2D
-//                                 ^          ^         ("BaseColor")
-//        VectorParameter ---------+----------+              |
-//        ("UvOffsetScale")                                  v
-//                                                      Base Color
+//                                ^           ^          ("BaseColor")
+//                                | B         | RG            |
+//        VectorParameter --------+--> ComponentMask          v
+//        ("DrapeUv")                                    Base Color
 //
-//  UvOffsetScale vale (offsetU, offsetV, scala, scala): le UV della mesh
-//  vengono moltiplicate per la scala e traslate dell'offset, che e' il ritaglio
-//  calcolato in ImageryMapping.h. La moltiplicazione usa le componenti BA e la
-//  somma le componenti RG -- per questo il subsystem ripete la scala due volte.
+//  DrapeUv vale (offsetU, offsetV, scala, scala): le UV della mesh vengono
+//  moltiplicate per la scala (componente B) e traslate dell'offset (componenti
+//  R e G, estratte con una ComponentMask), che e' il ritaglio calcolato in
+//  ImageryMapping.h.
+//
+//  IL BUG DELLA PRIMA VERSIONE, E PERCHE' IL PARAMETRO HA CAMBIATO NOME
+//  La prima versione collegava all'Add l'uscita "R" del parametro. Un'uscita
+//  di un solo canale e' uno SCALARE, e Unreal somma uno scalare a entrambe le
+//  componenti di un float2: l'offset U finiva anche in V. Per ogni tile
+//  vestita con un'immagine antenata (cioe' quasi tutte, con Sentinel a 10 m)
+//  meta' dei ritagli prendeva il quarto sbagliato dell'immagine: un mosaico di
+//  rettangoli fuori posto. Il parametro si chiamava UvOffsetScale; ora si
+//  chiama DrapeUv, cosi' il provider riconosce un materiale vecchio (non ha
+//  DrapeUv) e lo dice, invece di disegnare in silenzio il mosaico sbagliato.
 // =============================================================================
 #include "CoreMinimal.h"
 
@@ -34,6 +44,7 @@
 #include "HAL/IConsoleManager.h"
 #include "Materials/Material.h"
 #include "Materials/MaterialExpressionAdd.h"
+#include "Materials/MaterialExpressionComponentMask.h"
 #include "Materials/MaterialExpressionMultiply.h"
 #include "Materials/MaterialExpressionTextureCoordinate.h"
 #include "Materials/MaterialExpressionTextureSampleParameter2D.h"
@@ -54,10 +65,10 @@ namespace
 		if (GEngine) { GEngine->AddOnScreenDebugMessage(-1, 12.0f, Colour, Message); }
 	}
 
-	bool SaveMaterialPackage(UPackage* Package, UMaterial* Material)
+	bool SaveMaterialPackage(UPackage* Package, UMaterial* Material, bool bIsNew)
 	{
 		Package->MarkPackageDirty();
-		FAssetRegistryModule::AssetCreated(Material);
+		if (bIsNew) { FAssetRegistryModule::AssetCreated(Material); }
 
 		const FString FileName = FPackageName::LongPackageNameToFilename(
 			MaterialPackagePath, FPackageName::GetAssetPackageExtension());
@@ -68,34 +79,10 @@ namespace
 
 		return UPackage::SavePackage(Package, Material, *FileName, Arguments);
 	}
-}
 
-static FAutoConsoleCommand GeoImageryCreateMaterialCommand(
-	TEXT("geo.Imagery.CreateMaterial"),
-	TEXT("Costruisce /GeoWorld/Materials/M_GeoTerrain, il materiale del drappeggio."),
-	FConsoleCommandDelegate::CreateStatic([]()
+	/** Costruisce il grafo del materiale. Ritorna false se un nodo non si crea. */
+	bool BuildDrapeGraph(UMaterial* Material)
 	{
-		if (UMaterial* Existing = LoadObject<UMaterial>(nullptr, MaterialPackagePath))
-		{
-			Report(TEXT("M_GeoTerrain esiste gia'. Per rifarlo, cancellalo prima."), FColor::Yellow);
-			return;
-		}
-
-		UPackage* Package = CreatePackage(MaterialPackagePath);
-		if (!Package)
-		{
-			Report(TEXT("Non riesco a creare il package. Fallo a mano: docs/fase6-verifica.md"), FColor::Red);
-			return;
-		}
-
-		UMaterial* Material = NewObject<UMaterial>(
-			Package, MaterialAssetName, RF_Public | RF_Standalone);
-		if (!Material)
-		{
-			Report(TEXT("Non riesco a creare il materiale. Fallo a mano: docs/fase6-verifica.md"), FColor::Red);
-			return;
-		}
-
 		// Lit, non Unlit. Unlit mostrerebbe i colori esatti dell'ortofoto senza
 		// dipendere dalle luci, il che e' comodo; ma toglierebbe ogni
 		// ombreggiatura, e il rilievo costruito nella Fase 5 sparirebbe
@@ -111,7 +98,12 @@ static FAutoConsoleCommand GeoImageryCreateMaterialCommand(
 		UMaterialExpressionVectorParameter* UvParameter =
 			Cast<UMaterialExpressionVectorParameter>(
 				UMaterialEditingLibrary::CreateMaterialExpression(
-					Material, UMaterialExpressionVectorParameter::StaticClass(), -900, 200));
+					Material, UMaterialExpressionVectorParameter::StaticClass(), -1100, 200));
+
+		UMaterialExpressionComponentMask* OffsetMask =
+			Cast<UMaterialExpressionComponentMask>(
+				UMaterialEditingLibrary::CreateMaterialExpression(
+					Material, UMaterialExpressionComponentMask::StaticClass(), -650, 200));
 
 		UMaterialExpressionMultiply* Scale = Cast<UMaterialExpressionMultiply>(
 			UMaterialEditingLibrary::CreateMaterialExpression(
@@ -126,39 +118,96 @@ static FAutoConsoleCommand GeoImageryCreateMaterialCommand(
 				UMaterialEditingLibrary::CreateMaterialExpression(
 					Material, UMaterialExpressionTextureSampleParameter2D::StaticClass(), -250, 0));
 
-		if (!Coordinates || !UvParameter || !Scale || !Offset || !Sampler)
+		if (!Coordinates || !UvParameter || !OffsetMask || !Scale || !Offset || !Sampler)
 		{
-			Report(TEXT("Creazione dei nodi fallita. Fallo a mano: docs/fase6-verifica.md"), FColor::Red);
-			return;
+			return false;
 		}
 
-		UvParameter->ParameterName = TEXT("UvOffsetScale");
+		UvParameter->ParameterName = TEXT("DrapeUv");
 		// Valore di riposo: nessun ritaglio. Cosi' il materiale e' guardabile
 		// nell'editor anche senza che nessuno gli passi dei parametri.
 		UvParameter->DefaultValue = FLinearColor(0.0f, 0.0f, 1.0f, 1.0f);
 
+		// La maschera tiene R e G: l'offset come float2, (offsetU, offsetV).
+		// E' il pezzo che mancava nella prima versione.
+		OffsetMask->R = true;
+		OffsetMask->G = true;
+		OffsetMask->B = false;
+		OffsetMask->A = false;
+
 		Sampler->ParameterName = TEXT("BaseColor");
 		Sampler->SamplerType = SAMPLERTYPE_Color;
 
-		// uv = TexCoord * UvOffsetScale.BA + UvOffsetScale.RG
+		// uv = TexCoord * DrapeUv.B + DrapeUv.RG
+		//
+		// La scala e' la stessa sui due assi, quindi uno scalare (l'uscita "B")
+		// va bene: moltiplicato per un float2 scala entrambe le componenti, ed
+		// e' proprio quello che si vuole. Per l'offset invece serve un float2
+		// VERO: da qui la maschera.
 		UMaterialEditingLibrary::ConnectMaterialExpressions(Coordinates, TEXT(""), Scale, TEXT("A"));
 		UMaterialEditingLibrary::ConnectMaterialExpressions(UvParameter, TEXT("B"), Scale, TEXT("B"));
+		UMaterialEditingLibrary::ConnectMaterialExpressions(UvParameter, TEXT(""), OffsetMask, TEXT(""));
 		UMaterialEditingLibrary::ConnectMaterialExpressions(Scale, TEXT(""), Offset, TEXT("A"));
-		UMaterialEditingLibrary::ConnectMaterialExpressions(UvParameter, TEXT("R"), Offset, TEXT("B"));
+		UMaterialEditingLibrary::ConnectMaterialExpressions(OffsetMask, TEXT(""), Offset, TEXT("B"));
 		UMaterialEditingLibrary::ConnectMaterialExpressions(Offset, TEXT(""), Sampler, TEXT("UVs"));
 
 		UMaterialEditingLibrary::ConnectMaterialProperty(Sampler, TEXT(""), MP_BaseColor);
 
 		UMaterialEditingLibrary::RecompileMaterial(Material);
+		return true;
+	}
+}
 
-		if (!SaveMaterialPackage(Package, Material))
+static FAutoConsoleCommand GeoImageryCreateMaterialCommand(
+	TEXT("geo.Imagery.CreateMaterial"),
+	TEXT("Costruisce (o RIFA') /GeoWorld/Materials/M_GeoTerrain, il materiale del drappeggio."),
+	FConsoleCommandDelegate::CreateStatic([]()
+	{
+		// Se esiste lo si rifa' SUL POSTO: si svuota il grafo e lo si ricostruisce.
+		// Cancellarlo e crearne uno nuovo lascerebbe riferimenti rotti nelle
+		// istanze dinamiche gia' create, e costringerebbe a chiudere l'editor.
+		UMaterial* Material = LoadObject<UMaterial>(nullptr, MaterialPackagePath);
+		const bool bIsNew = (Material == nullptr);
+
+		UPackage* Package = nullptr;
+		if (bIsNew)
 		{
-			Report(TEXT("Materiale creato ma NON salvato: salvalo tu dal Content Browser."),
+			Package = CreatePackage(MaterialPackagePath);
+			if (!Package)
+			{
+				Report(TEXT("Non riesco a creare il package. Fallo a mano: docs/fase6-verifica.md"), FColor::Red);
+				return;
+			}
+			Material = NewObject<UMaterial>(Package, MaterialAssetName, RF_Public | RF_Standalone);
+			if (!Material)
+			{
+				Report(TEXT("Non riesco a creare il materiale. Fallo a mano: docs/fase6-verifica.md"), FColor::Red);
+				return;
+			}
+		}
+		else
+		{
+			Package = Material->GetOutermost();
+			UMaterialEditingLibrary::DeleteAllMaterialExpressions(Material);
+			Report(TEXT("M_GeoTerrain esiste: lo rifaccio con il grafo corretto."), FColor::Yellow);
+		}
+
+		if (!BuildDrapeGraph(Material))
+		{
+			Report(TEXT("Creazione dei nodi fallita. Fallo a mano: docs/fase6-verifica.md"), FColor::Red);
+			return;
+		}
+
+		if (!SaveMaterialPackage(Package, Material, bIsNew))
+		{
+			Report(TEXT("Materiale costruito ma NON salvato: salvalo tu dal Content Browser."),
 				FColor::Yellow);
 			return;
 		}
 
-		Report(TEXT("M_GeoTerrain creato in /GeoWorld/Materials. Rilancia geo.Imagery.Demo."));
+		Report(bIsNew
+			? TEXT("M_GeoTerrain creato in /GeoWorld/Materials. Rilancia geo.Imagery.Demo.")
+			: TEXT("M_GeoTerrain rifatto. Riavvia il Play (o rilancia geo.Imagery.Demo)."));
 	}));
 
 #endif  // WITH_EDITOR

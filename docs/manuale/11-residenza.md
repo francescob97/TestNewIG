@@ -35,7 +35,7 @@ Per una tile, i passi sono:
 | Passo | Dove gira | Quanto costa | Si vede nel frame? |
 |---|---|---|---|
 | leggere le quote dal disco | thread di lavoro | frazione di ms | no |
-| costruire la mesh (geodesia + topologia) | **game thread** | qualche ms | **sì** |
+| costruire la mesh (geodesia + topologia) | **game thread** (fino alla prima prova; ora thread di lavoro) | qualche ms | **sì** (ora no) |
 | decodificare il JPEG dell'ortofoto | thread di lavoro | qualche ms | no |
 | creare la texture | **game thread** | poco, ma per ogni tile | sì, se sono tante |
 
@@ -215,7 +215,7 @@ puntatore debole diventerebbe obbligatorio.
 
 Dopo un salto manca quasi tutto. Si entra in riscaldamento quando le mesh pronte
 della fascia 0 scendono sotto il **60%** (o dopo un salto), si esce sopra il
-**95%**; nel frattempo 24 mesh e 32 texture per frame invece di 4. Un attimo di
+**95%**; nel frattempo 16 mesh (erano 24) e 32 texture per frame invece di 4. Un attimo di
 frame lento, poi tutto pronto: è la tua scelta "meglio un'attesa lunga una
 volta sola".
 
@@ -282,6 +282,56 @@ funzione definita fuori da una classe deve essere `inline` (le funzioni definite
 
 ---
 
+## 11.10 Dopo la prima prova: la costruzione sui thread di lavoro
+
+Alla prima prova su un portatile il gioco laggava appena ci si muoveva. Il
+motivo era la tabella della sezione 11.1: costruire una mesh costava diversi
+millisecondi **sul game thread**, e la residenza, costruendo in anticipo, lo
+teneva occupato anche in volo dritto. La costruzione ora è divisa in due:
+
+```
+game thread                        thread di lavoro (UE::Tasks)
+-----------                        ----------------------------
+DispatchBuild(tile) ───────────►   BuildTileMesh (geodesia)
+                                   PrepareTileMesh (FDynamicMesh3)
+CommitCompletedBuilds  ◄──coda───  risultato
+  SetMesh + trasformazione
+```
+
+### Nota Unreal: `UE::Tasks` e chi può toccare cosa
+
+`UE::Tasks::Launch(nome, lambda, priorità)` affida la lambda al **task graph**
+del motore, che la esegue su uno dei suoi thread. Per le letture da disco
+(capitolo 4) avevamo scelto un pool nostro, perché una lettura **aspetta** il
+disco; costruire una mesh invece **calcola**, ed è proprio il lavoro per cui il
+task graph esiste. Priorità `BackgroundNormal`: non deve rubare i thread a chi
+prepara il frame.
+
+Le regole che rendono sicura la cosa:
+
+* **niente UObject sul worker.** La `FDynamicMesh3` è una struttura di
+  GeometryCore, non un UObject: si può costruire ovunque. Il componente invece
+  si tocca solo alla consegna, sul game thread (`SetMesh`, che *sposta* la mesh
+  senza copiarla);
+* **niente `this` nella lambda.** Il lavoro riceve copie di tutto quello che
+  usa: le quote (un `shared_ptr` a una tile immutabile), i parametri, la
+  funzione di preparazione (una funzione libera, senza stato), la coda;
+* **la coda è condivisa** (`TSharedPtr`): se il subsystem sparisse con un lavoro
+  in corso, il lavoro scriverebbe comunque in una coda viva;
+* **le generazioni.** Se cambiano i parametri (gonne, orientamento), i lavori
+  in volo sono stati lanciati con quelli vecchi: il loro risultato porta un
+  numero di generazione, e se non è quello corrente si butta;
+* **alla chiusura si aspetta.** Un lavoro in volo esegue codice del modulo
+  `GeoRender`; chiudere l'editor mentre gira vorrebbe dire eseguire codice di
+  una DLL già scaricata. `Deinitialize` aspetta che finiscano.
+
+La **trasformazione** si calcola alla consegna, non alla partenza: se nel
+frattempo c'è stato un rebase, l'origine è cambiata. I vertici no, perché sono
+nel frame locale della tile (capitolo 6) — ed è di nuovo quella scelta a
+rendere facile una cosa che altrimenti non lo sarebbe.
+
+---
+
 ## Alternative considerate
 
 | Alternativa | Perché no |
@@ -326,8 +376,9 @@ La verifica passo passo è in `docs/residenza-verifica.md`.
 
 ## Riepilogo
 
-* Il costo vero di una tile è **costruire la mesh sul game thread**, non
-  leggerla: per questo si precostruisce, non solo si precarica.
+* Il costo vero di una tile è **costruire la mesh**, non leggerla: per questo
+  si precostruisce, non solo si precarica. Dopo la prima prova la costruzione
+  è passata sui **thread di lavoro** (sezione 11.10).
 * La selezione è **vista-indipendente**: il frustum lo applica il renderer, che
   scarta le primitive fuori vista usando i loro **bounds**.
 * Il **piano di residenza** ha fasce: qui, dove sarò a 4-8-12 s, e un anello di
