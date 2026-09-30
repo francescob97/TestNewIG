@@ -110,6 +110,23 @@ namespace GeoWorld::Tiles
 			return Found->second->Tile;
 		}
 
+		/**
+		 * Segna come usata di recente SENZA contarla come accesso.
+		 *
+		 * Serve al piano di residenza: le tile che il piano vuole tenere vanno
+		 * spostate in testa alla LRU, cosi' lo sfratto colpisce per prime quelle
+		 * che il piano non vuole piu'. Farlo con Find() gonfierebbe il tasso di
+		 * hit con migliaia di "accessi" che nessuno ha davvero fatto.
+		 * Ritorna false se la tile non e' in cache.
+		 */
+		bool Touch(const FTileKey& Key)
+		{
+			const auto Found = Lookup.find(Key);
+			if (Found == Lookup.end()) { return false; }
+			Entries.splice(Entries.begin(), Entries, Found->second);
+			return true;
+		}
+
 		/** Inserisce (o sostituisce) e sfratta finche' si rientra nel budget. */
 		void Insert(const FTileKey& Key, FTilePtr Tile)
 		{

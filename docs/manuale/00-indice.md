@@ -47,9 +47,15 @@ Due convenzioni tipografiche:
 | 8 | `08-strumenti-verifica.md` | Test e controlli automatici |
 | 9 | `09-errori-e-lezioni.md` | Gli errori fatti, e cosa insegnano |
 | 10 | `10-glossario.md` | Glossario e mappa completa dei file |
+| 11 | `11-residenza.md` | Dopo le sei fasi — Cosa tenere pronto: posizione, velocità, mesh nascoste |
 
 La Fase 7 (entità, CIGI, DIS, HLA) è solo progettata: la trovi in
 `docs/fase7-design.md`.
+
+Il capitolo 11 è arrivato dopo le sei fasi e **cambia** alcune scelte dei
+capitoli 4, 5 e 6 (selezione senza frustum, mesh tenute nascoste, orizzonte
+rifatto). Quei capitoli raccontano com'erano le cose e hanno una nota nei punti
+cambiati; leggili comunque prima dell'11, che senza di loro non si capisce.
 
 ---
 
@@ -165,7 +171,7 @@ separati:**
 | **Ponte Unreal** | tutto il resto | Subsystem, componenti, attori, comandi | No |
 
 Lo strato puro non include **nessun** header di Unreal. È C++ standard, che si
-compila con qualunque compilatore. Questo ha permesso di verificare 169 test
+compila con qualunque compilatore. Questo ha permesso di verificare 205 test
 della matematica in un ambiente dove Unreal non c'era affatto.
 
 > 💡 **Esempio.** La conversione da latitudine/longitudine a coordinate

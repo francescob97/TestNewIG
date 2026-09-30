@@ -256,6 +256,18 @@ static void TestCache()
 	const FCacheStats Stats = Counting.GetStats();
 	Check(Stats.Hits == 1 && Stats.Misses == 1 && std::abs(Stats.GetHitRate() - 0.5) < 1e-9,
 		"hit e miss contati correttamente");
+
+	// Touch: protegge dallo sfratto come Find, ma senza toccare le statistiche.
+	// E' cio' che usa il piano di residenza per tenere le tile che vuole.
+	FTileCache Touched(TileSize * 3);
+	for (uint32_t X = 0; X < 3; ++X) { Touched.Insert(FTileKey{ 10, X, 0 }, MakeTile(FTileKey{ 10, X, 0 })); }
+	Check(Touched.Touch(FTileKey{ 10, 0, 0 }), "Touch trova una tile residente");
+	Check(!Touched.Touch(FTileKey{ 10, 9, 0 }), "Touch su una tile assente risponde false");
+	Touched.Insert(FTileKey{ 10, 3, 0 }, MakeTile(FTileKey{ 10, 3, 0 }));
+	Check(Touched.Peek(FTileKey{ 10, 0, 0 }) != nullptr && Touched.Peek(FTileKey{ 10, 1, 0 }) == nullptr,
+		"la tile toccata sopravvive, sfrattata la meno recente fra le altre");
+	Check(Touched.GetStats().Hits == 0 && Touched.GetStats().Misses == 0,
+		"Touch non conta ne' hit ne' miss");
 }
 
 // ===========================================================================

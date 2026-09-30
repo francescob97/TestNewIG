@@ -1,6 +1,7 @@
 #include "Imagery/GeoImagerySubsystem.h"
 
 #include "GeoCoreModule.h"
+#include "Lod/GeoQuadtreeSubsystem.h"
 #include "Streaming/GeoImageryStreamingSubsystem.h"
 #include "Terrain/GeoTerrainMeshProvider.h"
 #include "Terrain/GeoTerrainSubsystem.h"
@@ -144,14 +145,33 @@ void UGeoImagerySubsystem::SynchroniseWithTerrain()
 	IGeoTerrainMeshProvider* Provider = Terrain->GetProvider();
 	if (!Provider) { return; }
 
+	// Dopo un teletrasporto le immagini in coda sono quelle del posto da cui
+	// si e' partiti: si buttano, come fa il quadtree con le quote.
+	if (const UGeoQuadtreeSubsystem* Lod = GetWorld()->GetSubsystem<UGeoQuadtreeSubsystem>())
+	{
+		if (Lod->GetTeleportCount() != TeleportsSeen)
+		{
+			TeleportsSeen = Lod->GetTeleportCount();
+			Streaming->CancelPendingRequests();
+		}
+	}
+
+	// Le chiavi arrivano con le tile A SCHERMO per prime, poi quelle nascoste
+	// (costruite in anticipo dal piano di residenza, o tenute dopo l'uso).
+	// Vestendo in quest'ordine il budget del frame va prima a cio' che si vede;
+	// le nascoste si vestono con quello che avanza, e quando compariranno
+	// avranno gia' la loro foto.
 	TArray<FTileKey> TerrainKeys;
-	Terrain->GetBuiltTileKeys(TerrainKeys);
+	const int32 VisibleCount = Terrain->GetBuiltTileKeys(TerrainKeys);
 
 	const FImageryAvailability Availability(Streaming);
 	const uint32 MinLevel = static_cast<uint32>(FMath::Max(0, Streaming->GetDataset().GetMinLevel()));
 	const uint32 MaxLevel = static_cast<uint32>(FMath::Max(0, Streaming->GetDataset().GetMaxLevel()));
 
-	int32 Budget = MaxTexturesPerFrame;
+	// In riscaldamento (dopo un teletrasporto) si accetta un frame piu' lento
+	// per vestire tutto in fretta, come fa il terreno con le mesh.
+	int32 Budget = Terrain->IsWarmingUp()
+		? FMath::Max(MaxTexturesPerFrame, WarmupTexturesPerFrame) : MaxTexturesPerFrame;
 	int32 LevelMin = MAX_int32;
 	int32 LevelMax = MIN_int32;
 
@@ -160,8 +180,11 @@ void UGeoImagerySubsystem::SynchroniseWithTerrain()
 	// memoria video su tile che non si guardano piu'.
 	TSet<uint64> StillUsed;
 
-	for (const FTileKey& TerrainKey : TerrainKeys)
+	for (int32 Index = 0; Index < TerrainKeys.Num(); ++Index)
 	{
+		const FTileKey& TerrainKey = TerrainKeys[Index];
+		const bool bOnScreen = (Index < VisibleCount);
+
 		FDrapeTransform Drape;
 		FTileKey Request;
 		bool bHasRequest = false;
@@ -174,7 +197,8 @@ void UGeoImagerySubsystem::SynchroniseWithTerrain()
 		// lasciarlo sfocato per sempre.
 		if (bHasRequest)
 		{
-			Streaming->RequestTile(Request, /*Priority=*/0);
+			// A schermo prima delle nascoste: anche nella coda del disco.
+			Streaming->RequestTile(Request, /*Priority=*/bOnScreen ? 1 : 0);
 			++Stats.RichiesteQuestoFrame;
 		}
 

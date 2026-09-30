@@ -34,6 +34,7 @@ public:
 
 	virtual void RemoveTile(const GeoWorld::Tiles::FTileKey& Key) override;
 	virtual void RemoveAllTiles() override;
+	virtual void SetTileVisible(const GeoWorld::Tiles::FTileKey& Key, bool bVisible) override;
 	virtual void RefreshTransforms(const FGeoreferenceSnapshot& Snapshot) override;
 
 	virtual int32 GetTileCount() const override { return Tiles.Num(); }

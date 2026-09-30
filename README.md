@@ -66,8 +66,8 @@ Dettagli e motivazioni in `docs/fase2-design.md`.
 cmake -S Plugins/GeoWorld/Tools/StandaloneTests -B build
 cmake --build build
 ./build/geocore_tests        # 37 test  -- geodesia, rebasing
-./build/geotiles_tests       # 23 test  -- formato tile, cache
-./build/geoquadtree_tests    # 42 test  -- LOD, culling, margine
+./build/geotiles_tests       # 22 test  -- formato tile, cache (piu' quelli su un dataset vero)
+./build/geoquadtree_tests    # 74 test  -- LOD, culling, orizzonte, residenza
 ./build/geomesh_tests        # 28 test  -- mesh, gonne, giunzioni
 ./build/geoimagery_tests     # 44 test  -- drappeggio, formato immagine
 
@@ -83,7 +83,7 @@ le classi di errore di compilazione gia' incontrate su Windows -- shadowing,
 simboli non esportati fra moduli, tipi di comando console inesistenti,
 collisioni da build unity, metodi inesistenti chiamati sulle nostre classi.
 
-169 test C++ in totale, piu' 77 test Python della pipeline.
+205 test C++ in totale, piu' 77 test Python della pipeline.
 
 ## Pipeline dati
 

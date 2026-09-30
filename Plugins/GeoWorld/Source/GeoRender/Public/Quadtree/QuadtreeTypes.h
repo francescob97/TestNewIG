@@ -92,6 +92,33 @@ namespace GeoWorld::Quadtree
 		 *  problema che il margine risolve.
 		 */
 		double FrustumMarginFactor = 1.2;
+
+		/**
+		 * Scartare le tile fuori dal frustum durante la SELEZIONE?
+		 *
+		 * =================================================================
+		 *  PERCHE' SI PUO' SPEGNERE, E PERCHE' IL MOTORE LO SPEGNE
+		 * =================================================================
+		 *  Con il frustum acceso, l'insieme di tile scelte dipende da DOVE SI
+		 *  GUARDA. Girando la testa cambia la selezione, e ogni tile che entra
+		 *  nel campo va letta, costruita e vestita mentre la si sta gia'
+		 *  guardando: il bordo nero, gli scatti in rotazione, lo specchietto
+		 *  retrovisore che non avrebbe niente da mostrare.
+		 *
+		 *  Spento, la selezione dipende SOLO dalla posizione: l'errore su
+		 *  schermo e' funzione della distanza, e l'orizzonte e' funzione della
+		 *  posizione. Ruotare la camera non cambia niente. A scartare cio' che
+		 *  sta dietro ci pensa comunque il renderer di Unreal, che fa il suo
+		 *  frustum culling per componente, sui bounds, a ogni frame: farlo
+		 *  anche qui serviva solo a risparmiare memoria, e la memoria c'e'.
+		 *
+		 *  Il costo misurato (Roma, 3 km di quota, soglia 4 px): da ~230 a
+		 *  ~630 tile, selezione sempre sotto il mezzo millisecondo.
+		 *
+		 *  Il default resta true perche' e' il comportamento della Fase 4 e i
+		 *  suoi test lo presuppongono; il subsystem lo mette a false.
+		 */
+		bool bFrustumCulling = true;
 	};
 
 	/** Una tile scelta per il disegno. */

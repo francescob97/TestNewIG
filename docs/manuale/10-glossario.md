@@ -61,6 +61,8 @@ terreno vero. Qui approssimato con il passo fra i post. (5)
 **Errore su schermo** (SSE) — l'errore geometrico proiettato in pixel. La manopola
 del LOD. Soglia di default: 4 pixel. (5)
 
+**Fascia** (del piano di residenza) — un gruppo di tile del piano con la stessa urgenza: 0 = adesso, 1..3 = posizioni previste, l'ultima = anello di sicurezza. (11)
+
 **Frame locale** — un sistema di assi appoggiato sulla superficie in un punto.
 Nel progetto è sempre NEU. (2, 6)
 
@@ -82,10 +84,16 @@ nascondere le crepe fra livelli diversi. (6)
 **Header-only** — codice scritto interamente negli header, con `inline`. Lo strato
 puro è così, per non dover esportare simboli dalle DLL. (0, 1)
 
-**Horizon culling** — scartare ciò che sta oltre la curvatura della Terra. (5)
+**Horizon culling** — scartare ciò che sta oltre la curvatura della Terra. Oggi sul rettangolo della tile nello spazio scalato. (5, 11)
 
 **Indice** (`index.bin`) — per ogni livello, l'elenco delle tile esistenti con
 quota minima e massima (quote) o copertura (immagini). (3)
+
+**Insieme ideale** — le tile che si disegnerebbero da un punto se tutto fosse già in memoria. È la base del piano di residenza. (11)
+
+**Isteresi** — due soglie diverse per entrare e per uscire da uno stato (riscaldamento: entra sotto il 60%, esce sopra il 95%), per non oscillare attorno a una soglia unica. (11)
+
+**Latitudine parametrica** — tan β = (b/a)·tan φ. È la latitudine di un punto dell'ellissoide nello spazio scalato, dove l'ellissoide diventa una sfera. (11)
 
 **LOD** (*Level Of Detail*) — usare versioni più semplici di ciò che è lontano. (5)
 
@@ -123,11 +131,15 @@ e +52 m. (3)
 **Ortofoto** — immagine aerea o satellitare raddrizzata, in cui ogni pixel sta alla
 sua coordinata. (7)
 
+**Piano di residenza** — la lista, in ordine di urgenza, delle tile da tenere pronte: qui, dove si sarà fra qualche secondo, e un anello di sicurezza. Rifatto ogni 0,25 s. (11)
+
 **Pin** — marcare una tile della cache come "non sfrattabile". (4)
 
 **Plugin** — un pacchetto di codice e contenuti riutilizzabile. (1)
 
 **Post** — un punto di campionamento di una griglia di quote. (3)
+
+**Previsione del moto** — stima della velocità della camera dalle sue posizioni (`FMotionPredictor`) e proiezione in avanti su una retta. (11)
 
 **Primitiva** (`UPrimitiveComponent`) — un componente che si disegna. (1)
 
@@ -150,6 +162,12 @@ i numeri. (2)
 **Registrazione sui nodi / sulle aree** — un campione rappresenta un punto (le
 quote) o un'area (i pixel). Decide se il bordo è condiviso. (3, 7)
 
+**Residenza** — l'insieme delle scelte su cosa tenere in memoria e pronto, in base a posizione e velocità invece che alla direzione dello sguardo. (11)
+
+**Riscaldamento** — dopo un salto, qualche decimo di secondo in cui si costruiscono più mesh per frame (24 invece di 4): il frame rallenta, il terreno arriva tutto insieme. (11)
+
+**Spazio scalato** — le coordinate ECEF divise per i semiassi (x/a, y/a, z/b): l'ellissoide diventa la sfera unitaria e il test d'orizzonte diventa esatto. (5, 11)
+
 **sRGB** — lo spazio di colore delle immagini normali. Una texture da JPEG va
 marcata sRGB. (7)
 
@@ -160,6 +178,8 @@ toccare il subsystem. (2)
 testabile e codice che usa il motore. (0)
 
 **Subsystem** — un "gestore" che Unreal crea e distrugge da solo. (1)
+
+**Teletrasporto** — uno spostamento, in un aggiornamento solo, oltre metà della quota. Svuota le code, azzera la velocità, fa partire il riscaldamento. (11)
 
 **Tick** — il metodo chiamato a ogni frame. (1)
 
@@ -174,6 +194,8 @@ A 6.371 km è 64 cm, a 10 km è 0,6 mm. (2)
 
 **UObject** — la classe base universale di Unreal, con riflessione e garbage
 collector. (1)
+
+**Vista-indipendente** — selezione che dipende solo dalla posizione della camera, non dalla direzione: il frustum lo applica il renderer di Unreal. È il default. (11)
 
 **VRT** — un raster virtuale di GDAL: un file XML che fa apparire più file come
 uno solo. (3, 7)
@@ -245,8 +267,9 @@ il primo comando da provare quando non si vede niente. (6)
 |---|---|
 | `GeoRender.Build.cs` | `GeometryFramework`, `GeometryCore` |
 | `Public/Quadtree/QuadtreeTypes.h` | vista, selezione, statistiche |
-| `Public/Quadtree/Culling.h` | volume, frustum, margine, orizzonte |
+| `Public/Quadtree/Culling.h` | volume, frustum, margine, orizzonte (sfera e rettangolo) |
 | `Public/Quadtree/TileSelector.h` | errore su schermo, attraversamento |
+| `Public/Quadtree/Residency.h` | insieme ideale, previsione del moto, piano di residenza |
 | `Public/Mesh/TileMesh.h` | da quote a mesh, gonne |
 | `Public/Imagery/ImageryMapping.h` | il ritaglio dell'immagine |
 | `Public/Lod/GeoQuadtreeSubsystem.h` | il subsystem della selezione |
@@ -311,4 +334,6 @@ il primo comando da provare quando non si vede niente. (6)
 | `docs/faseN-design.md` | decisioni e motivazioni, fase per fase |
 | `docs/faseN-verifica.md` | come verificare, fase per fase |
 | `docs/fase7-design.md` | entità e interoperabilità (solo design) |
+| `docs/residenza-design.md` | cosa tenere pronto: posizione, velocità, mesh nascoste |
+| `docs/residenza-verifica.md` | come verificare la residenza |
 | `docs/issues-aperte.md` | problemi noti non risolti |

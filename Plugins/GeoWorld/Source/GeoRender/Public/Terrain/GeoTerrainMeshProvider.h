@@ -91,6 +91,18 @@ public:
 	virtual void RemoveTile(const GeoWorld::Tiles::FTileKey& Key) = 0;
 	virtual void RemoveAllTiles() = 0;
 
+	/**
+	 * Mostra o nasconde una tile gia' costruita, senza distruggerla.
+	 *
+	 * PERCHE' ESISTE. Con il piano di residenza il terreno costruisce le mesh
+	 * PRIMA che servano (dove la camera sta andando) e le tiene dopo che non
+	 * servono piu' (se ci si torna, sono gia' pronte). In entrambi i casi la
+	 * tile esiste ma non va disegnata: sovrapposta al padre o ai figli
+	 * produrrebbe z-fighting. Nasconderla costa un flag; ricostruirla costa
+	 * migliaia di conversioni geodetiche e la topologia della mesh.
+	 */
+	virtual void SetTileVisible(const GeoWorld::Tiles::FTileKey& Key, bool bVisible) = 0;
+
 	/** Ricalcola le trasformazioni dopo un rebase. Nessun vertice viene toccato. */
 	virtual void RefreshTransforms(const FGeoreferenceSnapshot& Snapshot) = 0;
 

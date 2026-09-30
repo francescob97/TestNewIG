@@ -122,7 +122,7 @@ namespace GeoWorld::Quadtree
 	namespace Detail
 	{
 		/** Priorita' per il loader: piu' alta = piu' urgente. */
-		int32_t PriorityFromError(double ScreenSpaceError, double MaxError)
+		inline int32_t PriorityFromError(double ScreenSpaceError, double MaxError)
 		{
 			// Una tile con errore dieci volte oltre la soglia e' molto piu'
 			// urgente di una appena sopra: la scala e' logaritmica perche' gli
@@ -176,7 +176,8 @@ namespace GeoWorld::Quadtree
 				MinHeight, MaxHeight, Ellipsoid);
 
 			// --- Fuori dalla vista? -------------------------------------------
-			if (!IsSphereInFrustum(Planes, Volume.Centre, Volume.Radius))
+			// Solo se richiesto: vedi FViewParameters::bFrustumCulling.
+			if (View.bFrustumCulling && !IsSphereInFrustum(Planes, Volume.Centre, Volume.Radius))
 			{
 				++OutResult.CulledByFrustum;
 				continue;
@@ -186,7 +187,13 @@ namespace GeoWorld::Quadtree
 			// Questo test e' cio' che evita di considerare mezzo pianeta a ogni
 			// frame: senza, tutte le tile dell'emisfero passerebbero il frustum
 			// quando si guarda l'orizzonte.
-			if (IsTileBelowHorizon(Volume, View.CameraEcef, Ellipsoid))
+			//
+			// Si usa il test sul RETTANGOLO e non quello sulla sfera: la sfera
+			// non riesce a scartare le tile grandi (vedi Culling.h). Con il
+			// frustum acceso non si notava; senza, e' l'unico filtro che tiene
+			// fuori l'altra faccia del pianeta.
+			if (IsTileRectBeyondHorizon(Bounds.West, Bounds.South, Bounds.East, Bounds.North,
+			                            MaxHeight, View.CameraEcef, Ellipsoid))
 			{
 				++OutResult.CulledByHorizon;
 				continue;

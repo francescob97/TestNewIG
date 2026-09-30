@@ -120,6 +120,12 @@ arrivato fino alla tua macchina, è nato un controllo che lo intercetta in local
 Le regole 2 e 3 sono implementate da due script Python a parte:
 `CheckShadowedParameters.py` e `CheckModuleExports.py`.
 
+`CheckModuleExports.py` ha, dalla residenza, un terzo controllo: negli header
+dello strato puro ogni funzione definita fuori da una classe deve essere
+`inline`, altrimenti due `.cpp` che includono lo stesso header danno
+`LNK2005` (capitolo 11, sezione 11.9). Provato come tutti gli altri: sulla
+versione vecchia di `TileSelector.h` trova `PriorityFromError`.
+
 ### `CheckUnityCollisions.py`
 
 Cerca funzioni con lo stesso nome in namespace anonimi di `.cpp` diversi dello
@@ -259,7 +265,8 @@ python Plugins\GeoWorld\Tools\CheckOwnApiCalls.py
 
 ## Riepilogo
 
-* **169 test C++** senza Unreal, **77 test Python**, **sette controlli statici**.
+* **205 test C++** senza Unreal (dopo la residenza, capitolo 11), **77 test
+  Python**, **sette controlli statici**.
 * I test migliori confrontano con **qualcosa di indipendente**: la fisica, un
   algoritmo diverso, il mondo reale.
 * I test **saltano** quando manca una libreria opzionale, non falliscono.

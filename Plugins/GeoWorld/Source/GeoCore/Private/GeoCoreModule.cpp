@@ -98,6 +98,13 @@ static FAutoConsoleCommand GeoHelpCommand(
 		GeoConsole::Report(TEXT("geo.Fly                      - camera di volo (solo nel Play)"));
 		GeoConsole::Report(TEXT("geo.Fly.Speed <x>            - moltiplicatore della velocita' di volo"));
 		GeoConsole::Report(TEXT("geo.ViewSpeed <1..8> [x]     - velocita' della camera del viewport dell'editor"));
+		GeoConsole::Report(TEXT("--- Residenza (cosa tenere pronto) ---"));
+		GeoConsole::Report(TEXT("geo.Lod.ViewIndependent <0|1> - selezione indipendente da dove si guarda"));
+		GeoConsole::Report(TEXT("geo.Lod.Prefetch <0|1>       - precarico dove la camera sta andando"));
+		GeoConsole::Report(TEXT("geo.Lod.Lookahead <s>        - orizzonte della previsione, in secondi"));
+		GeoConsole::Report(TEXT("geo.Lod.Safety <fattore>     - anello di sicurezza in RAM (0 = spento)"));
+		GeoConsole::Report(TEXT("geo.Terrain.MeshBudget <N>   - mesh da tenere costruite in tutto"));
+		GeoConsole::Report(TEXT("geo.Terrain.Warmup <N>       - mesh per frame dopo un salto (0 = spento)"));
 	}));
 
 // --- geo.Where --------------------------------------------------------------

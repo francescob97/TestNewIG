@@ -193,6 +193,29 @@ void FDynamicMeshTerrainProvider::RemoveTile(const Tiles::FTileKey& Key)
 	}
 }
 
+void FDynamicMeshTerrainProvider::SetTileVisible(const Tiles::FTileKey& Key, bool bVisible)
+{
+	const FTileEntry* Entry = Tiles.Find(Key.Pack());
+	UDynamicMeshComponent* Component = Entry ? Entry->Component.Get() : nullptr;
+	if (!Component || Component->GetVisibleFlag() == bVisible) { return; }
+
+	// ------------------------------------------------------------------
+	//  NOTA UE: SetVisibility e non SetHiddenInGame.
+	//
+	//  SetHiddenInGame vale solo in gioco: nel viewport dell'editor la tile
+	//  resterebbe visibile, sovrapposta al padre, e il terreno "da fermo"
+	//  sembrerebbe pieno di z-fighting. SetVisibility vale ovunque.
+	//
+	//  Cosa succede sotto: un componente invisibile viene TOLTO dalla scena
+	//  del renderer (il suo proxy si distrugge) ma la FDynamicMesh3 resta
+	//  intatta sul game thread. Rimostrarlo ricrea il proxy copiando i
+	//  vertici nei buffer della scheda video: una copia lineare, molto meno
+	//  della costruzione vera (geodesia + topologia della mesh). E' il motivo
+	//  per cui conviene tenere le mesh invece di ricostruirle.
+	// ------------------------------------------------------------------
+	Component->SetVisibility(bVisible);
+}
+
 void FDynamicMeshTerrainProvider::RemoveAllTiles()
 {
 	for (TPair<uint64, FTileEntry>& Pair : Tiles)

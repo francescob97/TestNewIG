@@ -139,6 +139,15 @@ degeneri.
 > 💡 **Per vederlo.** `geo.Lod.Margin 1.0` e giri la camera: vedi il bordo vuoto.
 > `geo.Lod.Margin 1.2`: sparisce.
 
+### Dopo: il frustum è uscito dalla selezione
+
+Il margine sposta il problema, non lo toglie: una rotazione abbastanza veloce
+lo supera comunque. Con la **residenza** (capitolo 11) il frustum non entra
+più nella selezione: si scelgono le tile tutto attorno alla camera, e a non
+disegnare quelle dietro ci pensa il renderer di Unreal. Il frustum e il suo
+margine restano nel codice come **modo classico** (`geo.Lod.ViewIndependent 0`),
+utile per confrontare. Il flag è `FViewParameters::bFrustumCulling`.
+
 ---
 
 ## 5.4 L'orizzonte, e il bug che i test hanno trovato
@@ -194,6 +203,22 @@ a 1.000 m, e la confronta con la formula classica dell'orizzonte √(2Rh):
 E il caso che la versione sbagliata avrebbe fallito: **una vetta alta 10 km a
 300 km di distanza resta visibile**, perché anche lei "vede" oltre l'orizzonte
 (113 + 356 = 469 km di portata combinata). A 600 km sparisce.
+
+### Il limite della sfera, scoperto dopo
+
+Il test sulla sfera ha un limite che il frustum ha nascosto per mesi. Quando la
+sfera di contenimento scende sotto la superficie del pianeta, il test rinuncia
+("non so, la tengo"). Ma una sfera che contiene un pezzo di superficie **curva**
+scende sempre sotto la superficie, tanto più quanto la tile è grande: in pratica
+non scartava nessuna tile dal livello 0 fin verso il 10.
+
+Con il frustum acceso non importava, perché il frustum scartava l'altra faccia
+del pianeta. Togliendolo (capitolo 11), su un dataset mondiale si caricavano
+tile sull'America guardando da Roma. Il selettore ora usa
+`IsTileRectBeyondHorizon`, che ragiona sul **rettangolo** geografico vero nello
+**spazio scalato**, dove l'ellissoide è esattamente una sfera unitaria. I
+dettagli, con la formula, sono nel capitolo 11. Il test sulla sfera resta nel
+codice, con i suoi test, ma il selettore non lo usa più.
 
 ---
 
@@ -288,6 +313,12 @@ Risultato: il dettaglio arriva con qualche frame di ritardo, ma **non c'è mai u
 buco**. Si vede il terreno affinarsi man mano che scendi, invece di vederlo
 sparire e ricomparire.
 
+> ⚠️ **Trappola, trovata dopo.** "Ci sono" voleva dire "le quote sono in RAM".
+> Ma a schermo va la **mesh**, e la mesh si costruisce qualche frame dopo:
+> il quadtree sceglieva i figli, il terreno toglieva subito il padre, e per
+> qualche frame non c'era niente. Con il terreno acceso, adesso "ci sono" vuol
+> dire "hanno la mesh" (`SetRenderReadiness`, capitolo 11).
+
 ### La priorità delle richieste
 
 Non tutte le tile mancanti sono ugualmente urgenti. La priorità di una richiesta
@@ -358,7 +389,7 @@ Vedi esattamente la porzione che era nel frustum, e niente dietro la curvatura.
 | `GeoRender/Public/Quadtree/TileSelector.h` | errore su schermo, attraversamento, regola anti-buchi |
 | `GeoRender/Public/Lod/GeoQuadtreeSubsystem.h` + `.cpp` | il subsystem: costruisce la vista dalla camera, lancia la selezione |
 | `GeoRender/Private/GeoRenderModule.cpp` | i comandi `geo.Lod.*` |
-| `Tools/StandaloneTests/geoquadtree_main.cpp` | 42 test senza Unreal |
+| `Tools/StandaloneTests/geoquadtree_main.cpp` | 42 test senza Unreal, diventati 74 con la residenza (capitolo 11) |
 | `docs/fase4-design.md`, `docs/fase4-verifica.md` | i documenti originali |
 
 ### Comandi
@@ -385,9 +416,11 @@ geo.Lod.Stats              nodi visitati, scarti, tempo
 * Il volume di una tile è una **sfera da 18 punti**, costruita con min e max
   dell'indice, **senza leggere la tile**.
 * Frustum a **cinque piani** (niente piano lontano) e allargato del **20%** per
-  chiedere le tile prima che servano.
-* L'**orizzonte** si testa sulla sfera intera con la Terra inscritta. **Sbagliare
-  sempre dalla parte di tenere.**
+  chiedere le tile prima che servano. Dalla residenza (capitolo 11) il frustum
+  è **fuori dalla selezione** per default: lo applica il renderer.
+* L'**orizzonte** si testava sulla sfera intera con la Terra inscritta; ora sul
+  **rettangolo** nello spazio scalato, perché la sfera non scartava le tile
+  grandi. **Sbagliare sempre dalla parte di tenere.**
 * **Errore su schermo** = errore geometrico proiettato in pixel; soglia 4 px;
   distanza dalla **superficie** del volume; FOV **verticale**; tutto in **ECEF**.
 * **Niente buchi**: si scende nei figli solo quando ci sono tutti e quattro.

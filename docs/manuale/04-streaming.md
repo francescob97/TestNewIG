@@ -154,7 +154,7 @@ niente per una concorrenza che non esiste.
 ### Cosa fa
 
 La cache tiene le tile già caricate, entro un **budget in byte** (256 MB di
-default). Quando si supera il budget, butta la tile usata **meno di recente**:
+default all'inizio, 1 GB dalla residenza: vedi capitolo 11). Quando si supera il budget, butta la tile usata **meno di recente**:
 è una cache *LRU*, *Least Recently Used*.
 
 ```
@@ -164,6 +164,15 @@ più recente ──────────────────────�
 
 Ogni volta che una tile viene usata, si sposta in testa. Quelle in fondo sono
 quelle che non si guardano da più tempo.
+
+### Toccare senza usare (aggiunto con la residenza)
+
+`TTileCache::Touch` sposta una tile in testa **senza** contarla come accesso.
+Lo usa il piano di residenza (capitolo 11): ogni quarto di secondo "tocca"
+tutte le tile che vuole tenere, così lo sfratto colpisce per prime quelle che
+il piano non vuole più. Farlo con `Find` gonfierebbe il tasso di hit con
+migliaia di accessi che nessuno ha fatto davvero. È così che "si scarica
+dietro": non buttando via niente di proposito, ma lasciando invecchiare.
 
 ### Budget in byte, non in numero di tile
 

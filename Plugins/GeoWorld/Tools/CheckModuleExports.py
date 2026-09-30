@@ -24,6 +24,14 @@ LE DUE REGOLE CHE LO PREVENGONO
 2. Nello strato UNREAL, una funzione LIBERA dichiarata in un header pubblico
    deve essere inline oppure portare la macro API del modulo. Le classi vanno
    bene se la macro sta sulla classe: esporta tutti i membri.
+
+3. Nello strato PURO, header-only, ogni funzione DEFINITA a livello di
+   namespace deve essere inline. Senza, ogni .cpp che include l'header ne
+   ha una copia con collegamento esterno, e il linker trova lo stesso
+   simbolo due volte (LNK2005, "already defined"). E' passato inosservato a
+   lungo con Detail::PriorityFromError in TileSelector.h: l'header lo
+   includeva un solo .cpp, poi la unity build li fondeva. Bastava che un
+   secondo .cpp lo includesse fuori dallo stesso blocco unity.
 """
 import glob
 import os
@@ -34,6 +42,13 @@ PURE_DIRECTORIES = [
     ("GeoCore", "Geo"),
     ("GeoTiles", "Tiles"),
     ("GeoRender", "Quadtree"),
+    ("GeoRender", "Mesh"),
+]
+
+# Header puri che vivono in una cartella condivisa con codice Unreal: si
+# controllano uno per uno (la cartella Imagery contiene anche il subsystem).
+PURE_FILES = [
+    ("GeoRender", os.path.join("Imagery", "ImageryMapping.h")),
 ]
 
 # Dichiarazione di funzione libera: tipo + nome + parentesi + ";" sulla stessa
@@ -99,11 +114,87 @@ def check_public_free_functions(source_root: str) -> list[str]:
     return problems
 
 
+# Inizio di una definizione di funzione: "tipo nome(" su una riga che non e'
+# un'istruzione. Il resto (inline, template, constexpr) si guarda a parte.
+DEFINITION_START = re.compile(
+    r'^\s*(?P<head>[A-Za-z_][\w:<>,\*& ]*?)\s+[\*&]*(?P<name>[A-Za-z_]\w*)\s*\(')
+NOT_A_TYPE = {"return", "if", "for", "while", "switch", "else", "case", "do", "delete",
+              "new", "throw", "using", "namespace", "class", "struct", "enum", "typedef"}
+
+
+def check_pure_definitions_are_inline(source_root: str) -> list[str]:
+    problems = []
+    for module, folder in PURE_DIRECTORIES:
+        for path in sorted(glob.glob(os.path.join(source_root, module, "Public", folder, "*.h"))):
+            problems += check_header_definitions(path)
+    for module, relative in PURE_FILES:
+        path = os.path.join(source_root, module, "Public", relative)
+        if os.path.exists(path):
+            problems += check_header_definitions(path)
+    return problems
+
+
+def check_header_definitions(path: str, text: str | None = None) -> list[str]:
+    """Funzioni definite a livello di namespace senza inline/template/constexpr."""
+    if text is None:
+        text = open(path, encoding="utf-8").read()
+
+    # Via commenti e stringhe: le graffe dentro un commento non contano.
+    text = re.sub(r'/\*.*?\*/', lambda m: '\n' * m.group(0).count('\n'), text, flags=re.S)
+    text = re.sub(r'//[^\n]*', '', text)
+    text = re.sub(r'"(?:\\.|[^"\\])*"', '""', text)
+    lines = text.splitlines()
+
+    problems = []
+    stack = []            # un elemento per graffa aperta: True se e' di un namespace
+    pending_namespace = False
+    previous = ""
+
+    for number, line in enumerate(lines, 1):
+        stripped = line.strip()
+        at_namespace_scope = all(stack)
+
+        if at_namespace_scope and stripped and not stripped.startswith('#'):
+            match = DEFINITION_START.match(line)
+            if match:
+                head_words = set(re.findall(r'[A-Za-z_]\w*', match.group("head")))
+                is_function = (not head_words & NOT_A_TYPE
+                               and "operator" not in head_words
+                               and not stripped.endswith(';'))
+                # Definizione se la graffa arriva su questa riga o sulla prossima
+                # non vuota (dopo eventuali righe di parametri).
+                if is_function:
+                    rest = lines[number - 1:number + 6]
+                    joined = " ".join(rest)
+                    brace = joined.find('{')
+                    semicolon = joined.find(';')
+                    defines = brace != -1 and (semicolon == -1 or brace < semicolon)
+                    qualified = head_words & {"inline", "constexpr", "template", "static"} \
+                        or previous.startswith("template")
+                    if defines and not qualified:
+                        problems.append(
+                            f"{path}:{number}: '{match.group('name')}' e' definita in un header dello "
+                            f"strato puro senza 'inline': due .cpp che lo includono danno LNK2005.")
+
+        if re.search(r'\bnamespace\b', stripped):
+            pending_namespace = True
+        for char in line:
+            if char == '{':
+                stack.append(pending_namespace)
+                pending_namespace = False
+            elif char == '}' and stack:
+                stack.pop()
+        if stripped:
+            previous = stripped
+    return problems
+
+
 def main() -> int:
     root = sys.argv[1] if len(sys.argv) > 1 else os.path.join(
         os.path.dirname(os.path.abspath(__file__)), "..", "Source")
 
-    problems = check_pure_is_header_only(root) + check_public_free_functions(root)
+    problems = (check_pure_is_header_only(root) + check_public_free_functions(root)
+                + check_pure_definitions_are_inline(root))
 
     if problems:
         print(f"  FALLITO - {len(problems)} simboli a rischio di errore di link:")
@@ -111,7 +202,7 @@ def main() -> int:
             print(f"    {problem}")
         return 1
 
-    print("  ok - strato puro header-only, nessuna funzione libera non esportata")
+    print("  ok - strato puro header-only e tutto inline, nessuna funzione libera non esportata")
     return 0
 
 

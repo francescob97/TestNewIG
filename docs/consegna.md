@@ -16,14 +16,15 @@ Ultimo aggiornamento: 2026-09-20. Branch: `claude/charming-goodall-xd2r3g`.
 | 5 | Mesh, gonne, terreno a schermo | **codice completo, mai compilato in UE** |
 | 6 | Ortofoto drappeggiate | **codice completo, mai compilato in UE** |
 | 7 | Entità e interoperabilità (CIGI, DIS, HLA, memoria condivisa) | **solo design** |
+| dopo | **Residenza**: selezione indipendente dalla vista, precarico da posizione e velocità, mesh nascoste | **codice completo, mai compilato in UE** — `docs/residenza-design.md` |
 
 **Avvertenza sul C++:** nessuna riga di C++ di questo progetto e' mai stata
 compilata con Unreal Engine. L'ambiente in cui e' stato scritto e' Linux senza
 il motore. Quello che **e'** stato verificato:
 
-* tutta la matematica pura, con test numerici eseguiti: **164 test C++** in
-  totale (37 Fase 1 + 23 Fase 3 + 42 Fase 4 + 28 Fase 5 + 44 Fase 6), piu' 77
-  test Python;
+* tutta la matematica pura, con test numerici eseguiti: **205 test C++** in
+  totale (37 Fase 1 + 22 Fase 3 + 74 Fase 4 e residenza + 28 Fase 5 + 44
+  Fase 6), piu' 77 test Python;
 * le convenzioni UE controllate staticamente (bilanciamento parentesi,
   posizione dei `.generated.h`, guardie `WITH_EDITOR`, macro di export);
 * il formato dei file, letto dal codice C++ vero contro un dataset vero.
@@ -41,6 +42,7 @@ gia' incontrati e corretti, per riconoscerli se tornano:
 | `C2039: 'X' is not a member of Y` su una classe nostra | nome di metodo sbagliato. Lo intercetta `Tools/CheckOwnApiCalls.py`, che suggerisce anche il nome giusto |
 | `missing type specifier` su una riga `static FAutoConsoleCommand...` | il tipo non esiste. **`FAutoConsoleCommandWithArgs` NON esiste**: i validi sono `FAutoConsoleCommand` (che accetta anche un delegato con argomenti), `...WithWorld`, `...WithWorldAndArgs`, `...WithOutputDevice`, `...WithArgsAndOutputDevice`, `...WithWorldArgsAndOutputDevice`. Lo intercetta la regola 5 di `CheckSourceDiscipline.sh` |
 | `unresolved external symbol` su una funzione dello strato puro | in Unreal ogni modulo e' una DLL: un simbolo definito in un `.cpp` non e' visibile fuori se non esportato. **Lo strato puro e' header-only**, appunto per non doverlo esportare. Lo intercetta `Tools/CheckModuleExports.py` |
+| `LNK2005: ... already defined` su una funzione dello strato puro | funzione DEFINITA in un header senza `inline`: ogni `.cpp` che lo include ne fa una copia. Mai successo, ma `Detail::PriorityFromError` era cosi' fino alla residenza. Lo intercetta la regola 3 di `Tools/CheckModuleExports.py` |
 
 Dopo aver aggiunto file o cartelle: tasto destro sul `.uproject` ->
 **Generate Visual Studio project files**. IntelliSense non li vede finche' non
@@ -72,7 +74,7 @@ cmake -S Plugins/GeoWorld/Tools/StandaloneTests -B build
 cmake --build build
 build\Debug\geocore_tests.exe                       :: 37 test
 build\Debug\geotiles_tests.exe dataset\test         :: 23 test
-build\Debug\geoquadtree_tests.exe                   :: 42 test
+build\Debug\geoquadtree_tests.exe                   :: 74 test
 build\Debug\geomesh_tests.exe                       :: 28 test
 build\Debug\geoimagery_tests.exe                    :: 44 test
 Plugins\GeoWorld\Tools\CheckSourceDiscipline.sh      :: serve bash (Git Bash)
@@ -111,7 +113,14 @@ geo.Lod.Error <pixel>          soglia dell'errore su schermo (la manopola del LO
 geo.Lod.Freeze <0|1>           congela la vista: mostra cosa il culling ha scartato
 geo.Lod.Draw <0|1>             tassellatura scelta, un colore per livello
 geo.Lod.Stats                  nodi visitati, scarti, tempo di selezione
-geo.Lod.Margin <fattore>       allargamento del frustum: contro il bordo vuoto
+geo.Lod.Margin <fattore>       allargamento del frustum (solo nel modo classico)
+
+geo.Lod.ViewIndependent <0|1>  1 = tile tutto attorno, il frustum lo fa Unreal (default)
+geo.Lod.Prefetch <0|1>         piano di residenza e precarico (default 1)
+geo.Lod.Lookahead <s>          quanti secondi avanti prevedere (default 12)
+geo.Lod.Safety <fattore>       anello di sicurezza in RAM (default 0.5; 0 = spento)
+geo.Terrain.MeshBudget <N>     mesh tenute costruite, visibili + nascoste (default 2000)
+geo.Terrain.Warmup <N>         mesh per frame dopo un salto (default 24; 0 = spento)
 
 geo.Terrain.Demo <cartella>    apre un dataset e disegna il terreno vero
 geo.Terrain.Enable <0|1>       costruzione della geometria
@@ -347,6 +356,11 @@ onesto di cio' che manca, in ordine di quanto si fa sentire.
 correttezza e non la resa. Finche' non e' chiusa non si possono giudicare le
 finiture visive. Serve l'output di `geo.Diag`.
 
+**1b. Verificare la residenza e tarare i default.** `docs/residenza-verifica.md`,
+sezione 8: memoria per mesh, costo di rimostrare una mesh nascosta, durata del
+riscaldamento. Poi il passo naturale successivo: **costruire le mesh su un thread
+di lavoro**. Il precarico ne nasconde il costo ma non lo toglie.
+
 **2. Mipmap sulle ortofoto.** Senza, a viste radenti il terreno sfarfalla. La
 soluzione e' scriverli nel file (il formato ha gia' il byte del tipo di payload
 e si presta) e caricarli tutti in `UTexture2D::CreateTransient`, che accetta un
@@ -439,6 +453,8 @@ Limitazioni note, lasciate aperte di proposito:
 | Cosa | Dove |
 |---|---|
 | Manuale di studio: tutto il progetto spiegato, capitolo per capitolo | `docs/manuale/00-indice.md` |
+| Residenza: cosa tenere pronto, design e motivazioni | `docs/residenza-design.md` |
+| Verifica della residenza in Unreal | `docs/residenza-verifica.md` |
 | Programma delle sei fasi | `docs/programma.md` |
 | Da dove vengono i dati, licenze, ortofoto | `docs/dati.md` |
 | Design e motivazioni Fase 1 | `docs/fase1-design.md` |

@@ -60,6 +60,8 @@ giusto.
 | `EQueuedWorkPriority::Count` | è un valore dell'enum, il compilatore lo accetta |
 | i contatori dell'overlay che misuravano l'intenzione | "3.538.944 triangoli", e schermo vuoto |
 | `geo.Terrain.FlipWinding 1` che rispondeva "ON" | non aveva cambiato niente |
+| l'orizzonte sulla sfera di contenimento | rinunciava sulle tile grandi, e il frustum copriva il buco: visto solo togliendo il frustum (capitolo 11) |
+| la regola anti-buchi sulle quote invece che sulle mesh | un buco di qualche frame, confuso con gli scatti (capitolo 11) |
 
 **La difesa:**
 
@@ -105,6 +107,7 @@ e organizza il codice.
 |---|---|
 | `unresolved external symbol GeodeticToEcef` | ogni modulo è una **DLL**: senza `_API` il codice non è visibile agli altri |
 | `C2084: PackKey already has a body` | la **build unity** unisce più `.cpp`: i namespace anonimi si fondono |
+| `Detail::PriorityFromError` definita in un header senza `inline` | mai esploso, ma due `.cpp` fuori dallo stesso blocco unity avrebbero dato `LNK2005`: ora lo sorveglia la regola 3 di `CheckModuleExports.py` |
 | parametro `bEnabled` che nasconde il campo `bEnabled` | lo **shadowing** in Unreal è un errore, non un avviso |
 | `cannot open source file` su file appena aggiunti | bisogna **rigenerare i file di progetto** |
 

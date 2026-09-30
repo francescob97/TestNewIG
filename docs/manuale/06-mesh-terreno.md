@@ -332,6 +332,12 @@ questo che l'interfaccia esiste.
 3. **rimuove** la geometria delle tile non più selezionate, e le spinna;
 4. **costruisce** la geometria di quelle nuove, al massimo **4 per frame**.
 
+> 📌 **Com'è adesso, dopo la residenza (capitolo 11).** I passi 2 e 3 sono
+> cambiati. Le mesh non selezionate non si **rimuovono** più: si **nascondono**
+> (`IGeoTerrainMeshProvider::SetTileVisible`) e si tengono, fino a un budget di
+> 2.000. In più se ne costruiscono **in anticipo**, nascoste, per i posti dove
+> la camera sta andando. Il pin nella cache resta solo sulle tile a schermo.
+
 ### Il budget per frame
 
 `BuildTileMesh()` gira **sul game thread**. Trentamila triangoli per tile sono
@@ -343,6 +349,11 @@ Si potrebbe spostare la costruzione sui thread di caricamento: `BuildTileMesh()`
 è pura e senza stato, quindi la modifica sarebbe piccola. Non è stato fatto
 perché nessuna misura dice che serve, e aggiungere concorrenza prima di avere un
 numero è il modo classico di pagare complessità per niente.
+
+Con la residenza questa è diventata la cosa da fare dopo: il precarico
+nasconde il costo della costruzione (la fa prima, con il budget che avanza), ma
+non lo toglie, e nel riscaldamento dopo un salto il frame rallenta proprio per
+questo.
 
 ### Un bug trovato scrivendo
 

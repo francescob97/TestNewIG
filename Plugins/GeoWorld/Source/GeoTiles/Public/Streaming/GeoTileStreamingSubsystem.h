@@ -125,6 +125,16 @@ public:
 	void ClearCache();
 	void SetTilePinned(const FTileKey& Key, bool bPinned);
 
+	/**
+	 * Segna una tile come usata di recente senza contarla come accesso.
+	 * Il piano di residenza la chiama sulle tile che vuole tenere, cosi' lo
+	 * sfratto LRU colpisce per prime quelle che non servono piu'.
+	 */
+	bool TouchTile(const FTileKey& Key) { return Cache.Touch(Key); }
+
+	/** Letture avviate e non ancora consegnate al game thread. */
+	int32 GetInFlightCount() const { return InFlight.Num(); }
+
 	FGeoTileStreamingStats GetStats() const;
 	void ResetStats();
 
@@ -167,7 +177,13 @@ private:
 	void DrainCompletedLoads();
 
 	FGeoTileDataset Dataset;
-	GeoWorld::Tiles::FTileCache Cache{ 256ull * 1024 * 1024 };
+	/**
+	 * 1 GB di default: ~16.000 tile da 66 KB. Il piano di residenza ne vuole
+	 * tipicamente 1.500-3.000, quindi resta molto spazio per la memoria
+	 * "a lungo termine" (zone gia' visitate). Sulla macchina da 64 GB si puo'
+	 * alzare con geo.Tiles.Budget senza pensarci troppo.
+	 */
+	GeoWorld::Tiles::FTileCache Cache{ 1024ull * 1024 * 1024 };
 
 	/**
 	 * Coda multi-produttore / singolo-consumatore: molti worker scrivono, solo

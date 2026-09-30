@@ -171,7 +171,11 @@ void UGeoImageryStreamingSubsystem::Initialize(FSubsystemCollectionBase& Collect
 	// classe che contiene una list e una unordered_map. Un giorno qualcuno
 	// aggiunge un membro non assegnabile e il punto di rottura e' qui, lontano
 	// dalla causa.
-	Cache.SetBudgetBytes(512ull * 1024 * 1024);
+	//
+	// 1 GB: ~4.000 tile decodificate. Con il piano di residenza il terreno
+	// tiene costruite (e quindi vestite) anche le tile nascoste pronte
+	// all'uso, fino a ~1.500-2.000: 512 MB sarebbero stati al limite.
+	Cache.SetBudgetBytes(1024ull * 1024 * 1024);
 
 	Pool.Startup(LoadThreadCount, TEXT("GeoImageryLoadPool"));
 

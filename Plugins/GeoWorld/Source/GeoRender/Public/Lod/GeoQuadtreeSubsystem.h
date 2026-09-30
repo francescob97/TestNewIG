@@ -7,6 +7,7 @@
 #include "Subsystems/WorldSubsystem.h"
 
 #include "Quadtree/QuadtreeTypes.h"
+#include "Quadtree/Residency.h"
 #include "Quadtree/TileSelector.h"
 
 #include "GeoQuadtreeSubsystem.generated.h"
@@ -30,6 +31,20 @@ struct FGeoQuadtreeStats
 	UPROPERTY() float ErrorePeggiorePx = 0.0f;
 	UPROPERTY() float SogliaErrorePx = 4.0f;
 	UPROPERTY() float TempoSelezioneMs = 0.0f;
+
+	// --- Residenza (vedi Quadtree/Residency.h) ---------------------------
+	UPROPERTY() bool VistaIndipendente = true;
+	UPROPERTY() float VelocitaMs = 0.0f;
+	UPROPERTY() int32 Teletrasporti = 0;
+	UPROPERTY() int32 PianoAdesso = 0;
+	UPROPERTY() int32 PianoPreviste = 0;
+	UPROPERTY() int32 PianoSicurezza = 0;
+	/** Quante tile di ciascuna fascia hanno gia' le quote in RAM. */
+	UPROPERTY() int32 InRamAdesso = 0;
+	UPROPERTY() int32 InRamPreviste = 0;
+	UPROPERTY() int32 InRamSicurezza = 0;
+	UPROPERTY() int32 RichiestePrecarico = 0;
+	UPROPERTY() float TempoPianoMs = 0.0f;
 };
 
 /**
@@ -98,8 +113,67 @@ public:
 	/** Esegue una selezione adesso, fuori dal tick. Ritorna false se manca la vista. */
 	bool RunSelection();
 
+	// --- Residenza ----------------------------------------------------------
+	//
+	// Due modi di lavorare, per poterli confrontare:
+	//   vista-indipendente (default): si disegna tutto cio' che serve attorno
+	//     alla camera, in ogni direzione; il frustum lo applica Unreal.
+	//   classico (Fase 4): si seleziona solo cio' che sta nel frustum allargato.
+
+	void SetViewIndependent(bool bInViewIndependent) { bViewIndependent = bInViewIndependent; }
+	bool IsViewIndependent() const { return bViewIndependent; }
+
+	/** Precaricamento in base al piano di residenza. */
+	void SetPrefetchEnabled(bool bInEnabled) { bPrefetchEnabled = bInEnabled; bPlanDirty = true; }
+	bool IsPrefetchEnabled() const { return bPrefetchEnabled; }
+
+	void SetLookaheadSeconds(double Seconds)
+	{
+		ResidencySettings.LookaheadSeconds = FMath::Clamp(Seconds, 0.0, 120.0);
+		bPlanDirty = true;
+	}
+	double GetLookaheadSeconds() const { return ResidencySettings.LookaheadSeconds; }
+
+	void SetSafetyFactor(double Factor)
+	{
+		// 0 spegne; sopra 1 non avrebbe senso (sarebbe MENO dettaglio della
+		// fascia attuale, cioe' tutte tile gia' coperte).
+		ResidencySettings.SafetyErrorFactor = FMath::Clamp(Factor, 0.0, 1.0);
+		bPlanDirty = true;
+	}
+	double GetSafetyFactor() const { return ResidencySettings.SafetyErrorFactor; }
+
+	/** Il piano corrente: lo legge il terreno per costruire in anticipo. */
+	const GeoWorld::Quadtree::FResidencyPlan& GetResidencyPlan() const { return Plan; }
+
+	/** Cresce a ogni ricalcolo del piano: chi ne tiene una copia sa quando rifarla. */
+	int32 GetPlanGeneration() const { return PlanGeneration; }
+
+	/** Tile che il disegno vorrebbe ADESSO e non ha: le piu' urgenti di tutte. */
+	const TArray<GeoWorld::Quadtree::FTileRequest>& GetRenderRequests() const { return RenderRequests; }
+
+	/** Quanti teletrasporti ha visto: il terreno lo usa per entrare in riscaldamento. */
+	int32 GetTeleportCount() const { return Motion.GetTeleportCount(); }
+
+	/**
+	 * Chi decide se una tile e' "pronta per il disegno".
+	 *
+	 * Per la Fase 4 da sola basta che le quote siano in RAM. Con il terreno
+	 * acceso invece serve che la MESH esista: altrimenti il selettore
+	 * scenderebbe sui figli appena caricati, il terreno toglierebbe il padre
+	 * e per qualche frame non ci sarebbe niente al suo posto. Il terreno
+	 * registra qui la propria risposta, e la regola anti-buchi della Fase 4
+	 * torna a valere per quello che si vede davvero.
+	 */
+	void SetRenderReadiness(TFunction<bool(const GeoWorld::Tiles::FTileKey&)> InReadiness)
+	{
+		RenderReadiness = MoveTemp(InReadiness);
+	}
+	void ClearRenderReadiness() { RenderReadiness = nullptr; }
+
 private:
 	bool BuildViewParameters(GeoWorld::Quadtree::FViewParameters& OutView);
+	void UpdateResidency(const GeoWorld::Quadtree::FViewParameters& View);
 	void DrawDebugOverlay();
 	void DrawSelection() const;
 
@@ -118,6 +192,30 @@ private:
 	bool bFrozen = false;
 	bool bShowDebugOverlay = false;
 	bool bDrawSelection = false;
+
+	// --- Residenza ---------------------------------------------------------
+	bool bViewIndependent = true;
+	bool bPrefetchEnabled = true;
+	bool bPlanDirty = true;
+	double LastPlanTime = 0.0;
+	int32 PlanGeneration = 0;
+
+	/** Ogni quanto ricalcolare il piano. Il disegno si rifa' a ogni frame. */
+	static constexpr double PlanIntervalSeconds = 0.25;
+
+	/**
+	 * Tetto alle letture di precarico in volo. Senza, un piano da migliaia di
+	 * tile riempirebbe la coda del pool, e una tile diventata urgente dovrebbe
+	 * aspettare dietro a tutte: la coda ha priorita', ma una richiesta gia'
+	 * accodata non si riordina.
+	 */
+	static constexpr int32 MaxPrefetchInFlight = 128;
+
+	GeoWorld::Quadtree::FMotionPredictor Motion;
+	GeoWorld::Quadtree::FResidencySettings ResidencySettings;
+	GeoWorld::Quadtree::FResidencyPlan Plan;
+	TArray<GeoWorld::Quadtree::FTileRequest> RenderRequests;
+	TFunction<bool(const GeoWorld::Tiles::FTileKey&)> RenderReadiness;
 
 	/** Ultima vista usata: serve a continuare a disegnare quando si e' congelata. */
 	GeoWorld::Quadtree::FViewParameters FrozenView;

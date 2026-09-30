@@ -442,6 +442,17 @@ static FAutoConsoleCommandWithWorld GeoLodStatsCommand(
 		GeoLodConsole::Report(FString::Printf(TEXT("  scartati orizzonte: %d"), Stats.ScartateOrizzonte));
 		GeoLodConsole::Report(FString::Printf(TEXT("  inesistenti     : %d"), Stats.ScartateAssenti));
 		GeoLodConsole::Report(FString::Printf(TEXT("Tempo selezione   : %.3f ms"), Stats.TempoSelezioneMs));
+		GeoLodConsole::Report(FString::Printf(TEXT("Modo              : %s"),
+			Stats.VistaIndipendente ? TEXT("vista-indipendente") : TEXT("classico (frustum)")));
+		GeoLodConsole::Report(FString::Printf(TEXT("Velocita' stimata : %.1f m/s   teletrasporti %d"),
+			Stats.VelocitaMs, Stats.Teletrasporti));
+		GeoLodConsole::Report(FString::Printf(TEXT("Piano adesso      : %d (quote in RAM %d)"),
+			Stats.PianoAdesso, Stats.InRamAdesso));
+		GeoLodConsole::Report(FString::Printf(TEXT("Piano previste    : %d (quote in RAM %d)"),
+			Stats.PianoPreviste, Stats.InRamPreviste));
+		GeoLodConsole::Report(FString::Printf(TEXT("Piano sicurezza   : %d (quote in RAM %d)"),
+			Stats.PianoSicurezza, Stats.InRamSicurezza));
+		GeoLodConsole::Report(FString::Printf(TEXT("Tempo piano       : %.3f ms (ogni 0.25 s)"), Stats.TempoPianoMs));
 	}));
 
 // --- geo.Lod.Demo -----------------------------------------------------------
@@ -616,6 +627,11 @@ static FAutoConsoleCommandWithWorld GeoTerrainStatsCommand(
 		GeoTerrainConsole::Report(FString::Printf(TEXT("Provider     : %s"), *Terrain->GetProviderName()));
 		GeoTerrainConsole::Report(FString::Printf(TEXT("Tile con mesh: %d   triangoli %d"),
 			Stats.TileConGeometria, Stats.TriangoliTotali));
+		GeoTerrainConsole::Report(FString::Printf(TEXT("  a schermo %d, nascoste %d, budget %d"),
+			Stats.MeshVisibili, Stats.MeshNascoste, Terrain->GetMeshBudget()));
+		GeoTerrainConsole::Report(FString::Printf(TEXT("Pronte adesso: %d / %d   previste %d / %d%s"),
+			Stats.PronteAdesso, Stats.PianoAdesso, Stats.ProntePreviste, Stats.PianoPreviste,
+			Stats.InRiscaldamento ? TEXT("   [RISCALDAMENTO]") : TEXT("")));
 		GeoTerrainConsole::Report(FString::Printf(TEXT("In attesa    : %d"), Stats.TileInAttesa));
 		GeoTerrainConsole::Report(FString::Printf(TEXT("Costruzione  : %.2f ms per tile"),
 			Stats.TempoCostruzioneMediaMs));
@@ -867,6 +883,115 @@ static FAutoConsoleCommandWithWorldAndArgs GeoLodMarginCommand(
 			TEXT("  Con 1.0 le tile vengono chieste quando sono GIA' visibili, e"), FColor::White);
 		GeoTerrainConsole::Report(
 			TEXT("  ruotando la camera il bordo resta vuoto finche' non arrivano."), FColor::White);
+		if (Quadtree->IsViewIndependent())
+		{
+			GeoTerrainConsole::Report(
+				TEXT("  NOTA: in modo vista-indipendente il margine non ha effetto (geo.Lod.ViewIndependent 0)."),
+				FColor::Yellow);
+		}
+	}));
+
+// ============================================================================
+//  RESIDENZA -- cosa tenere pronto, in base a posizione e velocita'
+//  (docs/residenza-design.md)
+// ============================================================================
+
+// --- geo.Lod.ViewIndependent ------------------------------------------------
+static FAutoConsoleCommandWithWorldAndArgs GeoLodViewIndependentCommand(
+	TEXT("geo.Lod.ViewIndependent"),
+	TEXT("geo.Lod.ViewIndependent <0|1> - 1: si disegna tutto attorno, il frustum lo fa Unreal. 0: modo classico."),
+	FConsoleCommandWithWorldAndArgsDelegate::CreateStatic(
+		[](const TArray<FString>& Args, UWorld* World)
+	{
+		UGeoQuadtreeSubsystem* Quadtree = GeoLodConsole::Get(World);
+		if (!Quadtree) { return; }
+		const bool bValue = (Args.Num() >= 1) ? (FCString::Atoi(*Args[0]) != 0) : !Quadtree->IsViewIndependent();
+		Quadtree->SetViewIndependent(bValue);
+		GeoTerrainConsole::Report(bValue
+			? FString(TEXT("Selezione VISTA-INDIPENDENTE: girare la camera non cambia le tile."))
+			: FString(TEXT("Selezione CLASSICA (Fase 4): solo cio' che sta nel frustum allargato.")));
+		if (!bValue)
+		{
+			GeoTerrainConsole::Report(
+				TEXT("  Gira la camera in fretta: il bordo che entra e' quello appena chiesto."), FColor::White);
+		}
+	}));
+
+// --- geo.Lod.Prefetch -------------------------------------------------------
+static FAutoConsoleCommandWithWorldAndArgs GeoLodPrefetchCommand(
+	TEXT("geo.Lod.Prefetch"),
+	TEXT("geo.Lod.Prefetch <0|1> - precarica le tile dove la camera sta andando, e un anello di sicurezza."),
+	FConsoleCommandWithWorldAndArgsDelegate::CreateStatic(
+		[](const TArray<FString>& Args, UWorld* World)
+	{
+		UGeoQuadtreeSubsystem* Quadtree = GeoLodConsole::Get(World);
+		if (!Quadtree) { return; }
+		const bool bValue = (Args.Num() >= 1) ? (FCString::Atoi(*Args[0]) != 0) : !Quadtree->IsPrefetchEnabled();
+		Quadtree->SetPrefetchEnabled(bValue);
+		GeoTerrainConsole::Report(FString::Printf(TEXT("Precaricamento: %s"), bValue ? TEXT("ON") : TEXT("OFF")));
+	}));
+
+// --- geo.Lod.Lookahead ------------------------------------------------------
+static FAutoConsoleCommandWithWorldAndArgs GeoLodLookaheadCommand(
+	TEXT("geo.Lod.Lookahead"),
+	TEXT("geo.Lod.Lookahead <secondi> - quanto avanti prevedere la posizione (default 12)."),
+	FConsoleCommandWithWorldAndArgsDelegate::CreateStatic(
+		[](const TArray<FString>& Args, UWorld* World)
+	{
+		UGeoQuadtreeSubsystem* Quadtree = GeoLodConsole::Get(World);
+		if (!Quadtree) { return; }
+		if (Args.Num() >= 1) { Quadtree->SetLookaheadSeconds(FCString::Atod(*Args[0])); }
+		GeoTerrainConsole::Report(FString::Printf(
+			TEXT("Previsione: %.1f s  (a %.0f m/s sono %.1f km davanti)"),
+			Quadtree->GetLookaheadSeconds(), Quadtree->GetStats().VelocitaMs,
+			Quadtree->GetLookaheadSeconds() * Quadtree->GetStats().VelocitaMs / 1000.0));
+	}));
+
+// --- geo.Lod.Safety ---------------------------------------------------------
+static FAutoConsoleCommandWithWorldAndArgs GeoLodSafetyCommand(
+	TEXT("geo.Lod.Safety"),
+	TEXT("geo.Lod.Safety <fattore> - anello di sicurezza in RAM: 0.5 = un livello piu' fine tutto attorno, 0 = spento."),
+	FConsoleCommandWithWorldAndArgsDelegate::CreateStatic(
+		[](const TArray<FString>& Args, UWorld* World)
+	{
+		UGeoQuadtreeSubsystem* Quadtree = GeoLodConsole::Get(World);
+		if (!Quadtree) { return; }
+		if (Args.Num() >= 1) { Quadtree->SetSafetyFactor(FCString::Atod(*Args[0])); }
+		GeoTerrainConsole::Report(FString::Printf(
+			TEXT("Anello di sicurezza: fattore %.2f%s"), Quadtree->GetSafetyFactor(),
+			Quadtree->GetSafetyFactor() > 0.0 ? TEXT("  (piu' basso = anello piu' largo e fine)") : TEXT("  SPENTO")));
+	}));
+
+// --- geo.Terrain.MeshBudget -------------------------------------------------
+static FAutoConsoleCommandWithWorldAndArgs GeoTerrainMeshBudgetCommand(
+	TEXT("geo.Terrain.MeshBudget"),
+	TEXT("geo.Terrain.MeshBudget <N> - mesh da tenere costruite in tutto, visibili + nascoste (default 2000)."),
+	FConsoleCommandWithWorldAndArgsDelegate::CreateStatic(
+		[](const TArray<FString>& Args, UWorld* World)
+	{
+		UGeoTerrainSubsystem* Terrain = GeoTerrainConsole::Get(World);
+		if (!Terrain) { return; }
+		if (Args.Num() >= 1) { Terrain->SetMeshBudget(FCString::Atoi(*Args[0])); }
+		GeoTerrainConsole::Report(FString::Printf(
+			TEXT("Budget mesh: %d  (oltre, si buttano le nascoste che il piano non vuole piu')"),
+			Terrain->GetMeshBudget()));
+	}));
+
+// --- geo.Terrain.Warmup -----------------------------------------------------
+static FAutoConsoleCommandWithWorldAndArgs GeoTerrainWarmupCommand(
+	TEXT("geo.Terrain.Warmup"),
+	TEXT("geo.Terrain.Warmup <N> - mesh per frame durante il riscaldamento (dopo un salto). 0 = spento."),
+	FConsoleCommandWithWorldAndArgsDelegate::CreateStatic(
+		[](const TArray<FString>& Args, UWorld* World)
+	{
+		UGeoTerrainSubsystem* Terrain = GeoTerrainConsole::Get(World);
+		if (!Terrain) { return; }
+		if (Args.Num() >= 1) { Terrain->SetWarmupTilesPerFrame(FCString::Atoi(*Args[0])); }
+		GeoTerrainConsole::Report(FString::Printf(
+			TEXT("Riscaldamento: %d mesh per frame%s"), Terrain->GetWarmupTilesPerFrame(),
+			Terrain->GetWarmupTilesPerFrame() > 0
+				? TEXT("  (il frame rallenta per poco, il terreno arriva tutto insieme)")
+				: TEXT("  SPENTO: dopo un salto il terreno si riempie al ritmo normale")));
 	}));
 
 // --- geo.Terrain.Diag -------------------------------------------------------
@@ -939,8 +1064,10 @@ static FAutoConsoleCommandWithWorld GeoTerrainDiagCommand(
 			const double DistanceKm = ToTile.Size() / GeoWorld::Units::MetersToUu / 1000.0;
 
 			// Un valore vicino a +1 significa "davanti alla camera", vicino a -1
-			// "dietro". Se le tile selezionate risultassero dietro, il problema
-			// sarebbe nel frustum della selezione, non nella mesh.
+			// "dietro". Con la selezione vista-indipendente (default) le tile
+			// dietro sono NORMALI: ci sono apposta, e il renderer non le disegna.
+			// Solo in modo classico una tile dietro indicherebbe un frustum
+			// della selezione sbagliato.
 			const double Ahead = ToTile.IsNearlyZero()
 				? 1.0 : FVector::DotProduct(ToTile.GetSafeNormal(), Forward);
 
@@ -955,9 +1082,9 @@ static FAutoConsoleCommandWithWorld GeoTerrainDiagCommand(
 				TEXT("      distanza %.1f km  davanti %.2f  %s  %s  materiale %s"),
 				DistanceKm, Ahead,
 				Tile.bRegistered ? TEXT("registrato") : TEXT("NON REGISTRATO"),
-				Tile.bVisible ? TEXT("visibile") : TEXT("NASCOSTO"),
+				Tile.bVisible ? TEXT("visibile") : TEXT("nascosto (pronto in anticipo)"),
 				*Tile.MaterialName),
-				(Tile.bRegistered && Tile.bVisible) ? FColor::White : FColor::Red);
+				Tile.bRegistered ? FColor::White : FColor::Red);
 		}
 
 		// Se i numeri sono sani, il problema non e' piu' "dove sta la geometria"
@@ -1100,7 +1227,7 @@ static FAutoConsoleCommandWithWorldAndArgs GeoTerrainDemoCommand(
 		Terrain->SetWireframe(true);
 
 		GeoTerrainConsole::Report(FString::Printf(
-			TEXT("Terreno attivo su '%s'. Quota 15 km sul centro del dataset."),
+			TEXT("Terreno attivo su '%s'. Quota 6 km sul centro del dataset."),
 			*Dataset.GetDatasetName()));
 		GeoTerrainConsole::Report(TEXT("Wireframe acceso: il terreno grigio senza texture si confonde col cielo."));
 		GeoTerrainConsole::Report(TEXT("Spegnilo quando lo vedi: geo.Terrain.Wireframe 0"));

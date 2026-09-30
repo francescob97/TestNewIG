@@ -90,6 +90,41 @@ namespace GeoWorld::Quadtree
 	bool IsTileBelowHorizon(const FTileBoundingVolume& Volume, const FEcef& Camera,
 	                        const Core::FEllipsoid& Ellipsoid);
 
+	/**
+	 * La tile, come RETTANGOLO geografico, sta tutta oltre l'orizzonte?
+	 *
+	 * =========================================================================
+	 *  PERCHE' UN SECONDO TEST, E PERCHE' E' QUELLO CHE USA IL SELETTORE
+	 * =========================================================================
+	 *  Il test sulla sfera qui sopra rinuncia ("non so, tengo") appena la sfera
+	 *  di contenimento scende sotto la superficie del pianeta. Ma una sfera che
+	 *  contiene un pezzo di superficie curva scende SEMPRE sotto la superficie,
+	 *  di una quantita' che cresce con la tile: in pratica rinuncia per tutte
+	 *  le tile dal livello 0 fin verso il 10. Finche' il frustum scartava
+	 *  l'altra faccia del pianeta non se ne accorgeva nessuno. Con la selezione
+	 *  indipendente dalla vista, su un dataset mondiale, si caricavano tile
+	 *  sull'America guardando Roma: trovato dal test "l'orizzonte continua a
+	 *  scartare l'altra faccia del pianeta".
+	 *
+	 *  Qui si ragiona sul rettangolo vero, nello spazio scalato dove il
+	 *  pianeta e' esattamente la sfera unitaria:
+	 *
+	 *    gamma   angolo minimo, visto dal centro, fra la camera e un punto
+	 *            qualunque del rettangolo
+	 *    alphaC  acos(1 / distanza scalata della camera)
+	 *    alphaT  acos(1 / distanza scalata massima di un punto della tile)
+	 *
+	 *    la tile e' occlusa se  gamma > alphaC + alphaT
+	 *
+	 *  gamma si calcola in forma chiusa: in spazio scalato la latitudine di
+	 *  un punto in superficie e' quella PARAMETRICA, monotona rispetto alla
+	 *  geodetica, quindi il rettangolo resta un rettangolo, e la distanza di
+	 *  un punto da un rettangolo lat/lon su una sfera ha una formula chiusa.
+	 */
+	bool IsTileRectBeyondHorizon(double WestDeg, double SouthDeg, double EastDeg, double NorthDeg,
+	                             double MaxHeight, const FEcef& Camera,
+	                             const Core::FEllipsoid& Ellipsoid);
+
 	// ======================================================================
 	//  IMPLEMENTAZIONE
 	//
@@ -304,6 +339,88 @@ namespace GeoWorld::Quadtree
 	                        const FEllipsoid& Ellipsoid)
 	{
 		return IsSphereBelowHorizon(Camera, Volume.Centre, Volume.Radius, Ellipsoid);
+	}
+
+	inline bool IsTileRectBeyondHorizon(double WestDeg, double SouthDeg, double EastDeg, double NorthDeg,
+	                                    double MaxHeight, const FEcef& Camera,
+	                                    const FEllipsoid& Ellipsoid)
+	{
+		// Tutto nello SPAZIO SCALATO (x/a, y/a, z/b), come IsPointBelowHorizon:
+		// li' l'ellissoide e' la sfera unitaria ESATTA, e una trasformazione
+		// affine conserva rette e tangenze, quindi il cono d'orizzonte calcolato
+		// sulla sfera unitaria e' quello vero del pianeta. La prima versione
+		// usava la sfera inscritta di raggio B: corretta ma cosi' prudente da
+		// tenere tile a livello del mare 400 km oltre l'orizzonte.
+		const FEcef Scaled = ToScaledSpace(Camera, Ellipsoid);
+		const double CameraDistance = Scaled.Length();
+		if (CameraDistance <= 1.0) { return false; }
+
+		// La direzione scalata di un punto in superficie ha come latitudine la
+		// latitudine PARAMETRICA: tan(beta) = (b/a) tan(geodetica). E' monotona,
+		// quindi il rettangolo geografico resta un rettangolo.
+		const double Ratio = Ellipsoid.B / Ellipsoid.A;
+		auto Parametric = [Ratio](double LatDeg)
+		{
+			return std::atan(Ratio * std::tan(LatDeg * Core::DegToRad));
+		};
+		const double South = Parametric(std::max(-89.999999, SouthDeg));
+		const double North = Parametric(std::min(89.999999, NorthDeg));
+
+		const double CameraLat = std::atan2(Scaled.Z, std::sqrt(Scaled.X * Scaled.X + Scaled.Y * Scaled.Y));
+		const double CameraLon = std::atan2(Scaled.Y, Scaled.X);
+
+		// Differenza di longitudine ridotta a [0, pi].
+		auto LonGap = [CameraLon](double LonDeg)
+		{
+			const double Delta = std::fmod(std::fabs(LonDeg * Core::DegToRad - CameraLon), 2.0 * Core::Pi);
+			return Delta > Core::Pi ? 2.0 * Core::Pi - Delta : Delta;
+		};
+
+		const double West = WestDeg * Core::DegToRad;
+		const double East = EastDeg * Core::DegToRad;
+		double Wrapped = CameraLon;
+		while (Wrapped < West) { Wrapped += 2.0 * Core::Pi; }
+		const bool bLonInside = (Wrapped <= East);
+
+		// gamma: angolo minimo fra la direzione della camera e il rettangolo.
+		double Gamma = 0.0;
+		if (bLonInside)
+		{
+			// Per ogni latitudine la distanza cresce con la differenza di
+			// longitudine: il punto piu' vicino sta sul meridiano della camera.
+			Gamma = std::fabs(CameraLat - std::max(South, std::min(North, CameraLat)));
+		}
+		else
+		{
+			// Il punto piu' vicino sta sul lato meridiano piu' vicino. Lungo
+			// quel meridiano
+			//   cos(d) = sin(lat) sin(lc) + cos(lat) cos(lc) cos(dlon)
+			// e' una sinusoide in lat: il suo massimo (la distanza minima) sta
+			// nel picco se cade nell'intervallo, altrimenti a un estremo.
+			const double Gap = std::min(LonGap(WestDeg), LonGap(EastDeg));
+			const double SinPart = std::sin(CameraLat);
+			const double CosPart = std::cos(CameraLat) * std::cos(Gap);
+			auto CosDistance = [SinPart, CosPart](double Lat)
+			{
+				return SinPart * std::sin(Lat) + CosPart * std::cos(Lat);
+			};
+
+			double Best = std::max(CosDistance(South), CosDistance(North));
+			const double Peak = std::atan2(SinPart, CosPart);
+			if (Peak >= South && Peak <= North) { Best = std::max(Best, CosDistance(Peak)); }
+			Gamma = std::acos(std::max(-1.0, std::min(1.0, Best)));
+		}
+
+		// Una quota h sposta un punto di al piu' h/B nello spazio scalato
+		// (si divide per semiassi >= B), e ne ruota la direzione di un angolo
+		// dell'ordine di (h/A) * 0.0034 rad: 5e-6 rad per 10 km. Il margine
+		// lo copre, dal lato che tiene le tile.
+		constexpr double DirectionSlack = 1e-5;
+		const double TileDistance = 1.0 + std::max(0.0, MaxHeight) / Ellipsoid.B;
+		const double AlphaCamera = std::acos(1.0 / CameraDistance);
+		const double AlphaTile = std::acos(1.0 / TileDistance);
+
+		return Gamma - DirectionSlack > AlphaCamera + AlphaTile;
 	}
 
 }

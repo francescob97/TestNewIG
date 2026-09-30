@@ -109,5 +109,11 @@ private:
 	bool bShowDebugOverlay = false;
 	int32 MaxTexturesPerFrame = 4;
 
+	/** Texture per frame mentre il terreno e' in riscaldamento. */
+	int32 WarmupTexturesPerFrame = 32;
+
+	/** Teletrasporti gia' visti: a ogni nuovo si svuota la coda delle immagini. */
+	int32 TeleportsSeen = 0;
+
 	FGeoImageryStats Stats;
 };

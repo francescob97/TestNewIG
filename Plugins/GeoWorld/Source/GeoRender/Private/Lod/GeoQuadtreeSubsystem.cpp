@@ -26,8 +26,13 @@ namespace
 	class FStreamingAvailability : public ITileAvailability
 	{
 	public:
-		explicit FStreamingAvailability(UGeoTileStreamingSubsystem* InStreaming)
-			: Streaming(InStreaming) {}
+		/**
+		 * InReadiness, se c'e', sostituisce la domanda "e' caricata?": e' il
+		 * terreno che risponde "ho la mesh". Vedi SetRenderReadiness.
+		 */
+		explicit FStreamingAvailability(UGeoTileStreamingSubsystem* InStreaming,
+		                                const TFunction<bool(const FTileKey&)>* InReadiness = nullptr)
+			: Streaming(InStreaming), Readiness(InReadiness) {}
 
 		virtual bool TileExists(const FTileKey& Key) const override
 		{
@@ -55,11 +60,13 @@ namespace
 
 		virtual bool IsTileLoaded(const FTileKey& Key) const override
 		{
+			if (Readiness && *Readiness) { return (*Readiness)(Key); }
 			return Streaming && Streaming->GetTileState(Key) == EGeoTileState::Pronta;
 		}
 
 	private:
 		UGeoTileStreamingSubsystem* Streaming = nullptr;
+		const TFunction<bool(const FTileKey&)>* Readiness = nullptr;
 	};
 }
 
@@ -86,7 +93,10 @@ void UGeoQuadtreeSubsystem::Initialize(FSubsystemCollectionBase& Collection)
 void UGeoQuadtreeSubsystem::Deinitialize()
 {
 	SelectedTiles.Empty();
+	RenderRequests.Empty();
 	Result.Reset();
+	Plan.Reset();
+	RenderReadiness = nullptr;
 	Streaming = nullptr;
 	Super::Deinitialize();
 }
@@ -155,6 +165,7 @@ bool UGeoQuadtreeSubsystem::RunSelection()
 	if (!Streaming || !Streaming->IsDatasetOpen()) { return false; }
 
 	FViewParameters View;
+	bool bLiveView = false;
 	if (bFrozen && bHasFrozenView)
 	{
 		View = FrozenView;
@@ -168,12 +179,34 @@ bool UGeoQuadtreeSubsystem::RunSelection()
 		if (!BuildViewParameters(View)) { return false; }
 		FrozenView = View;
 		bHasFrozenView = true;
+		bLiveView = true;
+	}
+
+	// Vista-indipendente: il frustum non entra nella selezione. Vedi
+	// FViewParameters::bFrustumCulling per il perche'.
+	View.bFrustumCulling = !bViewIndependent;
+
+	// --- Il moto ---------------------------------------------------------------
+	//
+	// Il tempo e' quello dell'orologio, non quello del mondo: il tempo del
+	// mondo si ferma con la pausa e segue il rallentatore, e nell'editor fuori
+	// dal Play non e' detto che avanzi. La camera invece si muove comunque, e
+	// la velocita' che interessa e' quella vera.
+	if (bLiveView && Motion.Update(View.CameraEcef, FPlatformTime::Seconds()))
+	{
+		// Teletrasporto: tutto cio' che era in coda riguardava il posto da
+		// cui si e' partiti. Lasciarlo in coda vorrebbe dire far aspettare le
+		// tile di qui dietro a quelle di la'.
+		Streaming->CancelPendingRequests();
+		bPlanDirty = true;
+		UE_LOG(LogGeoWorld, Log,
+			TEXT("[GeoLod] Teletrasporto riconosciuto: richieste in coda annullate, piano da rifare."));
 	}
 
 	const double Started = FPlatformTime::Seconds();
 
 	const FGeoTileDataset& Dataset = Streaming->GetDataset();
-	const FStreamingAvailability Availability(Streaming);
+	const FStreamingAvailability Availability(Streaming, &RenderReadiness);
 
 	SelectTiles(View, Availability,
 		static_cast<uint32>(Dataset.GetMinLevel()),
@@ -181,12 +214,16 @@ bool UGeoQuadtreeSubsystem::RunSelection()
 
 	const double Elapsed = FPlatformTime::Seconds() - Started;
 
-	// Le richieste partono in ordine di urgenza: il selettore le ha gia'
-	// ordinate, e il loader ha la sua coda a priorita'.
+	// Le richieste del DISEGNO partono per prime e con la priorita' piu' alta
+	// (2..3): sono tile che mancano adesso, a schermo. Il precarico usa 0..2.
+	RenderRequests.Reset(static_cast<int32>(Result.ToLoad.size()));
 	for (const FTileRequest& Request : Result.ToLoad)
 	{
-		Streaming->RequestTile(Request.Key, Request.Priority);
+		Streaming->RequestTile(Request.Key, FMath::Clamp(Request.Priority, 2, 3));
+		RenderRequests.Add(Request);
 	}
+
+	UpdateResidency(View);
 
 	// Le tile che stiamo disegnando si pinnano: sfrattarle mentre sono a
 	// schermo significherebbe ricaricarle subito dopo.
@@ -216,7 +253,87 @@ bool UGeoQuadtreeSubsystem::RunSelection()
 	}
 	if (SelectedTiles.Num() == 0) { Stats.LivelloMinimo = 0; }
 
+	Stats.VistaIndipendente = bViewIndependent;
+	Stats.VelocitaMs = static_cast<float>(Motion.GetSpeed());
+	Stats.Teletrasporti = Motion.GetTeleportCount();
+
 	return true;
+}
+
+void UGeoQuadtreeSubsystem::UpdateResidency(const FViewParameters& View)
+{
+	if (!bPrefetchEnabled)
+	{
+		if (!Plan.Entries.empty()) { Plan.Reset(); ++PlanGeneration; }
+		Stats.PianoAdesso = Stats.PianoPreviste = Stats.PianoSicurezza = 0;
+		Stats.InRamAdesso = Stats.InRamPreviste = Stats.InRamSicurezza = 0;
+		Stats.RichiestePrecarico = 0;
+		return;
+	}
+
+	// --- Il piano: ogni quarto di secondo, o subito dopo un salto ------------
+	//
+	// Il piano costa cinque selezioni (adesso, tre posizioni previste,
+	// sicurezza): circa un millisecondo. Rifarlo a ogni frame sarebbe lavoro
+	// buttato: in un quarto di secondo, anche a 250 m/s, ci si sposta di 60 m,
+	// e l'insieme di tile cambia solo ai bordi.
+	const double Now = FPlatformTime::Seconds();
+	if (bPlanDirty || Now - LastPlanTime >= PlanIntervalSeconds)
+	{
+		// Il piano ragiona sulle QUOTE (cosa esiste, che intervallo di quote
+		// ha), non sulle mesh: niente readiness qui.
+		const FStreamingAvailability Availability(Streaming);
+		const FGeoTileDataset& Dataset = Streaming->GetDataset();
+
+		BuildResidencyPlan(View, Motion, ResidencySettings, Availability,
+			static_cast<uint32>(Dataset.GetMinLevel()),
+			static_cast<uint32>(Dataset.GetMaxLevel()), Plan);
+
+		Stats.TempoPianoMs = static_cast<float>((FPlatformTime::Seconds() - Now) * 1000.0);
+		LastPlanTime = Now;
+		bPlanDirty = false;
+		++PlanGeneration;
+
+		// Si "toccano" le tile del piano dalla MENO urgente alla piu' urgente:
+		// cosi' in testa alla LRU finiscono quelle che servono prima, e lo
+		// sfratto, quando serve, colpisce per prime le tile che il piano non
+		// vuole piu'. E' qui che "scaricare dietro" avviene: non buttando via
+		// niente in modo esplicito, ma lasciando che invecchi. Se si torna
+		// indietro prima che il budget lo richieda, e' ancora li'.
+		for (int32 Index = static_cast<int32>(Plan.Entries.size()) - 1; Index >= 0; --Index)
+		{
+			Streaming->TouchTile(Plan.Entries[Index].Key);
+		}
+	}
+
+	// --- Le richieste: a ogni frame, perche' i posti in volo si liberano ------
+	int32 InRam[3] = { 0, 0, 0 };
+	int32 Requested = 0;
+
+	for (const FResidencyEntry& Entry : Plan.Entries)
+	{
+		// Tre bande: adesso, previste, sicurezza.
+		const int32 Band = (Entry.Tier == 0) ? 0 : (Entry.Tier == Plan.SafetyTier ? 2 : 1);
+
+		const EGeoTileState State = Streaming->GetTileState(Entry.Key);
+		if (State == EGeoTileState::Pronta) { ++InRam[Band]; continue; }
+		if (State != EGeoTileState::NonCaricata) { continue; }
+
+		// Il tetto vale per il precarico, non per il disegno: le richieste
+		// del disegno sono gia' partite in RunSelection, senza limiti.
+		if (Streaming->GetInFlightCount() >= MaxPrefetchInFlight) { continue; }
+
+		const int32 Priority = (Band == 0) ? 2 : (Band == 1 ? 1 : 0);
+		if (Streaming->RequestTile(Entry.Key, Priority) == EGeoTileState::InCaricamento) { ++Requested; }
+	}
+
+	Stats.PianoAdesso = Plan.CountNow;
+	Stats.PianoPreviste = Plan.CountPredicted;
+	Stats.PianoSicurezza = Plan.CountSafety;
+	Stats.InRamAdesso = InRam[0];
+	Stats.InRamPreviste = InRam[1];
+	Stats.InRamSicurezza = InRam[2];
+	Stats.RichiestePrecarico = Requested;
 }
 
 // ============================================================================
@@ -258,6 +375,38 @@ void UGeoQuadtreeSubsystem::DrawDebugOverlay()
 
 	Line(FColor::White, FString::Printf(TEXT("Tile disegnate: %d   livelli %d..%d"),
 		Stats.TileDisegnate, Stats.LivelloMinimo, Stats.LivelloMassimo));
+
+	Line(Stats.VistaIndipendente ? FColor::Green : FColor::Orange, Stats.VistaIndipendente
+		? FString(TEXT("Modo          : vista-indipendente (il frustum lo applica Unreal)"))
+		: FString::Printf(TEXT("Modo          : CLASSICO, frustum x%.2f (geo.Lod.ViewIndependent 1)"), FrustumMargin));
+
+	if (bPrefetchEnabled)
+	{
+		Line(FColor::White, FString::Printf(TEXT("Moto          : %.0f m/s   previsione %.0f s   teletrasporti %d"),
+			Stats.VelocitaMs, ResidencySettings.LookaheadSeconds, Stats.Teletrasporti));
+
+		// Percentuale delle quote gia' in RAM, per fascia. "adesso" sotto il
+		// 100% vuol dire che si sta aspettando il disco; "previste" basse in
+		// volo vuol dire che l'orizzonte di previsione e' troppo corto per la
+		// velocita' del disco.
+		auto Percent = [](int32 Part, int32 Whole)
+		{
+			return Whole > 0 ? 100.0f * static_cast<float>(Part) / static_cast<float>(Whole) : 100.0f;   // non-unita: frazione -> percentuale
+		};
+		const float NowPct = Percent(Stats.InRamAdesso, Stats.PianoAdesso);
+		Line(NowPct < 99.0f ? FColor::Yellow : FColor::White, FString::Printf(
+			TEXT("Piano (RAM)   : adesso %d (%.0f%%)  previste %d (%.0f%%)  sicurezza %d (%.0f%%)"),
+			Stats.PianoAdesso, NowPct,
+			Stats.PianoPreviste, Percent(Stats.InRamPreviste, Stats.PianoPreviste),
+			Stats.PianoSicurezza, Percent(Stats.InRamSicurezza, Stats.PianoSicurezza)));
+
+		Line(FColor::White, FString::Printf(TEXT("Precarico     : +%d richieste   piano %.2f ms"),
+			Stats.RichiestePrecarico, Stats.TempoPianoMs));
+	}
+	else
+	{
+		Line(FColor::Orange, TEXT("Precarico     : SPENTO (geo.Lod.Prefetch 1)"));
+	}
 
 	Line(Stats.TileRichieste > 0 ? FColor::Cyan : FColor::White,
 		FString::Printf(TEXT("Da caricare   : %d"), Stats.TileRichieste));

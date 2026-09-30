@@ -32,6 +32,22 @@ struct FGeoTerrainStats
 	UPROPERTY() float MemoriaGeometriaMB = 0.0f;
 	UPROPERTY() float TempoCostruzioneMediaMs = 0.0f;
 	UPROPERTY() int32 Rebase = 0;
+
+	// --- Residenza delle mesh ----------------------------------------------
+	/** Mesh costruite e a schermo / costruite ma nascoste (pronte o in memoria). */
+	UPROPERTY() int32 MeshVisibili = 0;
+	UPROPERTY() int32 MeshNascoste = 0;
+	/** Mesh costruite in anticipo, nascoste, questo frame. */
+	UPROPERTY() int32 PrecostruiteQuestoFrame = 0;
+	/** Mesh nascoste buttate questo frame per rientrare nel budget. */
+	UPROPERTY() int32 SfrattateQuestoFrame = 0;
+	/** Quante tile della fascia "adesso" del piano hanno la mesh, e quante sono. */
+	UPROPERTY() int32 PronteAdesso = 0;
+	UPROPERTY() int32 PianoAdesso = 0;
+	/** Idem per le fasce previste. */
+	UPROPERTY() int32 ProntePreviste = 0;
+	UPROPERTY() int32 PianoPreviste = 0;
+	UPROPERTY() bool InRiscaldamento = false;
 };
 
 /**
@@ -74,6 +90,29 @@ public:
 	void SetMaxTilesPerFrame(int32 Count) { MaxTilesPerFrame = FMath::Clamp(Count, 1, 64); }
 	int32 GetMaxTilesPerFrame() const { return MaxTilesPerFrame; }
 
+	/**
+	 * Quante mesh tenere costruite in tutto, visibili piu' nascoste.
+	 *
+	 * Le visibili non si toccano mai; oltre il budget si buttano per prime le
+	 * nascoste che il piano non vuole piu', dalla meno recente. Una mesh
+	 * costa qualche MB fra RAM e scheda video: 2.000 sono dell'ordine dei
+	 * 5-10 GB. Sulla macchina da 64 GB si puo' alzare.
+	 */
+	void SetMeshBudget(int32 Count) { MeshBudget = FMath::Clamp(Count, 64, 100000); }
+	int32 GetMeshBudget() const { return MeshBudget; }
+
+	/**
+	 * Mesh per frame durante il RISCALDAMENTO: dopo un teletrasporto, o
+	 * quando manca buona parte di cio' che serve adesso. 0 lo spegne.
+	 *
+	 * E' la scelta "meglio un'attesa lunga una volta sola": per qualche
+	 * decimo di secondo il frame rate scende, e in cambio il terreno arriva
+	 * tutto insieme invece di riempirsi a pezzi per secondi.
+	 */
+	void SetWarmupTilesPerFrame(int32 Count) { WarmupTilesPerFrame = FMath::Clamp(Count, 0, 256); }
+	int32 GetWarmupTilesPerFrame() const { return WarmupTilesPerFrame; }
+	bool IsWarmingUp() const { return bWarmingUp; }
+
 	void SetSkirtEnabled(bool bInSkirt);
 	bool IsSkirtEnabled() const { return MeshParameters.bGenerateSkirt; }
 
@@ -106,12 +145,26 @@ public:
 	void SetDrawBounds(bool bInDraw) { bDrawBounds = bInDraw; }
 	bool IsDrawBounds() const { return bDrawBounds; }
 
-	/** Le tile che hanno geometria adesso. Serve al drappeggio della Fase 6. */
-	void GetBuiltTileKeys(TArray<GeoWorld::Tiles::FTileKey>& Out) const
+	/**
+	 * Le tile che hanno geometria adesso, VISIBILI PER PRIME. Serve al
+	 * drappeggio della Fase 6: vestendo nell'ordine, le texture di cio' che
+	 * si vede vengono create prima di quelle delle mesh nascoste.
+	 * Ritorna quante delle prime sono visibili.
+	 */
+	int32 GetBuiltTileKeys(TArray<GeoWorld::Tiles::FTileKey>& Out) const
 	{
 		Out.Reset();
 		Out.Reserve(BuiltTiles.Num());
-		for (const TPair<uint64, FBuiltTile>& Pair : BuiltTiles) { Out.Add(Pair.Value.Key); }
+		for (const TPair<uint64, FBuiltTile>& Pair : BuiltTiles)
+		{
+			if (Pair.Value.bVisible) { Out.Add(Pair.Value.Key); }
+		}
+		const int32 VisibleCount = Out.Num();
+		for (const TPair<uint64, FBuiltTile>& Pair : BuiltTiles)
+		{
+			if (!Pair.Value.bVisible) { Out.Add(Pair.Value.Key); }
+		}
+		return VisibleCount;
 	}
 
 	/** Il provider, per chi deve vestire le tile. Puo' essere nullo. */
@@ -126,6 +179,9 @@ public:
 
 private:
 	void SynchroniseWithSelection();
+	bool BuildTile(const GeoWorld::Tiles::FTileKey& Key, const FGeoreferenceSnapshot& Snapshot, bool bVisible);
+	void EvictHiddenMeshes(const TSet<uint64>& Visible);
+	void RefreshPlanSet();
 	void DrawDebugOverlay();
 	void DrawTileBounds();
 	void OnGeoreferenceRebased(const FGeoreferenceSnapshot& Snapshot);
@@ -147,8 +203,27 @@ private:
 	{
 		GeoWorld::Tiles::FTileKey Key;
 		int32 TriangleCount = 0;
+
+		/** A schermo adesso? Le nascoste sono pronte in anticipo o tenute dopo. */
+		bool bVisible = false;
+
+		/** Ultima volta che era visibile o voluta dal piano: decide chi sfrattare. */
+		double LastWantedSeconds = 0.0;
 	};
 	TMap<uint64, FBuiltTile> BuiltTiles;
+
+	/** Mostra/nasconde nel provider e tiene allineati flag e pin delle quote. */
+	void SetBuiltVisible(FBuiltTile& Built, bool bVisible);
+
+	/**
+	 * Le tile del piano di cui vale la pena costruire la MESH: fasce "adesso"
+	 * e "previste". La fascia di sicurezza no: resta come quote in RAM, perche'
+	 * costruirla costerebbe migliaia di mesh per posti dove probabilmente non
+	 * si andra'. Ricalcolato solo quando il quadtree rifa' il piano.
+	 */
+	TSet<uint64> PlanMeshKeys;
+	int32 PlanGenerationSeen = -1;
+	int32 TeleportsSeen = 0;
 
 	GeoWorld::Mesh::FTileMeshParameters MeshParameters;
 	FGeoTerrainStats Stats;
@@ -156,6 +231,9 @@ private:
 	FDelegateHandle RebaseHandle;
 
 	int32 MaxTilesPerFrame = 4;
+	int32 MeshBudget = 2000;
+	int32 WarmupTilesPerFrame = 24;
+	bool bWarmingUp = false;
 	bool bTerrainEnabled = false;
 	bool bShowDebugOverlay = false;
 

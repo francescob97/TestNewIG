@@ -2,6 +2,7 @@
 //  Test dello strato puro del quadtree (Fase 4), senza Unreal.
 // =============================================================================
 #include "Quadtree/Culling.h"
+#include "Quadtree/Residency.h"
 #include "Quadtree/TileSelector.h"
 #include "Tiles/TilingScheme.h"
 
@@ -270,6 +271,72 @@ static void TestHorizon()
 }
 
 // ===========================================================================
+// ===========================================================================
+static void TestRectHorizon()
+{
+	Section("3b. Orizzonte sul rettangolo geografico");
+
+	const FEcef Camera = GeodeticToEcef(FGeodetic::FromDegrees(41.89, 12.49, 3000.0));
+
+	// REGRESSIONE: il test sulla sfera non scarta una tile di livello 3
+	// sull'America vista da Roma, perche' la sua sfera scende sotto la superficie.
+	const auto America = Tiles::GetTileBounds(3, 2, 2);
+	const FTileBoundingVolume AmericaVolume = MakeTileBoundingVolume(
+		America.West, America.South, America.East, America.North, 0.0, 2000.0);
+	Check(!IsTileBelowHorizon(AmericaVolume, Camera, WGS84),
+		"(il test sulla sfera NON scarta la tile L3 sull'America: il suo limite)");
+	Check(IsTileRectBeyondHorizon(America.West, America.South, America.East, America.North,
+		2000.0, Camera, WGS84), "il test sul rettangolo la scarta");
+
+	// Le tile che contengono la camera non si scartano mai, a qualunque livello.
+	bool bContainingKept = true;
+	for (uint32_t Level = 0; Level <= 14; ++Level)
+	{
+		uint32_t X = 0, Y = 0;
+		Tiles::TileForLonLat(Level, 12.49, 41.89, X, Y);
+		const auto B = Tiles::GetTileBounds(Level, X, Y);
+		if (IsTileRectBeyondHorizon(B.West, B.South, B.East, B.North, 0.0, Camera, WGS84)) { bContainingKept = false; }
+	}
+	Check(bContainingKept, "le tile che contengono la camera restano, dal livello 0 al 14");
+
+	// Stessi casi limite dei test sui punti: montagna a 300 km visibile, a 600 no.
+	auto StripNorth = [](double Km)
+	{
+		const double Lat = 41.89 + Km / 111.132;
+		return Tiles::FTileBounds{ 12.48, Lat, 12.50, Lat + 0.001 };
+	};
+	const FEcef Low = GeodeticToEcef(FGeodetic::FromDegrees(41.89, 12.49, 1000.0));
+	const auto At300 = StripNorth(300.0);
+	const auto At600 = StripNorth(600.0);
+	Check(!IsTileRectBeyondHorizon(At300.West, At300.South, At300.East, At300.North, 10000.0, Low, WGS84),
+		"una vetta di 10 km a 300 km resta (portata combinata ~469 km)");
+	Check(IsTileRectBeyondHorizon(At600.West, At600.South, At600.East, At600.North, 10000.0, Low, WGS84),
+		"a 600 km viene scartata");
+	Check(IsTileRectBeyondHorizon(At300.West, At300.South, At300.East, At300.North, 0.0, Low, WGS84),
+		"a 300 km al livello del mare e' gia' oltre l'orizzonte (~113 km)");
+
+	// Il test sul rettangolo non deve MAI essere piu' permissivo di quello
+	// sui punti: per ogni punto visibile secondo il test elementare, la tile
+	// che lo contiene non va scartata. Si prova su una griglia di punti.
+	const FEcef ScaledCamera = ToScaledSpace(Low, WGS84);
+	const double HorizonSquared = ComputeCameraHorizonSquared(ScaledCamera);
+	int Violations = 0, Visible = 0;
+	for (double Km = 0.0; Km < 800.0; Km += 7.0)
+	{
+		for (double Bearing = 0.0; Bearing < 360.0; Bearing += 30.0)
+		{
+			const double Lat = 41.89 + Km / 111.132 * std::cos(Bearing * Core::DegToRad);
+			const double Lon = 12.49 + Km / (111.132 * std::cos(41.89 * Core::DegToRad)) * std::sin(Bearing * Core::DegToRad);
+			const FEcef Point = GeodeticToEcef(FGeodetic::FromDegrees(Lat, Lon, 3000.0));
+			if (IsPointBelowHorizon(ScaledCamera, HorizonSquared, Point, WGS84)) { continue; }
+			++Visible;
+			if (IsTileRectBeyondHorizon(Lon - 0.01, Lat - 0.01, Lon + 0.01, Lat + 0.01, 3000.0, Low, WGS84)) { ++Violations; }
+		}
+	}
+	Check(Violations == 0, "nessun punto visibile sta in una tile scartata",
+		std::to_string(Visible) + " punti visibili provati");
+}
+
 static void TestScreenSpaceError()
 {
 	Section("4. Errore su schermo");
@@ -488,6 +555,223 @@ static void TestSelection()
 	}
 }
 
+
+// ===========================================================================
+//  7-9. Residenza: selezione indipendente dalla vista, moto, piano
+// ===========================================================================
+static std::set<FTileKey> KeysOf(const FSelectionResult& Result)
+{
+	std::set<FTileKey> Keys;
+	for (const FSelectedTile& Tile : Result.ToRender) { Keys.insert(Tile.Key); }
+	return Keys;
+}
+
+/** Punto ECEF a Km chilometri a nord di (Lat, Lon), alla quota data. */
+static FEcef NorthOf(double LatDeg, double LonDeg, double Km, double Height)
+{
+	return GeodeticToEcef(FGeodetic::FromDegrees(LatDeg + Km / 111.132, LonDeg, Height));
+}
+
+static void TestViewIndependence()
+{
+	Section("7. Selezione indipendente dalla vista");
+
+	FFakeDataset Dataset(12.0, 41.0, 13.0, 42.0, 0, 14);
+	Dataset.LoadEverything();
+
+	// Tre camere nello STESSO punto: in giu', verso nord, verso sud.
+	FViewParameters Down = MakeDownwardView(41.5, 12.5, 3000.0);
+	FViewParameters North = MakeHorizontalView(41.5, 12.5, 3000.0);
+	FViewParameters South = North;
+	South.Forward = North.Forward * -1.0;
+	South.Right = North.Right * -1.0;
+
+	for (FViewParameters* View : { &Down, &North, &South }) { View->bFrustumCulling = false; }
+
+	FSelectionResult A, B, C;
+	SelectTiles(Down, Dataset, 0, 14, A);
+	SelectTiles(North, Dataset, 0, 14, B);
+	SelectTiles(South, Dataset, 0, 14, C);
+
+	Check(!A.ToRender.empty() && KeysOf(A) == KeysOf(B) && KeysOf(B) == KeysOf(C),
+		"senza frustum, girare la camera non cambia NESSUNA tile",
+		std::to_string(A.ToRender.size()) + " tile in tutte e tre le direzioni");
+	Check(A.CulledByFrustum == 0 && B.CulledByFrustum == 0, "e il frustum non scarta niente");
+
+	// Controprova: con il frustum acceso le due direzioni orizzontali differiscono.
+	North.bFrustumCulling = true;
+	South.bFrustumCulling = true;
+	SelectTiles(North, Dataset, 0, 14, B);
+	SelectTiles(South, Dataset, 0, 14, C);
+	Check(KeysOf(B) != KeysOf(C), "controprova: con il frustum nord e sud scelgono tile diverse");
+	Check(A.ToRender.size() > B.ToRender.size(),
+		"senza frustum servono piu' tile (il prezzo, in memoria)",
+		std::to_string(A.ToRender.size()) + " contro " + std::to_string(B.ToRender.size()));
+
+	// L'orizzonte invece resta: dipende dalla posizione, non dalla direzione.
+	FFakeDataset World(-180.0, -85.0, 180.0, 85.0, 0, 14);
+	World.LoadEverything();
+	FViewParameters Low = MakeDownwardView(41.5, 12.5, 3000.0);
+	Low.bFrustumCulling = false;
+	FSelectionResult Global;
+	SelectTiles(Low, World, 0, 14, Global);
+	Check(Global.CulledByHorizon > 0, "l'orizzonte continua a scartare l'altra faccia del pianeta",
+		std::to_string(Global.CulledByHorizon) + " nodi");
+	Check(Global.NodesVisited < 20000, "e la visita resta contenuta anche su un dataset mondiale",
+		std::to_string(Global.NodesVisited) + " nodi, " + std::to_string(Global.ToRender.size()) + " tile");
+
+	// L'insieme IDEALE ignora cosa e' caricato: e' dove si vorrebbe arrivare.
+	FFakeDataset Partial(12.0, 41.0, 13.0, 42.0, 0, 14);
+	for (uint32_t Level = 0; Level <= 4; ++Level)
+		for (uint32_t Y = 0; Y < Tiles::TilesY(Level); ++Y)
+			for (uint32_t X = 0; X < Tiles::TilesX(Level); ++X)
+				Partial.MarkLoaded(FTileKey{ Level, X, Y });
+
+	FSelectionResult Render, Ideal;
+	SelectTiles(Down, Partial, 0, 14, Render);
+	SelectIdealTiles(Down, Partial, 0, 14, Ideal);
+	uint32_t RenderDeepest = 0, IdealDeepest = 0;
+	for (const FSelectedTile& Tile : Render.ToRender) { RenderDeepest = std::max(RenderDeepest, Tile.Key.Level); }
+	for (const FSelectedTile& Tile : Ideal.ToRender) { IdealDeepest = std::max(IdealDeepest, Tile.Key.Level); }
+	Check(RenderDeepest <= 4 && IdealDeepest == 14,
+		"l'insieme ideale arriva al livello 14 anche se in memoria c'e' solo fino al 4",
+		"disegno L" + std::to_string(RenderDeepest) + ", ideale L" + std::to_string(IdealDeepest));
+	Check(KeysOf(Ideal) == KeysOf(A), "e coincide con la selezione a dati tutti caricati");
+}
+
+static void TestMotionPredictor()
+{
+	Section("8. Previsione del moto");
+
+	// Volo verso nord a 250 m/s, 2500 m di quota, 60 fps per 5 secondi.
+	FMotionPredictor Motion;
+	const double Speed = 250.0, Dt = 1.0 / 60.0;
+	bool bAnyTeleport = false;
+	for (int Frame = 0; Frame <= 300; ++Frame)
+	{
+		const double Time = Frame * Dt;
+		bAnyTeleport |= Motion.Update(NorthOf(41.5, 12.5, Speed * Time / 1000.0, 2500.0), Time);
+	}
+	Check(!bAnyTeleport, "un volo regolare non e' mai un teletrasporto");
+	Check(std::abs(Motion.GetSpeed() - Speed) < 2.0, "la velocita' stimata converge a quella vera",
+		Fmt("%.2f m/s", Motion.GetSpeed()));
+
+	// Fra 10 s: 2.5 km piu' a nord.
+	const FEcef Expected = NorthOf(41.5, 12.5, Speed * (5.0 + 10.0) / 1000.0, 2500.0);
+	const double Error = (Motion.PredictPosition(10.0) - Expected).Length();
+	Check(Error < 30.0, "la posizione prevista a 10 s e' dove deve essere", Fmt("scarto %.1f m", Error));
+
+	// La velocita' non si stima dal rumore di un solo frame: un frame lento
+	// (100 ms invece di 16) non fa impazzire la stima.
+	FMotionPredictor Hitch;
+	double Time = 0.0;
+	for (int Frame = 0; Frame < 120; ++Frame, Time += Dt)
+		Hitch.Update(NorthOf(41.5, 12.5, Speed * Time / 1000.0, 2500.0), Time);
+	Time += 0.1;
+	Hitch.Update(NorthOf(41.5, 12.5, Speed * Time / 1000.0, 2500.0), Time);
+	Check(std::abs(Hitch.GetSpeed() - Speed) < 5.0, "un frame lento non altera la velocita'",
+		Fmt("%.2f m/s", Hitch.GetSpeed()));
+
+	// Teletrasporto: geo.Goto da Roma a Milano.
+	Check(Motion.Update(GeodeticToEcef(FGeodetic::FromDegrees(45.46, 9.19, 2500.0)), 5.0 + Dt),
+		"un salto Roma -> Milano e' riconosciuto come teletrasporto");
+	Check(Motion.GetSpeed() == 0.0, "e la velocita' riparte da zero, invece di valere 30.000 km/s");
+
+	// Salire da 2500 a 6000 m sullo stesso punto e' un salto (cambia tutto il set)...
+	FMotionPredictor Climb;
+	Climb.Update(GeodeticToEcef(FGeodetic::FromDegrees(41.9, 12.5, 2500.0)), 0.0);
+	Check(Climb.Update(GeodeticToEcef(FGeodetic::FromDegrees(41.9, 12.5, 6000.0)), Dt),
+		"salire di 3.5 km in un frame e' un teletrasporto");
+
+	// ...ma volare veloce in alto no: a 600 km la camera di volo va a 300 km/s,
+	// 5 km per frame, e l'insieme di tile a quella quota cambia pochissimo.
+	FMotionPredictor Orbit;
+	bool bOrbitTeleport = false;
+	for (int Frame = 0; Frame < 60; ++Frame)
+		bOrbitTeleport |= Orbit.Update(NorthOf(41.5, 12.5, 300.0 * Frame * Dt, 600000.0), Frame * Dt);
+	Check(!bOrbitTeleport, "a 600 km di quota 5 km per frame sono volo, non teletrasporto",
+		Fmt("%.0f km/s stimati", Orbit.GetSpeed() / 1000.0));
+}
+
+static void TestResidencyPlan()
+{
+	Section("9. Piano di residenza");
+
+	FFakeDataset Dataset(11.0, 40.5, 14.0, 43.0, 0, 14);
+	const FViewParameters View = MakeHorizontalView(41.5, 12.5, 2500.0);
+
+	// --- Da fermo: solo la fascia attuale e l'anello di sicurezza ---
+	FMotionPredictor Still;
+	Still.Update(View.CameraEcef, 0.0);
+	FResidencySettings Settings;
+	FResidencyPlan Plan;
+	BuildResidencyPlan(View, Still, Settings, Dataset, 0, 14, Plan);
+
+	Check(Plan.CountNow > 0 && Plan.CountPredicted == 0 && Plan.PredictionTiers == 0,
+		"da fermi non si prevede niente", std::to_string(Plan.CountNow) + " tile attuali");
+	Check(Plan.CountSafety > 0 && Plan.SafetyTier == 1,
+		"l'anello di sicurezza aggiunge tile tutto attorno",
+		std::to_string(Plan.CountSafety) + " tile");
+
+	// La fascia 0 e' ESATTAMENTE l'insieme ideale senza frustum: il piano non
+	// dipende da dove guarda la camera.
+	FViewParameters Omni = View;
+	Omni.bFrustumCulling = false;
+	FSelectionResult Ideal;
+	SelectIdealTiles(Omni, Dataset, 0, 14, Ideal);
+	std::set<FTileKey> TierZero;
+	for (const FResidencyEntry& Entry : Plan.Entries) { if (Entry.Tier == 0) { TierZero.insert(Entry.Key); } }
+	Check(TierZero == KeysOf(Ideal), "la fascia 0 coincide con l'insieme ideale omnidirezionale");
+
+	// --- In volo verso nord a 250 m/s ---
+	FMotionPredictor Flying;
+	for (int Frame = 0; Frame <= 120; ++Frame)
+	{
+		const double Time = Frame / 60.0;
+		Flying.Update(NorthOf(41.5, 12.5, 0.25 * Time, 2500.0), Time);
+	}
+	FViewParameters Now = View;
+	Now.CameraEcef = Flying.GetPosition();
+	BuildResidencyPlan(Now, Flying, Settings, Dataset, 0, 14, Plan);
+
+	Check(Plan.PredictionTiers == 3 && Plan.CountPredicted > 0,
+		"in volo si aggiungono le tile delle posizioni previste",
+		std::to_string(Plan.CountPredicted) + " tile nuove in 3 fasce");
+
+	// Nessun duplicato, e fasce in ordine.
+	std::set<FTileKey> Unique;
+	bool bOrdered = true;
+	for (size_t Index = 0; Index < Plan.Entries.size(); ++Index)
+	{
+		Unique.insert(Plan.Entries[Index].Key);
+		if (Index > 0 && Plan.Entries[Index].Tier < Plan.Entries[Index - 1].Tier) { bOrdered = false; }
+	}
+	Check(Unique.size() == Plan.Entries.size(), "nessuna tile compare due volte nel piano",
+		std::to_string(Plan.Entries.size()) + " voci");
+	Check(bOrdered, "le fasce sono in ordine di urgenza");
+
+	// Le tile previste stanno DAVANTI: il loro centro e' a nord della camera.
+	const double CameraLat = Core::EcefToGeodetic(Now.CameraEcef, WGS84).LatDeg();
+	int Ahead = 0, Behind = 0;
+	for (const FResidencyEntry& Entry : Plan.Entries)
+	{
+		if (Entry.Tier < 1 || Entry.Tier > Plan.PredictionTiers) { continue; }
+		const auto Bounds = Tiles::GetTileBounds(Entry.Key.Level, Entry.Key.X, Entry.Key.Y);
+		(Bounds.CentreLat() > CameraLat ? Ahead : Behind)++;
+	}
+	Check(Ahead > 3 * Behind, "le tile previste stanno davanti, nella direzione del moto",
+		std::to_string(Ahead) + " davanti, " + std::to_string(Behind) + " dietro");
+
+	// Il costo del piano resta nell'ordine del millisecondo: cinque selezioni.
+	Check(Plan.NodesVisited < 20000, "il piano visita un numero di nodi contenuto",
+		std::to_string(Plan.NodesVisited) + " nodi");
+
+	// Sicurezza spenta: nessuna fascia di sicurezza.
+	Settings.SafetyErrorFactor = 0.0;
+	BuildResidencyPlan(Now, Flying, Settings, Dataset, 0, 14, Plan);
+	Check(Plan.SafetyTier == -1 && Plan.CountSafety == 0, "SafetyErrorFactor 0 spegne l'anello");
+}
+
 // ===========================================================================
 int main()
 {
@@ -498,6 +782,7 @@ int main()
 	TestBoundingVolume();
 	TestFrustum();
 	TestHorizon();
+	TestRectHorizon();
 	TestScreenSpaceError();
 	TestSelection();
 
@@ -563,6 +848,10 @@ int main()
 		Check(!IsSphereInFrustum(Planes, Behind, 1.0),
 			"e quello che sta dietro resta dietro");
 	}
+
+	TestViewIndependence();
+	TestMotionPredictor();
+	TestResidencyPlan();
 
 	std::printf("\n=====================================================\n");
 	std::printf(" RISULTATO: %d passati, %d falliti\n", GPassed, GFailed);
