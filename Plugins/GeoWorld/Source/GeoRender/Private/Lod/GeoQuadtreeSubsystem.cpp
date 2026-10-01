@@ -94,6 +94,7 @@ void UGeoQuadtreeSubsystem::Deinitialize()
 {
 	SelectedTiles.Empty();
 	RenderRequests.Empty();
+	PreviouslyRefined.clear();
 	Result.Reset();
 	Plan.Reset();
 	RenderReadiness = nullptr;
@@ -212,9 +213,15 @@ bool UGeoQuadtreeSubsystem::RunSelection()
 	const FGeoTileDataset& Dataset = Streaming->GetDataset();
 	const FStreamingAvailability Availability(Streaming, &RenderReadiness);
 
+	// Isteresi sul raffinamento (vedi FViewParameters::RefineHysteresis).
+	View.PreviouslyRefined = &PreviouslyRefined;
+
 	SelectTiles(View, Availability,
 		static_cast<uint32>(Dataset.GetMinLevel()),
 		static_cast<uint32>(Dataset.GetMaxLevel()), Result);
+
+	PreviouslyRefined.clear();
+	PreviouslyRefined.insert(Result.Refined.begin(), Result.Refined.end());
 
 	const double Elapsed = FPlatformTime::Seconds() - Started;
 

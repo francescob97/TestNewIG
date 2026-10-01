@@ -576,7 +576,9 @@ def command_fetch_imagery(args: argparse.Namespace) -> int:
             year=args.year, months=args.months, max_cloud=args.max_cloud,
             max_nodata=args.max_nodata, area=(None if args.bbox else args.area),
             stream=args.stream, dry_run=args.dry_run,
-            download_workers=args.workers, report=log)
+            download_workers=args.workers,
+            cloud_mask=not args.no_cloud_mask, cloud_fillers=args.fillers,
+            keep_originals=args.keep_originals, report=log)
     except RuntimeError as error:
         log(f"ERRORE: {error}")
         return 1
@@ -803,6 +805,13 @@ def build_parser() -> argparse.ArgumentParser:
                            help="non scaricare niente: dice quali scene e quanti GB")
     fetch_img.add_argument("--workers", type=int, default=4,
                            help="download in parallelo (default 4)")
+    fetch_img.add_argument("--no-cloud-mask", action="store_true",
+                           help="non togliere le nuvole (di default si usa la classificazione SCL "
+                                "di Sentinel-2 e si riempiono i buchi con altre date)")
+    fetch_img.add_argument("--fillers", type=int, default=2,
+                           help="scene in piu' per quadrato, per riempire i buchi delle nuvole (default 2)")
+    fetch_img.add_argument("--keep-originals", action="store_true",
+                           help="tieni anche i TCI originali, con le nuvole (di default si cancellano)")
     fetch_img.set_defaults(func=command_fetch_imagery)
 
     build_img = subparsers.add_parser(

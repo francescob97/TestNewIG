@@ -91,7 +91,7 @@ quota minima e massima (quote) o copertura (immagini). (3)
 
 **Insieme ideale** — le tile che si disegnerebbero da un punto se tutto fosse già in memoria. È la base del piano di residenza. (11)
 
-**Isteresi** — due soglie diverse per entrare e per uscire da uno stato (riscaldamento: entra sotto il 60%, esce sopra il 95%), per non oscillare attorno a una soglia unica. (11)
+**Isteresi** — due soglie diverse per entrare e per uscire da uno stato (riscaldamento: entra sotto il 60%, esce sopra il 95%; raffinamento di una tile: si entra alla soglia, si esce all'80%), per non oscillare attorno a una soglia unica. (11)
 
 **Latitudine parametrica** — tan β = (b/a)·tan φ. È la latitudine di un punto dell'ellissoide nello spazio scalato, dove l'ellissoide diventa una sfera. (11)
 
@@ -165,6 +165,8 @@ quote) o un'area (i pixel). Decide se il bordo è condiviso. (3, 7)
 **Residenza** — l'insieme delle scelte su cosa tenere in memoria e pronto, in base a posizione e velocità invece che alla direzione dello sguardo. (11)
 
 **Riscaldamento** — dopo un salto, qualche decimo di secondo in cui si costruiscono più mesh per frame (24 invece di 4): il frame rallenta, il terreno arriva tutto insieme. (11)
+
+**SCL** (*Scene Classification Layer*) — il file di Sentinel-2 L2A che classifica ogni pixel da 20 m: nuvole, ombre di nuvole, cirri, neve, acqua... Serve a togliere le nuvole dalle ortofoto. (7)
 
 **Spazio scalato** — le coordinate ECEF divise per i semiassi (x/a, y/a, z/b): l'ellissoide diventa la sfera unitaria e il test d'orizzonte diventa esatto. (5, 11)
 
@@ -338,4 +340,5 @@ il primo comando da provare quando non si vede niente. (6)
 | `docs/residenza-verifica.md` | come verificare la residenza |
 | `docs/prova-torino.md` | la prima prova vera: cause del mosaico, prestazioni, tutta Italia |
 | `docs/prova-torino-2.md` | la seconda: troppi triangoli, e quanto pesa ogni manopola |
+| `docs/prova-torino-3.md` | la terza: flash, popping, nuvole |
 | `docs/issues-aperte.md` | problemi noti non risolti |

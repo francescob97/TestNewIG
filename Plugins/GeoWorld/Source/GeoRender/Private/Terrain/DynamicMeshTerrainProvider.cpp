@@ -416,12 +416,25 @@ void FDynamicMeshTerrainProvider::SetTileDrape(const Tiles::FTileKey& Key,
 			}
 			Entry->Material.Reset();
 			Entry->bDraped = false;
+			Entry->DrapedTexture.Reset();
 		}
 		return;
 	}
 
 	UMaterialInterface* Parent = DrapeMaterial.Get();
 	if (!Parent) { return; }     // gia' segnalato in Initialize: non si insiste
+
+	// Il subsystem delle ortofoto richiama questo metodo per tutte le tile a
+	// ogni frame. Riassegnare gli stessi parametri a centinaia di istanze di
+	// materiale non cambia l'immagine ma costa (ogni assegnazione aggiorna il
+	// proxy di rendering del materiale): se niente e' cambiato, si esce.
+	if (Entry->bDraped && Entry->DrapedTexture.Get() == Texture &&
+	    Entry->DrapedTransform.OffsetU == Drape.OffsetU &&
+	    Entry->DrapedTransform.OffsetV == Drape.OffsetV &&
+	    Entry->DrapedTransform.Scale == Drape.Scale)
+	{
+		return;
+	}
 
 	UMaterialInstanceDynamic* Instance = Entry->Material.Get();
 	if (!Instance)
@@ -450,6 +463,8 @@ void FDynamicMeshTerrainProvider::SetTileDrape(const Tiles::FTileKey& Key,
 		FLinearColor(Drape.OffsetU, Drape.OffsetV, Drape.Scale, Drape.Scale));
 
 	Entry->bDraped = true;
+	Entry->DrapedTexture = Texture;
+	Entry->DrapedTransform = Drape;
 }
 
 int32 FDynamicMeshTerrainProvider::GetDrapedTileCount() const

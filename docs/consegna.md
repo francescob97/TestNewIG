@@ -17,6 +17,7 @@ Ultimo aggiornamento: 2026-09-20. Branch: `claude/charming-goodall-xd2r3g`.
 | 6 | Ortofoto drappeggiate | **codice completo, mai compilato in UE** |
 | 7 | Entità e interoperabilità (CIGI, DIS, HLA, memoria condivisa) | **solo design** |
 | dopo | **Residenza**: selezione indipendente dalla vista, precarico da posizione e velocità, mesh nascoste | **codice completo, mai compilato in UE** — `docs/residenza-design.md` |
+| dopo | **Terza prova**: niente flash grigi (tile mostrate solo vestite), isteresi sul LOD, nuvole tolte con la maschera SCL | **codice completo, da riprovare** — `docs/prova-torino-3.md` |
 | dopo | **Seconda prova**: soglia 8 px, mesh a passo 2, meno dettaglio fuori vista, wireframe spento: da 18 a 2,5 milioni di triangoli | **codice completo, da riprovare** — `docs/prova-torino-2.md` |
 | dopo | **Prima prova su Torino**: materiale corretto, scene Sentinel, mipmap, mesh su thread, tutta Italia | **codice completo, da ricompilare e riprovare** — `docs/prova-torino.md` |
 
@@ -464,6 +465,7 @@ Limitazioni note, lasciate aperte di proposito:
 | Residenza: cosa tenere pronto, design e motivazioni | `docs/residenza-design.md` |
 | Prima prova su Torino: mosaico, prestazioni, tutta Italia | `docs/prova-torino.md` |
 | Seconda prova: troppi triangoli, i numeri delle manopole | `docs/prova-torino-2.md` |
+| Terza prova: flash, popping, nuvole | `docs/prova-torino-3.md` |
 | Verifica della residenza in Unreal | `docs/residenza-verifica.md` |
 | Programma delle sei fasi | `docs/programma.md` |
 | Da dove vengono i dati, licenze, ortofoto | `docs/dati.md` |

@@ -83,6 +83,7 @@ void UGeoTerrainSubsystem::Deinitialize()
 	Provider.Reset();
 	BuiltTiles.Empty();
 	PlanMeshKeys.Empty();
+	DressPredicate = nullptr;
 
 	Super::Deinitialize();
 }
@@ -116,7 +117,9 @@ void UGeoTerrainSubsystem::SetEnabled(bool bInEnabled)
 			// this; la si toglie in Deinitialize e allo spegnimento.
 			Quadtree->SetRenderReadiness([this](const FTileKey& Key)
 			{
-				return BuiltTiles.Contains(Key.Pack());
+				// Costruita, e (se le ortofoto sono accese) vestita: vedi
+				// SetDressPredicate. Altrimenti il padre resta a schermo.
+				return BuiltTiles.Contains(Key.Pack()) && (!DressPredicate || DressPredicate(Key));
 			});
 		}
 		bWarmingUp = true;

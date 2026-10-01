@@ -143,6 +143,11 @@ class Scene:
         return f"{self.directory_url}/TCI.tif"
 
     @property
+    def scl_url(self) -> str:
+        """La classificazione della scena (20 m): dice dove sono nuvole e ombre."""
+        return f"{self.directory_url}/SCL.tif"
+
+    @property
     def metadata_url(self) -> str:
         return f"{self.directory_url}/{self.name}.json"
 
@@ -303,12 +308,20 @@ def _badness(scene: Scene) -> float:
 
 
 def choose_scenes(candidates: dict[str, list[Scene]], *, max_cloud: float = 10.0,
-                  max_nodata: float = 1.0, max_fillers: int = 2) -> list[Choice]:
+                  max_nodata: float = 1.0, max_fillers: int = 2,
+                  cloud_fillers: int = 0) -> list[Choice]:
     """
     Sceglie le scene del mosaico. Funzione PURA: nessuna rete, testabile.
 
     Ritorna le scelte nell'ordine in cui vanno messe nel mosaico: prima i
     riempimenti, poi le principali, cosi' che le principali stiano sopra.
+
+    `cloud_fillers`: quante scene in PIU' prendere per ogni quadrato, da
+    mettere sotto la principale. Servono quando le nuvole si tolgono con la
+    maschera SCL (cloudmask.py): dove la principale aveva una nuvola resta un
+    buco, e lo riempie la scena di sotto. Si scelgono le meno nuvolose, di
+    giorni diversi, e a parita' le piu' vicine nel tempo alla principale
+    (stessa stagione, stessa luce).
     """
     good = {key: [s for s in scenes if _usable(s, max_cloud, max_nodata)]
             for key, scenes in candidates.items()}
@@ -367,13 +380,43 @@ def choose_scenes(candidates: dict[str, list[Scene]], *, max_cloud: float = 10.0
                 used_dates.add(other.date)
                 added += 1
 
+    # --- Riempimenti per i buchi delle nuvole (maschera SCL) -----------------
+    if cloud_fillers > 0:
+        already = {choice.scene.name for choice in fillers} | {c.scene.name for c in primary.values()}
+        for key in sorted(primary):
+            main = primary[key].scene
+            used_dates = {main.date} | {c.scene.date for c in fillers if c.scene.square_key == key}
+
+            def days_apart(scene: Scene) -> int:
+                from datetime import date
+                a = date(int(main.date[:4]), int(main.date[4:6]), int(main.date[6:]))
+                b = date(int(scene.date[:4]), int(scene.date[4:6]), int(scene.date[6:]))
+                return abs((a - b).days)
+
+            ranked = sorted((s for s in candidates[key]
+                             if s.cloud_cover is not None and s.name not in already
+                             and (s.nodata or 0.0) < 99.0),
+                            key=lambda s: (_badness(s), days_apart(s)))
+            extra: list[Choice] = []
+            for other in ranked:
+                if len(extra) >= cloud_fillers:
+                    break
+                if other.date in used_dates:
+                    continue
+                extra.append(Choice(other, "riempimento",
+                                    f"copre le nuvole di {main.name} ({days_apart(other)} giorni di distanza)"))
+                used_dates.add(other.date)
+                already.add(other.name)
+            # Dal peggiore al migliore: il migliore finisce subito sotto la principale.
+            fillers.extend(reversed(extra))
+
     return fillers + [primary[key] for key in sorted(primary)]
 
 
 def find_best_scenes(bbox: tuple[float, float, float, float], *,
                      year: int, months: list[int], max_cloud: float = 10.0,
                      max_nodata: float = 1.0, area: str | None = None,
-                     report=print) -> list[Choice]:
+                     cloud_fillers: int = 0, report=print) -> list[Choice]:
     """Quadrati dell'area, loro scene, scelta. Ritorna le scelte in ordine di mosaico."""
     if area in AREA_POLYGONS:
         squares = squares_for_polygons(AREA_POLYGONS[area])
@@ -389,7 +432,8 @@ def find_best_scenes(bbox: tuple[float, float, float, float], *,
         if not scenes:
             report(f"  {key}: nessuna scena nei mesi richiesti (mare aperto?)")
 
-    choices = choose_scenes(candidates, max_cloud=max_cloud, max_nodata=max_nodata)
+    choices = choose_scenes(candidates, max_cloud=max_cloud, max_nodata=max_nodata,
+                            cloud_fillers=cloud_fillers)
     for choice in choices:
         scene = choice.scene
         report(f"  {scene.square_key}: {choice.role:<12} {scene.name}  "
@@ -410,23 +454,27 @@ def remote_size(url: str, timeout: float = 30.0) -> int | None:
 
 
 def download_scene(scene: Scene, directory: str, report=print,
-                   timeout: float = 600.0) -> str:
-    """Scarica il TCI di una scena. Salta il file se c'e' gia' ed e' completo."""
+                   timeout: float = 600.0, asset: str = "TCI") -> str:
+    """
+    Scarica un file di una scena (TCI di default, oppure SCL). Salta il file
+    se c'e' gia' ed e' completo.
+    """
     os.makedirs(directory, exist_ok=True)
-    destination = os.path.join(directory, f"{scene.name}_TCI.tif")
+    destination = os.path.join(directory, f"{scene.name}_{asset}.tif")
+    url = scene.visual_url if asset == "TCI" else f"{scene.directory_url}/{asset}.tif"
 
-    expected = remote_size(scene.visual_url)
+    expected = remote_size(url)
     if os.path.exists(destination):
         if expected is None or os.path.getsize(destination) == expected:
-            report(f"  {scene.name}: gia' presente")
+            report(f"  {scene.name} {asset}: gia' presente")
             return destination
-        report(f"  {scene.name}: incompleto, riscarico")
+        report(f"  {scene.name} {asset}: incompleto, riscarico")
 
     megabytes = (expected or 0) / (1024 * 1024)
-    report(f"  {scene.name}: scarico {megabytes:.0f} MB")
+    report(f"  {scene.name} {asset}: scarico {megabytes:.0f} MB")
 
     temporary = destination + ".part"
-    request = urllib.request.Request(scene.visual_url,
+    request = urllib.request.Request(url,
                                      headers={"User-Agent": "geoworld-pipeline"})
     with urllib.request.urlopen(request, timeout=timeout) as response, \
             open(temporary, "wb") as handle:
@@ -457,21 +505,39 @@ def write_order_file(directory: str, paths: list[str]) -> str:
     return path
 
 
+def masked_path(directory: str, scene: Scene) -> str:
+    """Dove sta il TCI senza nuvole di una scena."""
+    return os.path.join(directory, f"{scene.name}_TCI_senza_nuvole.tif")
+
+
 def fetch(bbox: tuple[float, float, float, float], directory: str, *,
           year: int, months: list[int], max_cloud: float = 10.0,
           max_nodata: float = 1.0, area: str | None = None,
           stream: bool = False, dry_run: bool = False, download_workers: int = 4,
-          report=print) -> list[str]:
+          cloud_mask: bool = True, cloud_fillers: int = 2,
+          keep_originals: bool = False, report=print) -> list[str]:
     """
     Trova e procura le scene. Ritorna i percorsi da passare a build-imagery, in
     ordine di mosaico, e scrive lo stesso elenco in ordine_scene.txt.
 
+    Con `cloud_mask` (default) scarica anche la classificazione SCL di ogni
+    scena, toglie nuvole, ombre e cirri (cloudmask.py) e prende
+    `cloud_fillers` scene in piu' per quadrato per riempire i buchi.
+
     Con `stream` non scarica niente: restituisce percorsi /vsicurl/ che GDAL
-    legge direttamente dalla rete. Con `dry_run` dice solo cosa scaricherebbe
-    e quanto pesa.
+    legge direttamente dalla rete (e allora niente maschera: servirebbe
+    comunque scrivere un file locale). Con `dry_run` dice solo cosa
+    scaricherebbe e quanto pesa.
     """
+    if stream and cloud_mask:
+        report("NOTA: con --stream la maschera delle nuvole non si applica "
+               "(servirebbe scrivere comunque un file locale).")
+        cloud_mask = False
+
     choices = find_best_scenes(bbox, year=year, months=months, max_cloud=max_cloud,
-                               max_nodata=max_nodata, area=area, report=report)
+                               max_nodata=max_nodata, area=area,
+                               cloud_fillers=(cloud_fillers if cloud_mask else 0),
+                               report=report)
     if not choices:
         raise RuntimeError(
             "nessuna scena trovata. Prova ad allargare i mesi, ad alzare "
@@ -486,6 +552,10 @@ def fetch(bbox: tuple[float, float, float, float], directory: str, *,
         report("")
         report(f"Scaricherei {len(scenes)} scene, circa {total / 1024 ** 3:.1f} GB "
                f"({len(sizes) - len(known)} dimensioni stimate a 230 MB).")
+        if cloud_mask:
+            report("Con la maschera delle nuvole: piu' ~2 MB di SCL a scena, e i file senza "
+                   "nuvole occupano circa quanto gli originali"
+                   + ("" if keep_originals else " (gli originali si cancellano dopo)") + ".")
         report("Nessun file scaricato: togli --dry-run per procedere.")
         return []
 
@@ -498,7 +568,25 @@ def fetch(bbox: tuple[float, float, float, float], directory: str, *,
 
     report("")
     report(f"Scarico {len(scenes)} scene in {directory} ({download_workers} alla volta)")
-    paths = _parallel(lambda scene: download_scene(scene, directory, report=report),
-                      scenes, workers=max(1, download_workers))
+
+    def procure(scene: Scene) -> str:
+        if not cloud_mask:
+            return download_scene(scene, directory, report=report)
+
+        # Gia' fatta in un giro precedente: non si riscarica niente.
+        result = masked_path(directory, scene)
+        if os.path.exists(result):
+            report(f"  {scene.name}: senza nuvole, gia' presente")
+            return result
+
+        tci = download_scene(scene, directory, report=report)
+        scl = download_scene(scene, directory, report=report, asset="SCL")
+        from . import cloudmask
+        cloudmask.mask_scene(tci, scl, result, report=report)
+        if not keep_originals:
+            os.remove(tci)
+        return result
+
+    paths = _parallel(procure, scenes, workers=max(1, download_workers))
     report(f"Ordine del mosaico in {write_order_file(directory, paths)}")
     return paths

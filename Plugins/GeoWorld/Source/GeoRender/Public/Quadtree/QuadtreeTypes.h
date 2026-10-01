@@ -4,6 +4,7 @@
 #pragma once
 
 #include <cstdint>
+#include <unordered_set>
 #include <vector>
 
 #include "Geo/Ellipsoid.h"
@@ -146,6 +147,32 @@ namespace GeoWorld::Quadtree
 		 * quanto ne disegni davvero. Vedi FTileMeshParameters::Step.
 		 */
 		double GeometricErrorScale = 1.0;
+
+		/**
+		 * Margine del frustum per decidere cosa e' "fuori dalla vista" ai fini
+		 * di OutOfViewErrorFactor. Piu' largo del margine normale apposta:
+		 * girando, le tile si affinano PRIMA di entrare nello schermo, invece
+		 * di farlo davanti agli occhi (il "terreno che si ricalcola" della terza
+		 * prova su Torino).
+		 */
+		double OutOfViewMarginFactor = 1.6;
+
+		/**
+		 * ISTERESI SUL RAFFINAMENTO.
+		 *
+		 * Senza, una tile che sta proprio sulla soglia si raffina e si
+		 * ricompone a ogni piccolo movimento della camera: i figli compaiono,
+		 * spariscono, ricompaiono. Ogni cambio e' un salto visibile della
+		 * geometria e un cambio di texture. Con l'isteresi, una tile che al
+		 * frame prima era raffinata resta raffinata finche' il suo errore non
+		 * scende sotto RefineHysteresis volte la soglia (0.8 = il 20% sotto).
+		 * Si entra a 1, si esce a 0.8: fra i due la decisione non cambia.
+		 *
+		 * PreviouslyRefined e' l'insieme dei nodi raffinati al frame prima
+		 * (FSelectionResult::Refined). Nullo = nessuna isteresi.
+		 */
+		const std::unordered_set<FTileKey>* PreviouslyRefined = nullptr;
+		double RefineHysteresis = 0.8;
 	};
 
 	/** Una tile scelta per il disegno. */
@@ -170,6 +197,9 @@ namespace GeoWorld::Quadtree
 		std::vector<FSelectedTile> ToRender;
 		std::vector<FTileRequest> ToLoad;
 
+		/** Nodi raffinati in questa passata: diventano PreviouslyRefined della prossima. */
+		std::vector<FTileKey> Refined;
+
 		int32_t NodesVisited = 0;
 		int32_t CulledByFrustum = 0;
 		int32_t CulledByHorizon = 0;
@@ -181,6 +211,7 @@ namespace GeoWorld::Quadtree
 		{
 			ToRender.clear();
 			ToLoad.clear();
+			Refined.clear();
 			NodesVisited = CulledByFrustum = CulledByHorizon = 0;
 			CulledByMissing = RefinedNodes = 0;
 			WorstScreenSpaceError = 0.0;

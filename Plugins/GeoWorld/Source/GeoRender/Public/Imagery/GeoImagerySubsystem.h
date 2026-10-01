@@ -32,6 +32,8 @@ struct FGeoImageryStats
 
 	UPROPERTY() int32 TileVestite = 0;
 	UPROPERTY() int32 TileSenzaImmagine = 0;
+	/** Tile vestite con la texture di un antenato perche' il budget era finito. */
+	UPROPERTY() int32 RipieghiSuAntenato = 0;
 	UPROPERTY() int32 TextureInMemoria = 0;
 	UPROPERTY() float MemoriaTextureMB = 0.0f;
 	UPROPERTY() int32 CreateQuestoFrame = 0;
@@ -85,6 +87,9 @@ public:
 private:
 	void SynchroniseWithTerrain();
 	UTexture2D* GetOrCreateTexture(const FTileKey& ImageKey, int32& InOutBudget);
+
+	/** Vestita, oppure nessuna immagine potra' mai vestirla. Vedi UGeoTerrainSubsystem::SetDressPredicate. */
+	bool IsDressedOrUndressable(const FTileKey& Key) const;
 	UTexture2D* GetCheckerboardTexture();
 	void DrawDebugOverlay();
 

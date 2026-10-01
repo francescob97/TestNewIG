@@ -239,6 +239,9 @@ private:
 	GeoWorld::Quadtree::FResidencySettings ResidencySettings;
 	GeoWorld::Quadtree::FResidencyPlan Plan;
 	TArray<GeoWorld::Quadtree::FTileRequest> RenderRequests;
+
+	/** Nodi raffinati alla selezione precedente: l'isteresi li tiene raffinati. */
+	std::unordered_set<GeoWorld::Tiles::FTileKey> PreviouslyRefined;
 	TFunction<bool(const GeoWorld::Tiles::FTileKey&)> RenderReadiness;
 
 	/** Ultima vista usata: serve a continuare a disegnare quando si e' congelata. */

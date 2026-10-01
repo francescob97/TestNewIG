@@ -142,6 +142,17 @@ namespace GeoWorld::Quadtree
 
 		const FFrustumPlanes Planes = MakeFrustumPlanes(View);
 
+		// Un secondo frustum, piu' largo, per decidere cosa e' "fuori vista"
+		// (vedi OutOfViewMarginFactor). Si costruisce solo se serve.
+		const bool bReduceOutOfView = !View.bFrustumCulling && View.OutOfViewErrorFactor > 1.0;
+		FFrustumPlanes WidePlanes = Planes;
+		if (bReduceOutOfView)
+		{
+			FViewParameters Wide = View;
+			Wide.FrustumMarginFactor = std::max(View.FrustumMarginFactor, View.OutOfViewMarginFactor);
+			WidePlanes = MakeFrustumPlanes(Wide);
+		}
+
 		// Radici: tutte le tile del livello minimo. Al livello 0 sono due, e
 		// scartarne una costa due test: non vale la pena di nessuna furbizia.
 		std::vector<FTileKey> Stack;
@@ -207,10 +218,15 @@ namespace GeoWorld::Quadtree
 
 			// Fuori dalla vista si tollera di piu' (vedi OutOfViewErrorFactor).
 			double Threshold = View.MaxScreenSpaceError;
-			if (!View.bFrustumCulling && View.OutOfViewErrorFactor > 1.0 &&
-			    !IsSphereInFrustum(Planes, Volume.Centre, Volume.Radius))
+			if (bReduceOutOfView && !IsSphereInFrustum(WidePlanes, Volume.Centre, Volume.Radius))
 			{
 				Threshold *= View.OutOfViewErrorFactor;
+			}
+
+			// Isteresi: chi era raffinato resta raffinato un po' piu' a lungo.
+			if (View.PreviouslyRefined && View.PreviouslyRefined->count(Key) > 0)
+			{
+				Threshold *= View.RefineHysteresis;
 			}
 
 			const bool bAtMaxLevel = (Key.Level >= MaxLevel);
@@ -258,6 +274,7 @@ namespace GeoWorld::Quadtree
 			if (ExistingChildren > 0 && LoadedChildren == ExistingChildren)
 			{
 				++OutResult.RefinedNodes;
+				OutResult.Refined.push_back(Key);
 				for (int32_t Index = 0; Index < ExistingChildren; ++Index)
 				{
 					Stack.push_back(Children[Index]);

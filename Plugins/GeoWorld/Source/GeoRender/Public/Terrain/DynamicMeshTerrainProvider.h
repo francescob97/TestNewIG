@@ -55,6 +55,11 @@ public:
 	                          UTexture2D* Texture,
 	                          const GeoWorld::Imagery::FDrapeTransform& Drape) override;
 	virtual int32 GetDrapedTileCount() const override;
+	virtual bool IsTileDraped(const GeoWorld::Tiles::FTileKey& Key) const override
+	{
+		const FTileEntry* Entry = Tiles.Find(Key.Pack());
+		return Entry && Entry->bDraped;
+	}
 	virtual FString GetMaterialProblem() const override { return MaterialProblem; }
 
 	virtual int32 GetRealizedTriangleCount() const override;
@@ -77,6 +82,10 @@ private:
 		 *  propria texture e il proprio ritaglio. Creata solo quando serve. */
 		TWeakObjectPtr<UMaterialInstanceDynamic> Material;
 		bool bDraped = false;
+
+		/** Ultimo drappeggio applicato: se non cambia, non si tocca il materiale. */
+		TWeakObjectPtr<UTexture2D> DrapedTexture;
+		GeoWorld::Imagery::FDrapeTransform DrapedTransform;
 	};
 
 	TWeakObjectPtr<AActor> Container;

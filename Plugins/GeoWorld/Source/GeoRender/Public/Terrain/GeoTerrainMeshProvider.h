@@ -187,6 +187,9 @@ public:
 	/** Quante tile hanno davvero una texture addosso. */
 	virtual int32 GetDrapedTileCount() const = 0;
 
+	/** Questa tile ha una texture addosso? Serve a non mostrarla grigia. */
+	virtual bool IsTileDraped(const GeoWorld::Tiles::FTileKey& Key) const = 0;
+
 	/**
 	 * Un problema noto del materiale del drappeggio, da mostrare a schermo, o
 	 * stringa vuota. Esiste perche' un materiale sbagliato non da' errori: da'

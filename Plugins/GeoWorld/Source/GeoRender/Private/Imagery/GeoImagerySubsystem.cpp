@@ -78,6 +78,7 @@ void UGeoImagerySubsystem::Initialize(FSubsystemCollectionBase& Collection)
 
 void UGeoImagerySubsystem::Deinitialize()
 {
+	if (Terrain) { Terrain->ClearDressPredicate(); }
 	ReleaseAllTextures();
 	Super::Deinitialize();
 }
@@ -100,6 +101,22 @@ void UGeoImagerySubsystem::SetEnabled(bool bInEnabled)
 	if (bDrapeEnabled == bInEnabled) { return; }
 	bDrapeEnabled = bInEnabled;
 
+	if (Terrain)
+	{
+		if (bDrapeEnabled)
+		{
+			// Una tile si mostra solo vestita: vedi SetDressPredicate. La lambda
+			// cattura "this"; la si toglie allo spegnimento e in Deinitialize.
+			Terrain->SetDressPredicate([this](const FTileKey& Key) { return IsDressedOrUndressable(Key); });
+		}
+		else
+		{
+			// PRIMA di togliere le foto: altrimenti nessuna tile risulterebbe
+			// pronta e il terreno sparirebbe.
+			Terrain->ClearDressPredicate();
+		}
+	}
+
 	if (!bDrapeEnabled && Terrain)
 	{
 		// Spegnendo il drappeggio si toglie la texture a tutte le tile, cosi' il
@@ -115,6 +132,29 @@ void UGeoImagerySubsystem::SetEnabled(bool bInEnabled)
 		}
 		ReleaseAllTextures();
 	}
+}
+
+bool UGeoImagerySubsystem::IsDressedOrUndressable(const FTileKey& Key) const
+{
+	// Senza dataset non c'e' niente da aspettare.
+	if (!Terrain || !Streaming || !Streaming->IsDatasetOpen()) { return true; }
+
+	const IGeoTerrainMeshProvider* Provider = Terrain->GetProvider();
+	if (Provider && Provider->IsTileDraped(Key)) { return true; }
+
+	// Non vestita: vale la pena aspettare solo se un'immagine PUO' arrivare,
+	// cioe' se il dataset ha la tile allo stesso livello o un suo antenato.
+	// Fuori dalla copertura delle ortofoto la tile si mostra grigia, invece di
+	// lasciare a schermo il padre per sempre. Gli indici sono tutti in memoria
+	// (si caricano all'apertura): sono lookup, non letture da disco.
+	const FGeoImageryDataset& Dataset = Streaming->GetDataset();
+	const int32 MinLevel = FMath::Max(0, Dataset.GetMinLevel());
+	const int32 Top = FMath::Min(static_cast<int32>(Key.Level), Dataset.GetMaxLevel());
+	for (int32 Level = Top; Level >= MinLevel; --Level)
+	{
+		if (Dataset.TileExists(Imagery::AncestorOf(Key, static_cast<uint32>(Level)))) { return false; }
+	}
+	return true;
 }
 
 void UGeoImagerySubsystem::SetCheckerboard(bool bInChecker)
@@ -214,10 +254,32 @@ void UGeoImagerySubsystem::SynchroniseWithTerrain()
 			? GetCheckerboardTexture()
 			: GetOrCreateTexture(Drape.ImageKey, Budget);
 
+		if (!Texture && !bCheckerboard)
+		{
+			// Budget del frame finito. Invece di lasciare la tile com'era (cioe'
+			// GRIGIA, se e' nuova), si ripiega su un antenato la cui texture
+			// esiste gia': costa zero, e la tile ha subito una foto, solo piu'
+			// sfocata. Quella giusta arrivera' nei frame successivi.
+			for (uint32 Level = Drape.ImageKey.Level; Level > MinLevel && !Texture; )
+			{
+				--Level;
+				const FTileKey Ancestor = Imagery::AncestorOf(TerrainKey, Level);
+				if (const TStrongObjectPtr<UTexture2D>* Existing = Textures.Find(Ancestor.Pack()))
+				{
+					Texture = Existing->Get();
+					Drape = Imagery::MakeDrapeTransform(TerrainKey, Level);
+					Drape.ImageKey = Ancestor;
+					StillUsed.Add(Ancestor.Pack());
+					++Stats.RipieghiSuAntenato;
+				}
+			}
+		}
+
 		if (!Texture)
 		{
-			// Texture non creata perche' il budget del frame e' finito: la tile
-			// resta com'era e ci si riprova al frame dopo.
+			// Nessuna texture e nessun antenato pronto: la tile resta com'era e
+			// ci si riprova al frame dopo. Non si vede grigia: finche' non e'
+			// vestita il terreno non la mostra (SetDressPredicate).
 			++Stats.TileSenzaImmagine;
 			continue;
 		}
@@ -421,8 +483,8 @@ void UGeoImagerySubsystem::DrawDebugOverlay()
 		}
 	}
 
-	Line(FColor::Green, FString::Printf(TEXT("Tile vestite  : %d   senza immagine %d"),
-		Stats.TileVestite, Stats.TileSenzaImmagine));
+	Line(FColor::Green, FString::Printf(TEXT("Tile vestite  : %d   senza immagine %d   con la foto di un antenato %d"),
+		Stats.TileVestite, Stats.TileSenzaImmagine, Stats.RipieghiSuAntenato));
 
 	// Se molte tile usano un'immagine piu' grossolana del proprio livello, o la
 	// piramide delle immagini e' piu' bassa (normale) oppure lo streaming non

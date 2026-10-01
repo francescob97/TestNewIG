@@ -10,6 +10,7 @@
 #include <cmath>
 #include <cstdio>
 #include <set>
+#include <unordered_set>
 #include <string>
 
 using namespace GeoWorld;
@@ -785,6 +786,8 @@ static void TestLighterSelection()
 	FViewParameters Base = MakeHorizontalView(41.5, 12.5, 3000.0);
 	Base.bFrustumCulling = false;
 	Base.MaxScreenSpaceError = 8.0;
+	// Qui si misura il solo fattore: il margine largo ha il suo test (sezione 11).
+	Base.OutOfViewMarginFactor = 1.0;
 
 	FViewParameters Scaled = Base;
 	Scaled.GeometricErrorScale = 2.0;
@@ -858,6 +861,62 @@ static void TestLighterSelection()
 	SelectTiles(Classic, Dataset, 0, 14, C1);
 	SelectTiles(ClassicEven, Dataset, 0, 14, C2);
 	Check(KeysOf(C1) == KeysOf(C2), "nel modo classico il fattore fuori vista non cambia niente");
+}
+
+
+// ===========================================================================
+static void TestHysteresis()
+{
+	Section("11. Isteresi e margine: niente terreno che si ricalcola davanti agli occhi");
+
+	FFakeDataset Dataset(11.0, 40.5, 14.0, 43.0, 0, 14);
+	Dataset.LoadEverything();
+
+	FViewParameters View = MakeHorizontalView(41.5, 12.5, 3000.0);
+	View.bFrustumCulling = false;
+	View.MaxScreenSpaceError = 8.0;
+	View.OutOfViewErrorFactor = 4.0;
+
+	FSelectionResult First;
+	SelectTiles(View, Dataset, 0, 14, First);
+	const std::unordered_set<FTileKey> Refined(First.Refined.begin(), First.Refined.end());
+	Check(!Refined.empty(), "la selezione dichiara i nodi che ha raffinato",
+		std::to_string(Refined.size()) + " nodi");
+
+	// Allontanarsi un poco equivale a chiedere un po' meno dettaglio: qui lo
+	// si simula alzando la soglia del 10%. Senza isteresi qualche tile si
+	// ricompone (salto visibile); con l'isteresi non si muove niente.
+	FViewParameters Coarser = View;
+	Coarser.MaxScreenSpaceError = View.MaxScreenSpaceError * 1.1;
+	FSelectionResult Without, With;
+	SelectTiles(Coarser, Dataset, 0, 14, Without);
+	Coarser.PreviouslyRefined = &Refined;
+	SelectTiles(Coarser, Dataset, 0, 14, With);
+
+	Check(KeysOf(Without) != KeysOf(First), "senza isteresi, un passo del 10% cambia le tile",
+		std::to_string(First.ToRender.size()) + " -> " + std::to_string(Without.ToRender.size()));
+	Check(KeysOf(With) == KeysOf(First), "con l'isteresi, lo stesso passo non cambia NESSUNA tile");
+
+	// Ma l'isteresi non blocca per sempre: oltre il 25% (1 / 0.8) si ricompone.
+	FViewParameters MuchCoarser = View;
+	MuchCoarser.MaxScreenSpaceError = View.MaxScreenSpaceError * 1.4;
+	MuchCoarser.PreviouslyRefined = &Refined;
+	FSelectionResult Far;
+	SelectTiles(MuchCoarser, Dataset, 0, 14, Far);
+	Check(Far.ToRender.size() < First.ToRender.size(), "oltre la banda dell'isteresi, il dettaglio cala davvero",
+		std::to_string(First.ToRender.size()) + " -> " + std::to_string(Far.ToRender.size()));
+
+	// Il margine largo per il fuori-vista: una tile appena fuori dallo schermo
+	// (ma dentro il margine) e' dettagliata come quelle dentro, cosi' girando
+	// non si raffina davanti agli occhi.
+	FViewParameters Narrow = View;
+	Narrow.OutOfViewMarginFactor = 1.0;
+	FSelectionResult NarrowResult, WideResult;
+	SelectTiles(Narrow, Dataset, 0, 14, NarrowResult);
+	SelectTiles(View, Dataset, 0, 14, WideResult);
+	Check(WideResult.ToRender.size() > NarrowResult.ToRender.size(),
+		"con il margine largo si tengono fini piu' tile ai lati dello schermo",
+		std::to_string(NarrowResult.ToRender.size()) + " -> " + std::to_string(WideResult.ToRender.size()));
 }
 
 // ===========================================================================
@@ -941,6 +1000,7 @@ int main()
 	TestMotionPredictor();
 	TestResidencyPlan();
 	TestLighterSelection();
+	TestHysteresis();
 
 	std::printf("\n=====================================================\n");
 	std::printf(" RISULTATO: %d passati, %d falliti\n", GPassed, GFailed);

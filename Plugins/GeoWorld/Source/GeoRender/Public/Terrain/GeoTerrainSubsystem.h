@@ -196,6 +196,24 @@ public:
 		return VisibleCount;
 	}
 
+	/**
+	 * Chi decide se una tile costruita e' anche VESTITA abbastanza da mostrarla.
+	 *
+	 * PERCHE' ESISTE. Il provider crea le tile con il materiale grigio di base,
+	 * e la foto arriva quando il subsystem delle ortofoto passa a vestirle: un
+	 * frame dopo, o piu' di uno se il budget di texture e' finito. Per quei
+	 * frame la tile compariva GRIGIO CHIARO in mezzo alle foto: i "flash"
+	 * della terza prova su Torino, a decine quando ci si gira. Le ortofoto
+	 * registrano qui la loro risposta, e il terreno la aggiunge a "ha la
+	 * mesh" nella readiness che da' al quadtree: una tile compare solo vestita,
+	 * e fino ad allora resta a schermo il padre.
+	 */
+	void SetDressPredicate(TFunction<bool(const GeoWorld::Tiles::FTileKey&)> InPredicate)
+	{
+		DressPredicate = MoveTemp(InPredicate);
+	}
+	void ClearDressPredicate() { DressPredicate = nullptr; }
+
 	/** Il provider, per chi deve vestire le tile. Puo' essere nullo. */
 	IGeoTerrainMeshProvider* GetProvider() const { return Provider.Get(); }
 
@@ -252,6 +270,8 @@ private:
 	 * costruirla costerebbe migliaia di mesh per posti dove probabilmente non
 	 * si andra'. Ricalcolato solo quando il quadtree rifa' il piano.
 	 */
+	TFunction<bool(const GeoWorld::Tiles::FTileKey&)> DressPredicate;
+
 	TSet<uint64> PlanMeshKeys;
 	int32 PlanGenerationSeen = -1;
 	int32 TeleportsSeen = 0;

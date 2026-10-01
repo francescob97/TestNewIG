@@ -89,6 +89,24 @@ class SceneChoice(unittest.TestCase):
         choices = choose_scenes({"32SMA": [], "32TMQ": TORINO["32TMQ"]}, max_cloud=10.0)
         self.assertEqual({c.scene.square_key for c in choices}, {"32TMQ"})
 
+    def test_cloud_fillers_go_below_the_principal(self):
+        choices = choose_scenes({"32TMQ": TORINO["32TMQ"]}, max_cloud=10.0, cloud_fillers=2)
+        roles = [c.role for c in choices]
+        self.assertEqual(roles, ["riempimento", "riempimento", "principale"])
+        dates = [c.scene.date for c in choices]
+        self.assertEqual(len(set(dates)), 3, "tre giorni diversi")
+        # Subito sotto la principale va il riempimento MIGLIORE.
+        from geoworld.fetchimagery import _badness
+        self.assertLessEqual(_badness(choices[1].scene), _badness(choices[0].scene))
+
+    def test_cloud_fillers_skip_empty_scenes(self):
+        candidates = {"32TMQ": [scene("32TMQ", "20240729", 0.3, 0.0),
+                                scene("32TMQ", "20240722", 0.1, 99.5),
+                                scene("32TMQ", "20240803", 2.0, 0.0)]}
+        choices = choose_scenes(candidates, max_cloud=10.0, cloud_fillers=2)
+        self.assertNotIn("20240722", [c.scene.date for c in choices],
+                         "una scena vuota al 99% non riempie niente")
+
     def test_scene_date_comes_from_the_name(self):
         self.assertEqual(scene("32TLQ", "20240821", 0, 0).date, "20240821")
 
