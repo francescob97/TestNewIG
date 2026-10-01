@@ -25,9 +25,9 @@ Ultimo aggiornamento: 2026-09-20. Branch: `claude/charming-goodall-xd2r3g`.
 compilata con Unreal Engine. L'ambiente in cui e' stato scritto e' Linux senza
 il motore. Quello che **e'** stato verificato:
 
-* tutta la matematica pura, con test numerici eseguiti: **224 test C++** in
+* tutta la matematica pura, con test numerici eseguiti: **229 test C++** in
   totale (37 Fase 1 + 22 Fase 3 + 79 Fase 4 e residenza + 34 Fase 5 + 52
-  Fase 6), piu' 90 test Python;
+  Fase 6), piu' 120 test Python;
 * le convenzioni UE controllate staticamente (bilanciamento parentesi,
   posizione dei `.generated.h`, guardie `WITH_EDITOR`, macro di export);
 * il formato dei file, letto dal codice C++ vero contro un dataset vero.
@@ -63,7 +63,7 @@ python run.py check-env                              :: SEMPRE per primo
 python run.py fetch --area test -o dati/copernicus   :: DEM libero, 19 MB
 python run.py build -i "dati/copernicus/*.tif" -o dataset/test
 python run.py verify -o dataset/test
-python -m unittest discover -s tests                 :: 90 test
+python -m unittest discover -s tests                 :: 120 test
 ```
 
 `check-env` e' l'unico comando che sta fra te e un dataset sbagliato di 48
@@ -76,10 +76,10 @@ sta vincendo.
 cmake -S Plugins/GeoWorld/Tools/StandaloneTests -B build
 cmake --build build
 build\Debug\geocore_tests.exe                       :: 37 test
-build\Debug\geotiles_tests.exe dataset\test         :: 23 test
-build\Debug\geoquadtree_tests.exe                   :: 74 test
-build\Debug\geomesh_tests.exe                       :: 28 test
-build\Debug\geoimagery_tests.exe                    :: 44 test
+build\Debug\geotiles_tests.exe dataset\test         :: 22 test
+build\Debug\geoquadtree_tests.exe                   :: 84 test
+build\Debug\geomesh_tests.exe                       :: 34 test
+build\Debug\geoimagery_tests.exe                    :: 52 test
 Plugins\GeoWorld\Tools\CheckSourceDiscipline.sh      :: serve bash (Git Bash)
 ```
 

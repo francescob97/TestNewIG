@@ -143,7 +143,37 @@ Due dettagli tecnici:
 
 ### 4.3 La prova vera, su Torino
 
-RISULTATI_TORINO
+Prima di consegnartelo l'ho fatto girare per davvero, con la rete, sull'area
+di Torino (7,55-7,80 E, 45,00-45,15 N), estate 2024.
+
+**`fetch-imagery`** ha scelto 6 scene, 3 per quadrato:
+
+| Quadrato | Ruolo | Scena | Nuvole (metadati) | Tolto dalla maschera |
+|---|---|---|---|---|
+| 32TLQ | principale | 21/08/2024 | 6,0% | 8,3% |
+| 32TLQ | riempimento | 01/08/2024 | 6,5% | 11,1% |
+| 32TLQ | riempimento | 27/06/2024 | 9,7% | 13,0% |
+| 32TMQ | principale | 29/07/2024 | 0,3% | 0,9% |
+| 32TMQ | riempimento | 03/08/2024 | 0,4% | 0,9% |
+| 32TMQ | riempimento | 13/08/2024 | 1,3% | 3,4% |
+
+La maschera toglie un po' più di quanto dicono i metadati: sono le **ombre**
+delle nuvole e l'allargamento di 40 m attorno ai bordi, che i metadati non
+contano. Tempo totale **1 minuto e 25 secondi** (circa 1,9 GB scaricati,
+4 scene alla volta); ogni file senza nuvole pesa ~230 MB.
+
+**`build-imagery`** è stata anche la prima volta che il taglio girava con GDAL
+vero su dati veri, non sui file di prova dei test. Risoluzione rilevata 8,7 m,
+livello massimo 13, ~18 tile al secondo: le 5904 tile del livello 13 in circa
+5 minuti e mezzo. L'ho interrotta a metà di proposito e rilanciata: ha ripreso
+da dove era rimasta, senza rifare le tile già scritte. `verify-imagery` alla
+fine dice **TUTTO A POSTO**: 7562 tile, in media 15 KB l'una.
+
+**A occhio**, ricomponendo le tile del livello 12 attorno a Torino: i buchi
+lasciati dalle nuvole della scena principale sono riempiti dalle altre date e
+non si vedono macchie bianche né ombre. Restano qualche puntino e qualche bordo
+appena più chiaro dove le nuvole erano molto sottili, e la fascia grigia in
+alto è semplicemente fuori dall'area scaricata.
 
 ### 4.4 Cosa fare
 
