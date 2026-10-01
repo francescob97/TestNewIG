@@ -332,6 +332,27 @@ rendere facile una cosa che altrimenti non lo sarebbe.
 
 ---
 
+## 11.11 Dopo la seconda prova: il compromesso sul "tutto attorno"
+
+La selezione uguale in ogni direzione costava circa **3 volte** le tile, e su un
+portatile da 16 GB, insieme a una soglia di 4 px e a tile da 33.792 triangoli,
+portava a 18 milioni di triangoli in memoria. Oggi fuori dalla vista si
+tollera un errore **4 volte** più grande (`FViewParameters::OutOfViewErrorFactor`):
+
+* dietro di te c'è **sempre** terreno, solo più grossolano (un test controlla
+  che tutto ciò che prima era coperto lo sia ancora);
+* nella vista il dettaglio è **identico** (un altro test lo controlla tile per
+  tile);
+* girando la testa, ciò che entra si affina in una frazione di secondo: il padre
+  grossolano resta a schermo finché i figli non sono costruiti.
+
+È un passo indietro rispetto a "girare non costa niente", e va detto: girare
+torna a costare un po' di lavoro. Ma niente buchi, e un terzo della memoria.
+Con RAM abbondante si torna all'idea originale con `geo.Lod.OutOfView 1` o
+`geo.Quality workstation`. I numeri sono in `docs/prova-torino-2.md`.
+
+---
+
 ## Alternative considerate
 
 | Alternativa | Perché no |

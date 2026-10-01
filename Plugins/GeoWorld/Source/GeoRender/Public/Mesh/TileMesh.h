@@ -110,6 +110,22 @@ namespace GeoWorld::Mesh
 		 * questo il parametro: geo.Terrain.FlipWinding lo cambia a caldo.
 		 */
 		bool bFlipWinding = true;
+
+		/**
+		 * Passo della mesh, in post: 1 = tutti i 129x129 post (33.792
+		 * triangoli), 2 = uno ogni due (65x65, 8.448 triangoli), 4 = uno ogni
+		 * quattro (33x33, 2.112). Deve dividere 128; altrimenti vale 1.
+		 *
+		 * PERCHE' ESISTE. Alla prima prova su un portatile da 16 GB il terreno
+		 * chiedeva 15-18 milioni di triangoli in memoria. Il dettaglio a schermo
+		 * lo decide la soglia d'errore, non quanti triangoli ha una tile: con un
+		 * passo 2 e l'errore geometrico raddoppiato (FViewParameters::
+		 * GeometricErrorScale) il LOD sceglie tile piu' piccole, ognuna con un
+		 * quarto dei triangoli. A parita' di dettaglio sullo schermo servono
+		 * meno triangoli, perche' il dettaglio si distribuisce piu' fine: una
+		 * tile grande sovra-dettaglia la sua parte lontana.
+		 */
+		int32_t Step = 1;
 	};
 
 	/**
@@ -153,8 +169,9 @@ namespace GeoWorld::Mesh
 	/**
 	 * Costruisce la mesh di una tile.
 	 *
-	 * La griglia e' 129x129 post; i triangoli sono 128x128x2. La gonna aggiunge
-	 * quattro strisce lungo il perimetro.
+	 * La griglia e' 129x129 post; i triangoli sono 128x128x2 (con Step 1; con
+	 * Step 2 65x65 post e 64x64x2 triangoli). La gonna aggiunge quattro
+	 * strisce lungo il perimetro.
 	 */
 	inline void BuildTileMesh(const FHeightTile& Tile, const FTileMeshParameters& Parameters,
 	                          FTileMeshData& Out, const FEllipsoid& Ellipsoid = Core::WGS84)
@@ -163,8 +180,13 @@ namespace GeoWorld::Mesh
 
 		if (!Tile.IsValid()) { return; }
 
-		constexpr int32_t Posts = Tiles::TilePosts;
-		constexpr int32_t Cells = Tiles::TileCells;
+		// La griglia della MESH, che puo' essere piu' rada di quella dei dati:
+		// con Step 2 si usa un post ogni due. Da qui in giu' Posts e Cells
+		// parlano della mesh; i dati si leggono a (I*PostStep, J*PostStep).
+		const int32_t PostStep = (Parameters.Step >= 1 && Tiles::TileCells % Parameters.Step == 0)
+			? Parameters.Step : 1;
+		const int32_t Cells = Tiles::TileCells / PostStep;
+		const int32_t Posts = Cells + 1;
 
 		const Tiles::FTileBounds Bounds =
 			Tiles::GetTileBounds(Tile.Key.Level, Tile.Key.X, Tile.Key.Y);
@@ -180,7 +202,7 @@ namespace GeoWorld::Mesh
 		const FEcef OriginEcef = Core::GeodeticToEcef(Out.Origin, Ellipsoid);
 		const FMat3 EcefToLocal = Detail::MakeLocalNeu(Out.Origin);
 
-		const double Spacing = Tiles::PostSpacingDeg(Tile.Key.Level);
+		const double Spacing = Tiles::PostSpacingDeg(Tile.Key.Level) * PostStep;
 
 		const uint32_t InteriorVertices = static_cast<uint32_t>(Posts) * Posts;
 		const uint32_t SkirtVertices = Parameters.bGenerateSkirt
@@ -211,7 +233,7 @@ namespace GeoWorld::Mesh
 
 				const FEcef Position = Core::GeodeticToEcef(
 					FGeodetic::FromRadians(Lat * Core::DegToRad, Lon * Core::DegToRad,
-					                       Tile.GetHeight(I, J)), Ellipsoid);
+					                       Tile.GetHeight(I * PostStep, J * PostStep)), Ellipsoid);
 
 				const FEcef Local = EcefToLocal.Transform(Position - OriginEcef);
 				LocalX[Index] = Local.X;   // Nord
@@ -322,8 +344,10 @@ namespace GeoWorld::Mesh
 		// condiviso: verificato in Fase 2 e di nuovo in Fase 3, bit per bit.
 		if (Parameters.bGenerateSkirt)
 		{
+			// Con una mesh piu' rada il bordo grossolano si stacca di piu' dal
+			// terreno vero: la gonna scende in proporzione al passo.
 			const double Depth = (Parameters.SkirtDepthMetres > 0.0)
-				? Parameters.SkirtDepthMetres : ComputeSkirtDepth(Tile.Key.Level);
+				? Parameters.SkirtDepthMetres : ComputeSkirtDepth(Tile.Key.Level) * PostStep;
 
 			uint32_t SkirtBase = InteriorVertices;
 

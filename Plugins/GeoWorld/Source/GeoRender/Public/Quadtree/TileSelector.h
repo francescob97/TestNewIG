@@ -203,10 +203,18 @@ namespace GeoWorld::Quadtree
 			const double DistanceToCentre = (Volume.Centre - View.CameraEcef).Length();
 			const double DistanceToSurface = std::max(0.0, DistanceToCentre - Volume.Radius);
 			const double ScreenSpaceError = ComputeScreenSpaceError(
-				GeometricErrorMetres(Key.Level), DistanceToSurface, View);
+				GeometricErrorMetres(Key.Level) * View.GeometricErrorScale, DistanceToSurface, View);
+
+			// Fuori dalla vista si tollera di piu' (vedi OutOfViewErrorFactor).
+			double Threshold = View.MaxScreenSpaceError;
+			if (!View.bFrustumCulling && View.OutOfViewErrorFactor > 1.0 &&
+			    !IsSphereInFrustum(Planes, Volume.Centre, Volume.Radius))
+			{
+				Threshold *= View.OutOfViewErrorFactor;
+			}
 
 			const bool bAtMaxLevel = (Key.Level >= MaxLevel);
-			const bool bErrorAcceptable = (ScreenSpaceError <= View.MaxScreenSpaceError);
+			const bool bErrorAcceptable = (ScreenSpaceError <= Threshold);
 
 			if (bErrorAcceptable || bAtMaxLevel)
 			{
@@ -220,7 +228,7 @@ namespace GeoWorld::Quadtree
 				else
 				{
 					OutResult.ToLoad.push_back(FTileRequest{
-						Key, Detail::PriorityFromError(ScreenSpaceError, View.MaxScreenSpaceError),
+						Key, Detail::PriorityFromError(ScreenSpaceError, Threshold),
 						ScreenSpaceError });
 				}
 				continue;
@@ -258,7 +266,7 @@ namespace GeoWorld::Quadtree
 			}
 
 			// Figli non ancora pronti: chiedili e tieni il padre a schermo.
-			const int32_t Priority = Detail::PriorityFromError(ScreenSpaceError, View.MaxScreenSpaceError);
+			const int32_t Priority = Detail::PriorityFromError(ScreenSpaceError, Threshold);
 			for (int32_t Index = 0; Index < ExistingChildren; ++Index)
 			{
 				if (!Availability.IsTileLoaded(Children[Index]))

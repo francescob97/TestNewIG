@@ -137,6 +137,14 @@ public:
 	void SetSkirtEnabled(bool bInSkirt);
 	bool IsSkirtEnabled() const { return MeshParameters.bGenerateSkirt; }
 
+	/**
+	 * Passo della mesh: 1, 2, 4 (un post ogni N). Default 2. Cambiarlo
+	 * ricostruisce tutto e dice al quadtree di quanto cresce l'errore
+	 * geometrico. Vedi FTileMeshParameters::Step.
+	 */
+	void SetMeshStep(int32 InStep);
+	int32 GetMeshStep() const { return MeshParameters.Step; }
+
 	/** Inverte l'orientamento dei triangoli. Se il terreno e' invisibile
 	 *  dall'alto e visibile da sotto, e' questo. */
 	void SetFlipWinding(bool bInFlip);
@@ -298,6 +306,7 @@ private:
 	 */
 	int32 BuildGeneration = 0;
 
+	/** Il passo si porta a 2 in Initialize: vedi FTileMeshParameters::Step e prova-torino.md. */
 	GeoWorld::Mesh::FTileMeshParameters MeshParameters;
 	FGeoTerrainStats Stats;
 	bool bDrawBounds = false;

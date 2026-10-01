@@ -772,6 +772,94 @@ static void TestResidencyPlan()
 	Check(Plan.SafetyTier == -1 && Plan.CountSafety == 0, "SafetyErrorFactor 0 spegne l'anello");
 }
 
+
+// ===========================================================================
+static void TestLighterSelection()
+{
+	Section("10. Meno triangoli: passo della mesh e dettaglio fuori vista");
+
+	FFakeDataset Dataset(11.0, 40.5, 14.0, 43.0, 0, 14);
+	Dataset.LoadEverything();
+
+	// --- Errore geometrico raddoppiato = soglia dimezzata ------------------
+	FViewParameters Base = MakeHorizontalView(41.5, 12.5, 3000.0);
+	Base.bFrustumCulling = false;
+	Base.MaxScreenSpaceError = 8.0;
+
+	FViewParameters Scaled = Base;
+	Scaled.GeometricErrorScale = 2.0;
+	FViewParameters HalfThreshold = Base;
+	HalfThreshold.MaxScreenSpaceError = 4.0;
+
+	FSelectionResult A, B;
+	SelectTiles(Scaled, Dataset, 0, 14, A);
+	SelectTiles(HalfThreshold, Dataset, 0, 14, B);
+	Check(!A.ToRender.empty() && KeysOf(A) == KeysOf(B),
+		"passo 2 (errore x2) sceglie le stesse tile di una soglia dimezzata",
+		std::to_string(A.ToRender.size()) + " tile");
+
+	// --- Fuori dalla vista, piu' grossolano --------------------------------
+	FViewParameters Even = Base;
+	Even.OutOfViewErrorFactor = 1.0;
+	FViewParameters Lighter = Base;
+	Lighter.OutOfViewErrorFactor = 4.0;
+
+	FSelectionResult Uniform, Reduced;
+	SelectTiles(Even, Dataset, 0, 14, Uniform);
+	SelectTiles(Lighter, Dataset, 0, 14, Reduced);
+
+	const FFrustumPlanes Planes = MakeFrustumPlanes(Base);
+	auto InView = [&](const FSelectionResult& Result)
+	{
+		std::set<FTileKey> Keys;
+		for (const FSelectedTile& Tile : Result.ToRender)
+		{
+			const auto Bounds = Tiles::GetTileBounds(Tile.Key.Level, Tile.Key.X, Tile.Key.Y);
+			const FTileBoundingVolume Volume = MakeTileBoundingVolume(
+				Bounds.West, Bounds.South, Bounds.East, Bounds.North, 0.0, 2000.0);
+			if (IsSphereInFrustum(Planes, Volume.Centre, Volume.Radius)) { Keys.insert(Tile.Key); }
+		}
+		return Keys;
+	};
+
+	Check(InView(Uniform) == InView(Reduced),
+		"cio' che sta NELLA vista non cambia: stesse tile, stesso dettaglio",
+		std::to_string(InView(Reduced).size()) + " tile in vista");
+	const size_t InViewCount = InView(Reduced).size();
+	const size_t OutBefore = Uniform.ToRender.size() - InViewCount;
+	const size_t OutAfter = Reduced.ToRender.size() - InViewCount;
+	Check(OutAfter * 2 <= OutBefore,
+		"fuori dalla vista le tile almeno si dimezzano (e sono grossolane: molti meno triangoli)",
+		std::to_string(OutBefore) + " -> " + std::to_string(OutAfter));
+
+	// Nessun buco: il terreno copre ancora tutto attorno. Si controlla che
+	// ogni tile della selezione uniforme abbia un antenato (o se stessa)
+	// nella selezione ridotta, cioe' che la superficie coperta sia la stessa.
+	std::set<FTileKey> ReducedKeys = KeysOf(Reduced);
+	bool bCovered = true;
+	for (const FSelectedTile& Tile : Uniform.ToRender)
+	{
+		bool bFound = false;
+		for (FTileKey Up = Tile.Key; ; Up = FTileKey{ Up.Level - 1, Up.X / 2, Up.Y / 2 })
+		{
+			if (ReducedKeys.count(Up)) { bFound = true; break; }
+			if (Up.Level == 0) { break; }
+		}
+		if (!bFound) { bCovered = false; break; }
+	}
+	Check(bCovered, "e dietro c'e' sempre terreno: piu' grossolano, mai assente");
+
+	// Con il frustum acceso il fattore non conta: fuori vista non si seleziona.
+	FViewParameters Classic = Lighter;
+	Classic.bFrustumCulling = true;
+	FViewParameters ClassicEven = Classic;
+	ClassicEven.OutOfViewErrorFactor = 1.0;
+	FSelectionResult C1, C2;
+	SelectTiles(Classic, Dataset, 0, 14, C1);
+	SelectTiles(ClassicEven, Dataset, 0, 14, C2);
+	Check(KeysOf(C1) == KeysOf(C2), "nel modo classico il fattore fuori vista non cambia niente");
+}
+
 // ===========================================================================
 int main()
 {
@@ -852,6 +940,7 @@ int main()
 	TestViewIndependence();
 	TestMotionPredictor();
 	TestResidencyPlan();
+	TestLighterSelection();
 
 	std::printf("\n=====================================================\n");
 	std::printf(" RISULTATO: %d passati, %d falliti\n", GPassed, GFailed);

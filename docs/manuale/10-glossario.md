@@ -59,7 +59,7 @@ camera non è un attore. (1)
 terreno vero. Qui approssimato con il passo fra i post. (5)
 
 **Errore su schermo** (SSE) — l'errore geometrico proiettato in pixel. La manopola
-del LOD. Soglia di default: 4 pixel. (5)
+del LOD. Soglia di default: 8 pixel (era 4: vedi `docs/prova-torino-2.md`). (5)
 
 **Fascia** (del piano di residenza) — un gruppo di tile del piano con la stessa urgenza: 0 = adesso, 1..3 = posizioni previste, l'ultima = anello di sicurezza. (11)
 
@@ -337,4 +337,5 @@ il primo comando da provare quando non si vede niente. (6)
 | `docs/residenza-design.md` | cosa tenere pronto: posizione, velocità, mesh nascoste |
 | `docs/residenza-verifica.md` | come verificare la residenza |
 | `docs/prova-torino.md` | la prima prova vera: cause del mosaico, prestazioni, tutta Italia |
+| `docs/prova-torino-2.md` | la seconda: troppi triangoli, e quanto pesa ogni manopola |
 | `docs/issues-aperte.md` | problemi noti non risolti |

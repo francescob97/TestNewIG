@@ -365,6 +365,75 @@ static void TestCost()
 	Check(Megabytes < 1.0, "una tile sta sotto il megabyte", Fmt("%.3f MB", Megabytes));
 }
 
+
+// ===========================================================================
+static void TestMeshStep()
+{
+	Section("8. Passo della mesh: un post ogni N");
+
+	// Il passo 2 e' il default del motore dopo la prima prova su un portatile:
+	// un quarto dei triangoli per tile, con il LOD che raddoppia l'errore
+	// geometrico per compensare.
+	const FTileKey Key{ 13, 4380, 1094 };
+	const FHeightTile Tile = MakeTile(Key);
+
+	FTileMeshParameters Full;
+	FTileMeshParameters Half;
+	Half.Step = 2;
+	FTileMeshData FullMesh, HalfMesh;
+	BuildTileMesh(Tile, Full, FullMesh);
+	BuildTileMesh(Tile, Half, HalfMesh);
+
+	Check(HalfMesh.IsValid() && HalfMesh.InteriorVertexCount == 65u * 65u,
+		"passo 2: 65x65 post", std::to_string(HalfMesh.InteriorVertexCount) + " vertici interni");
+	Check(HalfMesh.TriangleCount == 64u * 64u * 2u + 4u * 64u * 2u,
+		"passo 2: 8.704 triangoli con le gonne, un quarto di 33.792",
+		std::to_string(HalfMesh.TriangleCount));
+
+	// I post della mesh rada sono ESATTAMENTE post della mesh piena: stessa
+	// posizione, non un'interpolazione. Si confrontano in ECEF, perche' le
+	// origini locali coincidono solo se coincidono le quote estreme.
+	double Worst = 0.0;
+	for (uint32_t J = 0; J < 65; ++J)
+	{
+		for (uint32_t I = 0; I < 65; ++I)
+		{
+			const FEcef A = LocalToEcef(HalfMesh, static_cast<size_t>(J) * 65 + I);
+			const FEcef B = LocalToEcef(FullMesh, static_cast<size_t>(J * 2) * Tiles::TilePosts + I * 2);
+			Worst = std::max(Worst, (A - B).Length());
+		}
+	}
+	Check(Worst < 0.02, "ogni vertice della mesh rada e' un post vero della tile",
+		Fmt("scarto max %.4f m", Worst));
+
+	// Le UV coprono comunque [0,1]: l'ortofoto si drappeggia uguale.
+	const float LastU = HalfMesh.UVs[64 * 2 + 0];
+	const float LastV = HalfMesh.UVs[(static_cast<size_t>(64) * 65 + 64) * 2 + 1];
+	Check(LastU == 1.0f && LastV == 1.0f, "le UV vanno da 0 a 1 anche con il passo 2");
+
+	// Giunzione fra due tile vicine, entrambe col passo 2: i bordi coincidono.
+	const FTileKey Right{ 13, 4381, 1094 };
+	FTileMeshData RightMesh;
+	BuildTileMesh(MakeTile(Right), Half, RightMesh);
+	double WorstSeam = 0.0;
+	for (uint32_t J = 0; J < 65; ++J)
+	{
+		const FEcef A = LocalToEcef(HalfMesh, static_cast<size_t>(J) * 65 + 64);
+		const FEcef B = LocalToEcef(RightMesh, static_cast<size_t>(J) * 65 + 0);
+		WorstSeam = std::max(WorstSeam, (A - B).Length());
+	}
+	Check(WorstSeam < 0.02, "giunzione EST-OVEST con il passo 2: i 65 vertici coincidono",
+		Fmt("scarto max %.4f m", WorstSeam));
+
+	// Un passo che non divide 128 non deve produrre una griglia sbilenca.
+	FTileMeshParameters Odd;
+	Odd.Step = 3;
+	FTileMeshData OddMesh;
+	BuildTileMesh(Tile, Odd, OddMesh);
+	Check(OddMesh.InteriorVertexCount == FullMesh.InteriorVertexCount,
+		"un passo che non divide 128 (3) ricade sul passo 1");
+}
+
 // ===========================================================================
 int main()
 {
@@ -379,6 +448,7 @@ int main()
 	TestSeamsBetweenAdjacentTiles();
 	TestWinding();
 	TestCost();
+	TestMeshStep();
 
 	std::printf("\n=====================================================\n");
 	std::printf(" RISULTATO: %d passati, %d falliti\n", GPassed, GFailed);

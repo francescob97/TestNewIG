@@ -247,7 +247,15 @@ errore_su_schermo = errore_geometrico × altezza_schermo
 
 È la proiezione prospettica: un oggetto grande `E` a distanza `D` occupa sullo
 schermo una frazione `E / (D × 2 tan(fov/2))` dell'altezza. Si raffina finché
-questo numero scende sotto una **soglia**, di default **4 pixel**.
+questo numero scende sotto una **soglia**, di default **4 pixel** (oggi **8**: vedi la nota qui sotto).
+
+> ⚠️ **Dopo la seconda prova su un portatile.** Con 4 pixel, la selezione su tutti i lati
+> della residenza e tile da 33.792 triangoli, il terreno chiedeva 18 milioni di
+> triangoli in memoria. Oggi la soglia è 8 px, la mesh usa un post ogni due
+> (`GeometricErrorScale` compensa nel LOD) e fuori dalla vista si tollera un errore
+> 4 volte più grande: 2,5 milioni. I numeri di ogni manopola sono in
+> `docs/prova-torino-2.md`. **Dimezzare la soglia quadruplica le tile** resta la
+> cosa da ricordare.
 
 > 💡 **Esempio.** Schermo alto 1.080 px, campo visivo verticale 60°
 > (tan 30° = 0,577). Una tile di livello 13, errore 20 m, a 5 km:

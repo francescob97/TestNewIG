@@ -94,6 +94,18 @@ public:
 	double GetMaxScreenSpaceError() const { return MaxScreenSpaceError; }
 
 	void SetFrustumMargin(double InMargin) { FrustumMargin = FMath::Clamp(InMargin, 1.0, 3.0); }
+
+	/**
+	 * Quanto meno dettaglio fuori dalla vista: 1 = tutto uguale in ogni
+	 * direzione (serve memoria: ~3 volte le tile), 4 = dietro tile ~4 volte
+	 * piu' grossolane per lato. Vedi FViewParameters::OutOfViewErrorFactor.
+	 */
+	void SetOutOfViewErrorFactor(double Factor) { OutOfViewErrorFactor = FMath::Clamp(Factor, 1.0, 64.0); bPlanDirty = true; }
+	double GetOutOfViewErrorFactor() const { return OutOfViewErrorFactor; }
+
+	/** Il terreno dice qui il passo della propria mesh (FTileMeshParameters::Step). */
+	void SetGeometricErrorScale(double Scale) { GeometricErrorScale = FMath::Max(1.0, Scale); bPlanDirty = true; }
+	double GetGeometricErrorScale() const { return GeometricErrorScale; }
 	double GetFrustumMargin() const { return FrustumMargin; }
 
 	/** Blocca la selezione sulla vista corrente: utile per ispezionarla da fuori. */
@@ -184,7 +196,19 @@ private:
 	GeoWorld::Quadtree::FSelectionResult Result;
 	FGeoQuadtreeStats Stats;
 
-	double MaxScreenSpaceError = 4.0;
+	/**
+	 * 8 pixel, non piu' 4. Con 4, alla prima prova su un portatile, il terreno
+	 * chiedeva 15-18 milioni di triangoli in memoria e quasi 6 a schermo.
+	 * Dimezzare la soglia quadruplica le tile: e' la manopola piu' potente
+	 * che c'e', e si cambia a caldo con geo.Lod.Error o geo.Quality.
+	 */
+	double MaxScreenSpaceError = 8.0;
+
+	/** Fuori dalla vista si tollera questo multiplo dell'errore. Vedi FViewParameters. */
+	double OutOfViewErrorFactor = 4.0;
+
+	/** Lo imposta il terreno: il passo della sua mesh. Vedi FViewParameters. */
+	double GeometricErrorScale = 1.0;
 
 	/** Allargamento del frustum per la sola selezione: vedi FViewParameters. */
 	double FrustumMargin = 1.2;

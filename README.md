@@ -67,8 +67,8 @@ cmake -S Plugins/GeoWorld/Tools/StandaloneTests -B build
 cmake --build build
 ./build/geocore_tests        # 37 test  -- geodesia, rebasing
 ./build/geotiles_tests       # 22 test  -- formato tile, cache (piu' quelli su un dataset vero)
-./build/geoquadtree_tests    # 74 test  -- LOD, culling, orizzonte, residenza
-./build/geomesh_tests        # 28 test  -- mesh, gonne, giunzioni
+./build/geoquadtree_tests    # 79 test  -- LOD, culling, orizzonte, residenza
+./build/geomesh_tests        # 34 test  -- mesh, gonne, giunzioni, passo
 ./build/geoimagery_tests     # 52 test  -- drappeggio, formato immagine, mipmap
 
 ./Plugins/GeoWorld/Tools/CheckSourceDiscipline.sh
@@ -83,9 +83,10 @@ le classi di errore di compilazione gia' incontrate su Windows -- shadowing,
 simboli non esportati fra moduli, tipi di comando console inesistenti,
 collisioni da build unity, metodi inesistenti chiamati sulle nostre classi.
 
-213 test C++ in totale, piu' 90 test Python della pipeline.
+224 test C++ in totale, piu' 90 test Python della pipeline.
 
 **Dopo la prima prova su Torino** (materiale, scene Sentinel, prestazioni): `docs/prova-torino.md`.
+**Dopo la seconda** (troppi triangoli, RAM): `docs/prova-torino-2.md`.
 
 ## Pipeline dati
 

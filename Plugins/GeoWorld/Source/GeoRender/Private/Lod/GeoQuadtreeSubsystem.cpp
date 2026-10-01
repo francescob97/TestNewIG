@@ -155,6 +155,8 @@ bool UGeoQuadtreeSubsystem::BuildViewParameters(FViewParameters& OutView)
 	OutView.ScreenHeightPixels = FMath::Max(1, Info.ScreenSize.Y);
 	OutView.MaxScreenSpaceError = MaxScreenSpaceError;
 	OutView.FrustumMarginFactor = FrustumMargin;
+	OutView.OutOfViewErrorFactor = OutOfViewErrorFactor;
+	OutView.GeometricErrorScale = GeometricErrorScale;
 	OutView.NearClipMetres = 1.0;
 
 	return true;
@@ -173,6 +175,8 @@ bool UGeoQuadtreeSubsystem::RunSelection()
 		// proprio a vedere che effetto hanno, guardando la selezione da fuori.
 		View.MaxScreenSpaceError = MaxScreenSpaceError;
 		View.FrustumMarginFactor = FrustumMargin;
+		View.OutOfViewErrorFactor = OutOfViewErrorFactor;
+		View.GeometricErrorScale = GeometricErrorScale;
 	}
 	else
 	{
@@ -377,7 +381,8 @@ void UGeoQuadtreeSubsystem::DrawDebugOverlay()
 		Stats.TileDisegnate, Stats.LivelloMinimo, Stats.LivelloMassimo));
 
 	Line(Stats.VistaIndipendente ? FColor::Green : FColor::Orange, Stats.VistaIndipendente
-		? FString(TEXT("Modo          : vista-indipendente (il frustum lo applica Unreal)"))
+		? FString::Printf(TEXT("Modo          : vista-indipendente, fuori vista errore x%.0f, passo mesh %.0f"),
+			OutOfViewErrorFactor, GeometricErrorScale)
 		: FString::Printf(TEXT("Modo          : CLASSICO, frustum x%.2f (geo.Lod.ViewIndependent 1)"), FrustumMargin));
 
 	if (bPrefetchEnabled)

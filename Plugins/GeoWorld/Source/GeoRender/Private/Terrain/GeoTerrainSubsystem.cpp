@@ -36,6 +36,11 @@ void UGeoTerrainSubsystem::Initialize(FSubsystemCollectionBase& Collection)
 
 	BuildQueue = MakeShared<FMeshBuildQueue, ESPMode::ThreadSafe>();
 
+	// Un post ogni due: un quarto dei triangoli per tile, con il LOD che lo sa
+	// (SetGeometricErrorScale in SetEnabled). Il default dello strato puro resta
+	// 1, la geometria completa, che e' quella che i test verificano.
+	MeshParameters.Step = 2;
+
 	// Budget di mesh in base alla RAM. Una mesh costa qualche MB fra la copia
 	// sul game thread (la FDynamicMesh3, con la topologia) e i buffer della
 	// scheda video. Con 16 GB, di cui l'editor ne usa parecchi da solo, 2.000
@@ -104,6 +109,7 @@ void UGeoTerrainSubsystem::SetEnabled(bool bInEnabled)
 		if (Quadtree)
 		{
 			Quadtree->SetEnabled(true);
+			Quadtree->SetGeometricErrorScale(static_cast<double>(MeshParameters.Step));
 
 			// Da qui in poi "pronta per il disegno" vuol dire "ha la mesh":
 			// vedi UGeoQuadtreeSubsystem::SetRenderReadiness. La lambda cattura
@@ -117,7 +123,11 @@ void UGeoTerrainSubsystem::SetEnabled(bool bInEnabled)
 	}
 	else
 	{
-		if (Quadtree) { Quadtree->ClearRenderReadiness(); }
+		if (Quadtree)
+		{
+			Quadtree->ClearRenderReadiness();
+			Quadtree->SetGeometricErrorScale(1.0);
+		}
 		RebuildAll();
 	}
 }
@@ -281,9 +291,14 @@ void UGeoTerrainSubsystem::SynchroniseWithSelection()
 	// (Entrambi contano anche le mesh nascoste: esistono, occupano memoria.)
 	Stats.TriangoliTotali = Provider->GetRealizedTriangleCount();
 
-	// Stima: posizioni, normali e UV in float piu' gli indici.
+	// Stima della RAM, per triangolo, di una FDynamicMesh3: vertici in double,
+	// topologia (spigoli e loro riferimenti), sovrapposizioni di normali e UV.
+	// Fatti i conti struttura per struttura sono ~125 byte. La versione
+	// precedente contava 12 byte (solo le posizioni in float): dieci volte meno
+	// del vero, e il numero sull'overlay non spiegava la RAM "alle stelle".
+	constexpr double BytesPerTriangle = 125.0;
 	Stats.MemoriaGeometriaMB = static_cast<float>(
-		Stats.TriangoliTotali * (3.0 * 4.0) / (1024.0 * 1024.0));
+		Stats.TriangoliTotali * BytesPerTriangle / (1024.0 * 1024.0));
 	Stats.TempoCostruzioneMediaMs = (BuildCount > 0)
 		? static_cast<float>(TotalBuildSeconds / BuildCount * 1000.0) : 0.0f;
 }
@@ -484,6 +499,19 @@ void UGeoTerrainSubsystem::SetSkirtEnabled(bool bInSkirt)
 	RebuildAll();
 }
 
+void UGeoTerrainSubsystem::SetMeshStep(int32 InStep)
+{
+	// Solo divisori di 128 che abbiano senso: 1, 2, 4, 8.
+	const int32 Valid = (InStep == 1 || InStep == 2 || InStep == 4 || InStep == 8) ? InStep : 2;
+	if (MeshParameters.Step == Valid) { return; }
+	MeshParameters.Step = Valid;
+
+	// Il LOD deve sapere che una mesh col passo 2 sbaglia il doppio: altrimenti
+	// sceglierebbe le stesse tile di prima, con un quarto del dettaglio.
+	if (Quadtree && bTerrainEnabled) { Quadtree->SetGeometricErrorScale(static_cast<double>(Valid)); }
+	RebuildAll();
+}
+
 void UGeoTerrainSubsystem::SetFlipWinding(bool bInFlip)
 {
 	if (MeshParameters.bFlipWinding == bInFlip) { return; }
@@ -555,9 +583,16 @@ void UGeoTerrainSubsystem::DrawDebugOverlay()
 		: FString::Printf(TEXT("  (ne ho costruiti %d: geo.Terrain.Diag)"), Stats.TriangoliCostruiti);
 
 	Line(bGeometriaArrivata ? FColor::Green : FColor::Red,
-		FString::Printf(TEXT("Mesh          : %d a schermo + %d nascoste = %d / %d   triangoli nel renderer %d%s"),
+		FString::Printf(TEXT("Mesh          : %d a schermo + %d nascoste = %d / %d   passo %d%s"),
 			Stats.MeshVisibili, Stats.MeshNascoste, Stats.TileConGeometria, MeshBudget,
-			Stats.TriangoliTotali, *Discrepanza));
+			MeshParameters.Step, *Discrepanza));
+
+	// Il numero che serve per capire se il terreno sta chiedendo troppo: sopra i
+	// 5 milioni di triangoli un portatile comincia a soffrire.
+	const float MillionTriangles = static_cast<float>(Stats.TriangoliTotali) / 1.0e6f;
+	Line(MillionTriangles > 5.0f ? FColor::Red : (MillionTriangles > 3.0f ? FColor::Yellow : FColor::White),
+		FString::Printf(TEXT("Triangoli     : %.2f milioni in memoria, ~%.0f MB di RAM (stima)"),
+			MillionTriangles, Stats.MemoriaGeometriaMB));
 
 	// "Pronte" = hanno gia' la mesh. Adesso sotto il 100% vuol dire che si
 	// sta aspettando; previste basse in volo vuol dire che la costruzione non

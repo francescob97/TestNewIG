@@ -565,7 +565,7 @@ static FAutoConsoleCommandWithWorldAndArgs GeoTerrainEnableCommand(
 
 static FAutoConsoleCommandWithWorldAndArgs GeoTerrainWireframeCommand(
 	TEXT("geo.Terrain.Wireframe"),
-	TEXT("geo.Terrain.Wireframe <0|1> - mostra il reticolo dei triangoli."),
+	TEXT("geo.Terrain.Wireframe <0|1> - mostra il reticolo dei triangoli. Costa: lascialo spento per misurare."),
 	FConsoleCommandWithWorldAndArgsDelegate::CreateStatic(
 		[](const TArray<FString>& Args, UWorld* World)
 	{
@@ -1005,6 +1005,83 @@ static FAutoConsoleCommandWithWorldAndArgs GeoTerrainThreadsCommand(
 			TEXT("Costruzioni in parallelo: %d (il doppio in riscaldamento)"), Terrain->GetBuildsInFlight()));
 	}));
 
+// --- geo.Lod.OutOfView ------------------------------------------------------
+static FAutoConsoleCommandWithWorldAndArgs GeoLodOutOfViewCommand(
+	TEXT("geo.Lod.OutOfView"),
+	TEXT("geo.Lod.OutOfView <fattore> - meno dettaglio fuori dalla vista: 1 = uguale ovunque, 4 = default."),
+	FConsoleCommandWithWorldAndArgsDelegate::CreateStatic(
+		[](const TArray<FString>& Args, UWorld* World)
+	{
+		UGeoQuadtreeSubsystem* Quadtree = GeoLodConsole::Get(World);
+		if (!Quadtree) { return; }
+		if (Args.Num() >= 1) { Quadtree->SetOutOfViewErrorFactor(FCString::Atod(*Args[0])); }
+		GeoTerrainConsole::Report(FString::Printf(
+			TEXT("Fuori dalla vista: errore tollerato x%.1f  (1 = tutto uguale, costa ~3 volte la memoria)"),
+			Quadtree->GetOutOfViewErrorFactor()));
+	}));
+
+// --- geo.Terrain.MeshStep ---------------------------------------------------
+static FAutoConsoleCommandWithWorldAndArgs GeoTerrainMeshStepCommand(
+	TEXT("geo.Terrain.MeshStep"),
+	TEXT("geo.Terrain.MeshStep <1|2|4|8> - un post ogni N nella mesh di una tile (default 2)."),
+	FConsoleCommandWithWorldAndArgsDelegate::CreateStatic(
+		[](const TArray<FString>& Args, UWorld* World)
+	{
+		UGeoTerrainSubsystem* Terrain = GeoTerrainConsole::Get(World);
+		if (!Terrain) { return; }
+		if (Args.Num() >= 1) { Terrain->SetMeshStep(FCString::Atoi(*Args[0])); }
+		const int32 Step = Terrain->GetMeshStep();
+		const int32 Cells = 128 / Step;
+		GeoTerrainConsole::Report(FString::Printf(
+			TEXT("Passo della mesh: %d  (%dx%d post, %d triangoli per tile; il LOD lo compensa)"),
+			Step, Cells + 1, Cells + 1, Cells * Cells * 2));
+	}));
+
+// --- geo.Quality ------------------------------------------------------------
+//
+//  Un comando invece di sei. I due profili sono quelli misurati in
+//  docs/prova-torino-2.md: sopra Torino a 3 km, "portatile" tiene ~2,5 milioni
+//  di triangoli in memoria e ~1,5 a schermo; "workstation" circa il triplo.
+static FAutoConsoleCommandWithWorldAndArgs GeoQualityCommand(
+	TEXT("geo.Quality"),
+	TEXT("geo.Quality <portatile|workstation> - imposta insieme soglia, dettaglio fuori vista, passo, budget."),
+	FConsoleCommandWithWorldAndArgsDelegate::CreateStatic(
+		[](const TArray<FString>& Args, UWorld* World)
+	{
+		UGeoQuadtreeSubsystem* Quadtree = GeoLodConsole::Get(World);
+		UGeoTerrainSubsystem* Terrain = GeoTerrainConsole::Get(World);
+		if (!Quadtree || !Terrain) { return; }
+
+		const FString Profile = (Args.Num() >= 1) ? Args[0].ToLower() : FString();
+		if (Profile == TEXT("portatile"))
+		{
+			Quadtree->SetMaxScreenSpaceError(8.0);
+			Quadtree->SetOutOfViewErrorFactor(4.0);
+			Terrain->SetMeshStep(2);
+			Terrain->SetMeshBudget(600);
+			Terrain->SetBuildsInFlight(4);
+			Terrain->SetWarmupTilesPerFrame(8);
+		}
+		else if (Profile == TEXT("workstation"))
+		{
+			Quadtree->SetMaxScreenSpaceError(4.0);
+			Quadtree->SetOutOfViewErrorFactor(1.0);
+			Terrain->SetMeshStep(2);
+			Terrain->SetMeshBudget(3000);
+			Terrain->SetBuildsInFlight(8);
+			Terrain->SetWarmupTilesPerFrame(16);
+		}
+		else
+		{
+			GeoTerrainConsole::Report(TEXT("Uso: geo.Quality portatile | workstation"), FColor::Yellow);
+		}
+
+		GeoTerrainConsole::Report(FString::Printf(
+			TEXT("Soglia %.0f px, fuori vista x%.0f, passo %d, budget %d mesh, %d costruzioni in parallelo"),
+			Quadtree->GetMaxScreenSpaceError(), Quadtree->GetOutOfViewErrorFactor(),
+			Terrain->GetMeshStep(), Terrain->GetMeshBudget(), Terrain->GetBuildsInFlight()));
+	}));
+
 // --- geo.Terrain.Warmup -----------------------------------------------------
 static FAutoConsoleCommandWithWorldAndArgs GeoTerrainWarmupCommand(
 	TEXT("geo.Terrain.Warmup"),
@@ -1247,18 +1324,19 @@ static FAutoConsoleCommandWithWorldAndArgs GeoTerrainDemoCommand(
 		Terrain->SetEnabled(true);
 		Terrain->SetDebugOverlayEnabled(true);
 
-		// WIREFRAME ACCESO AL PRIMO AVVIO, di proposito.
-		// Il materiale di base e' una superficie grigia senza texture: illuminata
-		// solo dalla luce del cielo riempie lo schermo di un azzurrino uniforme,
-		// indistinguibile dal cielo vuoto. Il reticolo dei triangoli invece non
-		// si confonde con niente. Si spegne con geo.Terrain.Wireframe 0.
-		Terrain->SetWireframe(true);
+		// WIREFRAME SPENTO. La prima versione lo accendeva "per vedere il
+		// terreno grigio contro il cielo". Alla prima prova su un portatile era
+		// diventato il problema: una passata di disegno in piu' su milioni di
+		// triangoli, e uno schermo pieno di "una miriade di poligoni" che faceva
+		// sembrare il LOD rotto. Il terreno grigio si distingue dal cielo con la
+		// nebbia spenta (r.Fog 0) o con le ortofoto; il reticolo resta a un
+		// comando di distanza.
+		Terrain->SetWireframe(false);
 
 		GeoTerrainConsole::Report(FString::Printf(
 			TEXT("Terreno attivo su '%s'. Quota 6 km sul centro del dataset."),
 			*Dataset.GetDatasetName()));
-		GeoTerrainConsole::Report(TEXT("Wireframe acceso: il terreno grigio senza texture si confonde col cielo."));
-		GeoTerrainConsole::Report(TEXT("Spegnilo quando lo vedi: geo.Terrain.Wireframe 0"));
+		GeoTerrainConsole::Report(TEXT("Per vedere i triangoli: geo.Terrain.Wireframe 1 (costa: ridisegna ogni triangolo)."));
 		GeoTerrainConsole::Report(TEXT("Scendi di quota: la geometria si raffina da sola."));
 		GeoTerrainConsole::Report(TEXT("Per capire cosa fanno le gonne: geo.Terrain.Skirt 0"));
 		GeoTerrainConsole::Report(TEXT("Se non vedi niente, in quest'ordine:"), FColor::Yellow);

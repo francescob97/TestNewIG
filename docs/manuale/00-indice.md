@@ -171,7 +171,7 @@ separati:**
 | **Ponte Unreal** | tutto il resto | Subsystem, componenti, attori, comandi | No |
 
 Lo strato puro non include **nessun** header di Unreal. È C++ standard, che si
-compila con qualunque compilatore. Questo ha permesso di verificare 213 test
+compila con qualunque compilatore. Questo ha permesso di verificare 224 test
 della matematica in un ambiente dove Unreal non c'era affatto.
 
 > 💡 **Esempio.** La conversione da latitudine/longitudine a coordinate

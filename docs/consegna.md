@@ -17,14 +17,15 @@ Ultimo aggiornamento: 2026-09-20. Branch: `claude/charming-goodall-xd2r3g`.
 | 6 | Ortofoto drappeggiate | **codice completo, mai compilato in UE** |
 | 7 | Entità e interoperabilità (CIGI, DIS, HLA, memoria condivisa) | **solo design** |
 | dopo | **Residenza**: selezione indipendente dalla vista, precarico da posizione e velocità, mesh nascoste | **codice completo, mai compilato in UE** — `docs/residenza-design.md` |
+| dopo | **Seconda prova**: soglia 8 px, mesh a passo 2, meno dettaglio fuori vista, wireframe spento: da 18 a 2,5 milioni di triangoli | **codice completo, da riprovare** — `docs/prova-torino-2.md` |
 | dopo | **Prima prova su Torino**: materiale corretto, scene Sentinel, mipmap, mesh su thread, tutta Italia | **codice completo, da ricompilare e riprovare** — `docs/prova-torino.md` |
 
 **Avvertenza sul C++:** nessuna riga di C++ di questo progetto e' mai stata
 compilata con Unreal Engine. L'ambiente in cui e' stato scritto e' Linux senza
 il motore. Quello che **e'** stato verificato:
 
-* tutta la matematica pura, con test numerici eseguiti: **213 test C++** in
-  totale (37 Fase 1 + 22 Fase 3 + 74 Fase 4 e residenza + 28 Fase 5 + 52
+* tutta la matematica pura, con test numerici eseguiti: **224 test C++** in
+  totale (37 Fase 1 + 22 Fase 3 + 79 Fase 4 e residenza + 34 Fase 5 + 52
   Fase 6), piu' 90 test Python;
 * le convenzioni UE controllate staticamente (bilanciamento parentesi,
   posizione dei `.generated.h`, guardie `WITH_EDITOR`, macro di export);
@@ -124,6 +125,9 @@ geo.Terrain.MeshBudget <N>     mesh tenute costruite, visibili + nascoste (defau
 geo.Terrain.Warmup <N>         mesh consegnate per frame dopo un salto (default 16; 0 = spento)
 geo.Terrain.Shadows <0|1>      ombre del terreno (default 0: le foto le hanno gia', e costano)
 geo.Terrain.Threads <N>        mesh in costruzione sui thread di lavoro (default 6)
+geo.Terrain.MeshStep <1|2|4>   un post ogni N nella mesh (default 2)
+geo.Lod.OutOfView <fattore>    meno dettaglio fuori vista (default 4; 1 = uguale ovunque)
+geo.Quality <portatile|workstation>  tutte le manopole insieme
 
 geo.Terrain.Demo <cartella>    apre un dataset e disegna il terreno vero
 geo.Terrain.Enable <0|1>       costruzione della geometria
@@ -459,6 +463,7 @@ Limitazioni note, lasciate aperte di proposito:
 | Manuale di studio: tutto il progetto spiegato, capitolo per capitolo | `docs/manuale/00-indice.md` |
 | Residenza: cosa tenere pronto, design e motivazioni | `docs/residenza-design.md` |
 | Prima prova su Torino: mosaico, prestazioni, tutta Italia | `docs/prova-torino.md` |
+| Seconda prova: troppi triangoli, i numeri delle manopole | `docs/prova-torino-2.md` |
 | Verifica della residenza in Unreal | `docs/residenza-verifica.md` |
 | Programma delle sei fasi | `docs/programma.md` |
 | Da dove vengono i dati, licenze, ortofoto | `docs/dati.md` |

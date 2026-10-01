@@ -119,6 +119,33 @@ namespace GeoWorld::Quadtree
 		 *  suoi test lo presuppongono; il subsystem lo mette a false.
 		 */
 		bool bFrustumCulling = true;
+
+		/**
+		 * Quanto si tollera di piu', in errore su schermo, FUORI dalla vista.
+		 *
+		 * Con la selezione vista-indipendente le tile dietro la camera erano
+		 * dettagliate quanto quelle davanti: tre volte la memoria per cose che
+		 * nessuno guarda. Con un fattore 4 dietro si tengono tile ~4 volte
+		 * piu' grossolane per lato (circa 16 volte meno triangoli): girando la
+		 * testa c'e' SUBITO terreno (grossolano), e il dettaglio arriva in una
+		 * frazione di secondo, perche' le mesh si costruiscono sui thread di
+		 * lavoro. 1 = come prima, tutto uguale in ogni direzione.
+		 *
+		 * "Fuori dalla vista" si decide con il frustum allargato del margine
+		 * (FrustumMarginFactor): il bordo dello schermo resta dettagliato.
+		 * Vale solo se bFrustumCulling e' falso; altrimenti cio' che e' fuori
+		 * non viene selezionato affatto.
+		 */
+		double OutOfViewErrorFactor = 1.0;
+
+		/**
+		 * Moltiplica l'errore geometrico di ogni livello. Serve quando la mesh
+		 * di una tile NON usa tutti i suoi 129x129 post: con un post ogni 2,
+		 * il passo della mesh e' il doppio, e l'errore che si commette pure.
+		 * Senza questo fattore il LOD crederebbe di avere piu' dettaglio di
+		 * quanto ne disegni davvero. Vedi FTileMeshParameters::Step.
+		 */
+		double GeometricErrorScale = 1.0;
 	};
 
 	/** Una tile scelta per il disegno. */
