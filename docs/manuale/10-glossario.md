@@ -6,6 +6,10 @@
 
 Termini in ordine alfabetico. Tra parentesi, il capitolo dove sono spiegati.
 
+**Alfa premoltiplicato** — un'immagine trasparente il cui colore è già moltiplicato per la
+copertura. Le medie fra pixel (mipmap, filtro bilineare) vengono giuste; in alfa normale i
+bordi si scurirebbero. Le strade sono così. (12)
+
 **Antenato** — la tile di un livello più grossolano che contiene una tile data.
 L'antenato di livello `La` di `(L, X, Y)` è `(La, X >> d, Y >> d)` con `d = L − La`. (7)
 
@@ -23,6 +27,9 @@ se è visibile. (1, 6)
 
 **Bowring** — formula approssimata (1976) per passare da ECEF a latitudine,
 longitudine, quota in un passo solo. Qui con una raffinazione. (2)
+
+**Buffer (di una tile vettoriale)** — quanto le linee escono dalla tile: un ottavo del
+lato. Serve perché una strada larga lungo il bordo compaia anche nella tile accanto. (12)
 
 **Build unity** — Unreal compila più `.cpp` dello stesso modulo come un file solo,
 per fare prima. Fa scontrare le funzioni omonime nei namespace anonimi. (1)
@@ -76,6 +83,9 @@ che nessuno usa più. Vede solo i riferimenti che conosce. (1)
 
 **GDAL** — la libreria standard per leggere e trasformare dati geografici. (3)
 
+**Geofabrik** — chi ripubblica ogni giorno OpenStreetMap tagliato per nazione e regione, in
+`.osm.pbf`. Da lì scarica `fetch-osm`. (12)
+
 **Geoide** — la superficie del livello medio del mare, irregolare. (3)
 
 **Gonna** (*skirt*) — striscia verticale che scende dal bordo di una tile, per
@@ -127,6 +137,9 @@ della Terra. (2)
 
 **Ondulazione** (`N`) — la differenza fra geoide ed ellissoide. In Italia fra +42
 e +52 m. (3)
+
+**OpenStreetMap (OSM)** — la mappa libera del mondo fatta dai volontari: strade, ferrovie,
+edifici, boschi, acqua. Licenza ODbL, da citare. Fonte della Fase 8 e delle successive. (12)
 
 **Ortofoto** — immagine aerea o satellitare raddrizzata, in cui ogni pixel sta alla
 sua coordinata. (7)
@@ -187,6 +200,9 @@ testabile e codice che usa il motore. (0)
 
 **Tile** — un pezzo quadrato della piramide: 129 × 129 quote o 256 × 256 pixel. (3, 7)
 
+**Tile vettoriale** (`.gvt`) — una tile che contiene linee (punti e proprietà) invece di
+pixel. Il runtime le disegna alla risoluzione che serve. Livelli 10..13. (12)
+
 **TINITALY** — il modello del terreno dell'Italia a 10 m dell'INGV. (3)
 
 **UBT / UHT** — Unreal Build Tool e Unreal Header Tool: compilano e generano codice. (1)
@@ -196,6 +212,9 @@ A 6.371 km è 64 cm, a 10 km è 0,6 mm. (2)
 
 **UObject** — la classe base universale di Unreal, con riflessione e garbage
 collector. (1)
+
+**Vestitore** — chi mette qualcosa sopra il terreno e decide quando una tile è pronta da
+mostrare: le ortofoto e le strade. Il terreno ne accetta più d'uno, per nome. (11, 12)
 
 **Vista-indipendente** — selezione che dipende solo dalla posizione della camera, non dalla direzione: il frustum lo applica il renderer di Unreal. È il default. (11)
 
@@ -336,6 +355,8 @@ il primo comando da provare quando non si vede niente. (6)
 | `docs/faseN-design.md` | decisioni e motivazioni, fase per fase |
 | `docs/faseN-verifica.md` | come verificare, fase per fase |
 | `docs/fase7-design.md` | entità e interoperabilità (solo design) |
+| `docs/fase8-design.md` | strade, ferrovie, piste; il programma delle fasi 8–12 |
+| `docs/fase8-verifica.md` | come provare le strade |
 | `docs/residenza-design.md` | cosa tenere pronto: posizione, velocità, mesh nascoste |
 | `docs/residenza-verifica.md` | come verificare la residenza |
 | `docs/prova-torino.md` | la prima prova vera: cause del mosaico, prestazioni, tutta Italia |

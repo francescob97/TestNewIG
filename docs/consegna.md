@@ -1,7 +1,7 @@
 # GeoWorld — documento di consegna
 
 Tutto quello che serve per riprendere il lavoro da solo.
-Ultimo aggiornamento: 2026-09-20. Branch: `claude/charming-goodall-xd2r3g`.
+Ultimo aggiornamento: 2026-10-02. Branch: `claude/charming-goodall-xd2r3g`.
 
 ---
 
@@ -16,6 +16,8 @@ Ultimo aggiornamento: 2026-09-20. Branch: `claude/charming-goodall-xd2r3g`.
 | 5 | Mesh, gonne, terreno a schermo | **codice completo, mai compilato in UE** |
 | 6 | Ortofoto drappeggiate | **codice completo, mai compilato in UE** |
 | 7 | Entità e interoperabilità (CIGI, DIS, HLA, memoria condivisa) | **solo design** |
+| 8 | **Strade, ferrovie, piste** da OpenStreetMap, disegnate sul terreno | **codice completo, mai compilato in UE**; pipeline provata su OSM sintetico — `docs/fase8-design.md`, `docs/fase8-verifica.md` |
+| 9–12 | Acqua; edifici e monumenti; vegetazione; atmosfera, cielo, nuvole e luce | **da fare** — programma in `docs/fase8-design.md`, sezione 0 |
 | dopo | **Residenza**: selezione indipendente dalla vista, precarico da posizione e velocità, mesh nascoste | **codice completo, mai compilato in UE** — `docs/residenza-design.md` |
 | dopo | **Terza prova**: niente flash grigi (tile mostrate solo vestite), isteresi sul LOD, nuvole tolte con la maschera SCL | **codice completo, da riprovare** — `docs/prova-torino-3.md` |
 | dopo | **Seconda prova**: soglia 8 px, mesh a passo 2, meno dettaglio fuori vista, wireframe spento: da 18 a 2,5 milioni di triangoli | **codice completo, da riprovare** — `docs/prova-torino-2.md` |
@@ -25,9 +27,9 @@ Ultimo aggiornamento: 2026-09-20. Branch: `claude/charming-goodall-xd2r3g`.
 compilata con Unreal Engine. L'ambiente in cui e' stato scritto e' Linux senza
 il motore. Quello che **e'** stato verificato:
 
-* tutta la matematica pura, con test numerici eseguiti: **229 test C++** in
-  totale (37 Fase 1 + 22 Fase 3 + 79 Fase 4 e residenza + 34 Fase 5 + 52
-  Fase 6), piu' 120 test Python;
+* tutta la matematica pura, con test numerici eseguiti: **271 test C++** in
+  totale (37 Fase 1 + 22 Fase 3 + 84 Fase 4 e residenza + 34 Fase 5 + 52
+  Fase 6 + 42 Fase 8), piu' 148 test Python;
 * le convenzioni UE controllate staticamente (bilanciamento parentesi,
   posizione dei `.generated.h`, guardie `WITH_EDITOR`, macro di export);
 * il formato dei file, letto dal codice C++ vero contro un dataset vero.
@@ -63,7 +65,12 @@ python run.py check-env                              :: SEMPRE per primo
 python run.py fetch --area test -o dati/copernicus   :: DEM libero, 19 MB
 python run.py build -i "dati/copernicus/*.tif" -o dataset/test
 python run.py verify -o dataset/test
-python -m unittest discover -s tests                 :: 120 test
+python -m unittest discover -s tests                 :: 148 test
+
+:: Fase 8: strade su Torino (dettagli in docs/fase8-verifica.md)
+python run.py fetch-osm --area torino -o dati/osm
+python run.py build-roads -i dati/osm/nord-ovest-latest.osm.pbf -o dataset/strade_torino --bbox 7.55 45.00 7.80 45.15
+python run.py verify-roads -o dataset/strade_torino
 ```
 
 `check-env` e' l'unico comando che sta fra te e un dataset sbagliato di 48
@@ -80,6 +87,7 @@ build\Debug\geotiles_tests.exe dataset\test         :: 22 test
 build\Debug\geoquadtree_tests.exe                   :: 84 test
 build\Debug\geomesh_tests.exe                       :: 34 test
 build\Debug\geoimagery_tests.exe                    :: 52 test
+build\Debug\georoads_tests.exe                      :: 42 test (dalla radice del repository)
 Plugins\GeoWorld\Tools\CheckSourceDiscipline.sh      :: serve bash (Git Bash)
 ```
 
@@ -144,7 +152,17 @@ geo.Imagery.Enable <0|1>       drappeggio
 geo.Imagery.Checker <0|1>      scacchiera: e' cosi' che si verificano le UV
 geo.Imagery.Budget <N>         texture create per frame
 geo.Imagery.Stats              statistiche del drappeggio
-geo.Imagery.CreateMaterial     costruisce M_GeoTerrain (solo editor)
+geo.Imagery.CreateMaterial     costruisce M_GeoTerrain (solo editor) -- RIFALLO dopo la Fase 8
+
+geo.Roads.Demo <q> <o|-> <s>   terreno, ortofoto (o "-") e strade, in un colpo
+geo.Roads.Open <cartella>      apre un dataset di strade (python run.py build-roads)
+geo.Roads.Enable <0|1>         strade, ferrovie e piste sul terreno
+geo.Roads.Style <realistico|mappa>  colori veri o da carta stradale (per l'allineamento)
+geo.Roads.Resolution <b> [f]   pixel per tile; f per il livello piu' profondo del terreno
+geo.Roads.Budget <MB>          memoria video per le strade
+geo.Roads.Strength <0..1>      quanto si vedono sopra la foto
+geo.Roads.Debug <0|1>          overlay delle strade
+geo.Roads.Stats                statistiche delle strade
 ```
 
 Se hai un dataset e vuoi vedere subito qualcosa, il comando e'

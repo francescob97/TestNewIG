@@ -107,6 +107,19 @@ python run.py inspect dataset/14/17525/4389.ght
 python run.py test-vectors -o vettori.json   :: riferimento per il C++
 ```
 
+### Strade, ferrovie, piste (Fase 8)
+
+```bat
+python run.py fetch-osm --area torino -o dati/osm           :: estratto OSM da Geofabrik
+python run.py build-roads -i dati/osm/nord-ovest-latest.osm.pbf -o dataset/strade_torino --bbox 7.55 45.00 7.80 45.15
+python run.py verify-roads -o dataset/strade_torino
+python run.py inspect-roads dataset/strade_torino/13/8538/2044.gvt
+```
+
+Tre stadi (estrai, taglia, indici), riavviabili; il taglio va in parallelo
+(`--jobs`). Serve GDAL con il driver OSM e GEOS: `check-env` lo dice. Le
+decisioni sono in `docs/fase8-design.md`.
+
 ## Stadi
 
 | # | Stadio | Produce |

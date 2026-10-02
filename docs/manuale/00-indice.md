@@ -48,9 +48,11 @@ Due convenzioni tipografiche:
 | 9 | `09-errori-e-lezioni.md` | Gli errori fatti, e cosa insegnano |
 | 10 | `10-glossario.md` | Glossario e mappa completa dei file |
 | 11 | `11-residenza.md` | Dopo le sei fasi — Cosa tenere pronto: posizione, velocità, mesh nascoste |
+| 12 | `12-strade.md` | Fase 8 — Strade, ferrovie e piste: i dati vettoriali |
 
 La Fase 7 (entità, CIGI, DIS, HLA) è solo progettata: la trovi in
-`docs/fase7-design.md`.
+`docs/fase7-design.md`. Il programma dalla Fase 8 alla 12 (strade, acqua,
+edifici, vegetazione, atmosfera) è nella sezione 0 di `docs/fase8-design.md`.
 
 Il capitolo 11 è arrivato dopo le sei fasi e **cambia** alcune scelte dei
 capitoli 4, 5 e 6 (selezione senza frustum, mesh tenute nascoste, orizzonte

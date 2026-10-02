@@ -433,10 +433,16 @@ void UGeoRoadsSubsystem::Synchronise()
 			// buchi, niente lampi.
 			const bool bStale = (Own->Generation != Generation)
 				|| (Own->Texture.IsValid() && Own->Size != Size);
-			if (bStale && !InFlight.Contains(Packed) && !PendingUploads.Contains(Packed)
-			    && InFlight.Num() < MaxJobsInFlight && Streaming->FindLoadedTile(VectorKey))
+			if (bStale && !InFlight.Contains(Packed) && !PendingUploads.Contains(Packed))
 			{
-				LaunchJob(Key, static_cast<uint32>(VectorLevel), Size);
+				if (!Streaming->FindLoadedTile(VectorKey))
+				{
+					Streaming->RequestTile(VectorKey, 2);
+				}
+				else if (InFlight.Num() < MaxJobsInFlight)
+				{
+					LaunchJob(Key, static_cast<uint32>(VectorLevel), Size);
+				}
 			}
 
 			if (!Own->Texture.IsValid())

@@ -34,6 +34,13 @@ Il progetto `TestNewIG` e' un guscio vuoto: tutto il codice vive in
 - [x] **Fase 6** — ortofoto drappeggiate *(mai compilata in UE)*
 - [ ] Fase 7 — entità e interoperabilità (CIGI, DIS, HLA, memoria condivisa)
       *(solo design: `docs/fase7-design.md`)*
+- [x] **Fase 8** — strade, ferrovie e piste da OpenStreetMap *(mai compilata in UE;
+      `docs/fase8-design.md`, prova: `docs/fase8-verifica.md`)*
+- [ ] Fase 9 — acqua: mare, laghi, fiumi
+- [ ] Fase 10 — edifici e monumenti
+- [ ] Fase 11 — vegetazione
+- [ ] Fase 12 — atmosfera, cielo, nuvole e luce
+      *(il perché di quest'ordine: `docs/fase8-design.md`, sezione 0)*
 
 ## Formato dei dati
 
@@ -46,6 +53,7 @@ Il progetto `TestNewIG` e' un guscio vuoto: tutto il codice vive in
 | Manifest | `<root>/manifest.json`, metadati globali |
 | Quote | **ellissoidiche** WGS84 (ortometriche del sorgente + ondulazione del geoide) |
 | Ortofoto | piramide **separata**, stesso tiling; 256x256 pixel registrati sulle AREE (nessuna sovrapposizione), payload JPEG |
+| Strade | tile **vettoriali** `.gvt`, stesso tiling, livelli 10..13; linee in int16 locali (extent 16384, buffer 1/8), disegnate a runtime |
 
 Dettagli e motivazioni in `docs/fase2-design.md`.
 
@@ -70,6 +78,7 @@ cmake --build build
 ./build/geoquadtree_tests    # 84 test  -- LOD, culling, orizzonte, residenza
 ./build/geomesh_tests        # 34 test  -- mesh, gonne, giunzioni, passo
 ./build/geoimagery_tests     # 52 test  -- drappeggio, formato immagine, mipmap
+./build/georoads_tests       # 42 test  -- strade: formato .gvt, larghezze misurate, ritagli
 
 ./Plugins/GeoWorld/Tools/CheckSourceDiscipline.sh
 python3 Plugins/GeoWorld/Tools/CheckShadowedParameters.py
@@ -83,7 +92,7 @@ le classi di errore di compilazione gia' incontrate su Windows -- shadowing,
 simboli non esportati fra moduli, tipi di comando console inesistenti,
 collisioni da build unity, metodi inesistenti chiamati sulle nostre classi.
 
-229 test C++ in totale, piu' 120 test Python della pipeline.
+271 test C++ in totale, piu' 148 test Python della pipeline.
 
 **Dopo la prima prova su Torino** (materiale, scene Sentinel, prestazioni): `docs/prova-torino.md`.
 **Dopo la seconda** (troppi triangoli, RAM): `docs/prova-torino-2.md`.
@@ -106,7 +115,7 @@ python run.py verify-imagery -o dataset/ortofoto
 python run.py fetch --area italia -o dati/copernicus_italia
 python run.py fetch-imagery --area italia -o dati/sentinel_italia --dry-run
 
-python -m unittest discover -s tests               :: 120 test, sorgente sintetico
+python -m unittest discover -s tests               :: 148 test, sorgente sintetico
 ```
 
 Su Windows serve conda: vedi `Pipeline/README.md`.
@@ -118,7 +127,8 @@ Quadro d'insieme delle sei fasi: `docs/programma.md`.
 ## Verifica in Unreal
 
 Vedi `docs/fase1-verifica.md`, `docs/fase2-verifica.md`, `docs/fase3-verifica.md`,
-`docs/fase4-verifica.md`, `docs/fase5-verifica.md` e `docs/fase6-verifica.md`.
+`docs/fase4-verifica.md`, `docs/fase5-verifica.md`, `docs/fase6-verifica.md` e
+`docs/fase8-verifica.md`.
 
 Scorciatoie: `geo.Terrain.Demo <quote>` per il terreno,
 `geo.Imagery.Demo <quote> <ortofoto>` per il terreno vestito.

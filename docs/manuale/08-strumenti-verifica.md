@@ -35,6 +35,7 @@ build\Debug\geotiles_tests.exe  [cartella di un dataset, facoltativa]
 build\Debug\geoquadtree_tests.exe
 build\Debug\geomesh_tests.exe
 build\Debug\geoimagery_tests.exe
+build\Debug\georoads_tests.exe      (dalla radice del repository: legge TestData/vector_fixture.gvt)
 ```
 
 Durano meno di un secondo in tutto. Non serve Unreal: sono programmi C++ normali,
@@ -49,7 +50,8 @@ che includono gli header dello strato puro.
 | `geoquadtree_tests` | 42 | volume, frustum, margine, orizzonte, errore su schermo, selezione, niente buchi |
 | `geomesh_tests` | 28 | conteggi, precisione del frame locale, normali, gonne, **giunzioni in ECEF** |
 | `geoimagery_tests` | 44 | ritaglio contro la geografia, scelta dell'antenato, formato `.gim`, cache template |
-| **Totale** | **169** | |
+| `georoads_tests` | 42 | formato `.gvt` letto da un file della pipeline, larghezze delle strade **misurate** in metri, figlie uguali ai quarti della madre (Fase 8) |
+| **Totale** | **211** | conteggi al momento della scrittura di questo capitolo; quelli aggiornati sono nel README |
 
 ### Un test che conta più degli altri
 
@@ -235,6 +237,7 @@ trovato.** Il capitolo 9 li racconta tutti.
 | `Tools/StandaloneTests/geoquadtree_main.cpp` | test del quadtree |
 | `Tools/StandaloneTests/geomesh_main.cpp` | test della mesh |
 | `Tools/StandaloneTests/geoimagery_main.cpp` | test delle ortofoto |
+| `Tools/StandaloneTests/georoads_main.cpp` | test delle strade (Fase 8) |
 | `Tools/CheckSourceDiscipline.sh` | le cinque regole |
 | `Tools/CheckShadowedParameters.py` | regola 2 |
 | `Tools/CheckModuleExports.py` | regola 3 |
