@@ -191,6 +191,34 @@ public:
 	virtual bool IsTileDraped(const GeoWorld::Tiles::FTileKey& Key) const = 0;
 
 	/**
+	 * Mette sopra l'ortofoto una seconda immagine trasparente: le strade, le
+	 * ferrovie e le piste della Fase 8.
+	 *
+	 * La texture e' in alfa PREMOLTIPLICATO (vedi Roads/RoadRasterizer.h) e il
+	 * materiale la compone cosi':  colore = foto * (1 - alfa) + strade.
+	 * `Window` ha lo stesso significato del drappeggio: identita' quando la
+	 * texture e' stata disegnata per questa tile, un ritaglio quando e' quella
+	 * di un antenato, usata in attesa della propria.
+	 *
+	 * Passare `nullptr` toglie le strade dalla tile.
+	 */
+	virtual void SetTileOverlay(const GeoWorld::Tiles::FTileKey& Key,
+	                            UTexture2D* Texture,
+	                            const GeoWorld::Imagery::FDrapeTransform& Window) = 0;
+
+	/** Questa tile ha le strade addosso (proprie o di un antenato)? */
+	virtual bool IsTileOverlaid(const GeoWorld::Tiles::FTileKey& Key) const = 0;
+
+	/** Quante tile hanno le strade addosso. */
+	virtual int32 GetOverlaidTileCount() const = 0;
+
+	/** Quanto si vedono le strade: 0 = per niente, 1 = come disegnate. Vale per tutte. */
+	virtual void SetOverlayStrength(float Strength) = 0;
+
+	/** Come GetMaterialProblem, per i parametri delle strade (vuota se a posto). */
+	virtual FString GetOverlayMaterialProblem() const { return FString(); }
+
+	/**
 	 * Un problema noto del materiale del drappeggio, da mostrare a schermo, o
 	 * stringa vuota. Esiste perche' un materiale sbagliato non da' errori: da'
 	 * un'immagine sbagliata, e il primo sospettato non e' mai il materiale.

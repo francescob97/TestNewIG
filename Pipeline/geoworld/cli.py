@@ -36,6 +36,9 @@ import time
 from . import __version__, tiling, tileformat, geoid, environment, fetch as fetch_module, manifest as manifest_module
 from . import (fetchimagery, imagecut, imageformat, imagerybuild,
                imagerymanifest)
+# Fase 8: le linee (strade, ferrovie, piste). Moduli che importano GDAL e
+# numpy solo dentro le funzioni, come gli altri.
+from . import fetchosm, roadclasses, vectorbuild, vectorformat
 from .raster import (LevelGrid, level_grid_for_bbox, build_source_vrt, source_bounds_wgs84,
                      source_ground_resolution, check_level_is_feasible,
                      warp_and_convert_heights, reduce_level,
@@ -694,6 +697,69 @@ def command_verify_imagery(args: argparse.Namespace) -> int:
 
 
 
+# =============================================================================
+#  STRADE, FERROVIE, PISTE (Fase 8)
+#
+#  Terzo tipo di dataset, accanto a quote e ortofoto: tile VETTORIALI, che il
+#  runtime disegna sul terreno alla risoluzione che serve.
+# =============================================================================
+
+def command_fetch_osm(args: argparse.Namespace) -> int:
+    try:
+        path = fetchosm.fetch(args.area, args.output, dry_run=args.dry_run, report=log)
+    except (RuntimeError, ValueError, OSError) as error:
+        log(f"ERRORE: {error}")
+        return 1
+    if args.dry_run:
+        return 0
+
+    bbox = fetchosm.AREAS[args.area][1]
+    log("")
+    log("Da dare in pasto alla pipeline:")
+    cut = f" --bbox {bbox[0]} {bbox[1]} {bbox[2]} {bbox[3]}" if bbox else ""
+    log(f"  python run.py build-roads -i {path} -o dataset/strade_{args.area}{cut}")
+    return 0
+
+
+def command_build_roads(args: argparse.Namespace) -> int:
+    bbox = tuple(args.bbox) if args.bbox else None
+    try:
+        vectorbuild.build(inputs=args.input, output=args.output, work=args.work,
+                          name=args.name, bbox=bbox, min_level=args.min_level,
+                          max_level=args.max_level, jobs=args.jobs, report=log)
+    except (FileNotFoundError, RuntimeError, ValueError) as error:
+        log(f"ERRORE: {error}")
+        return 1
+    return 0
+
+
+def command_verify_roads(args: argparse.Namespace) -> int:
+    try:
+        problems = vectorbuild.verify(args.output, report=log)
+    except FileNotFoundError as error:
+        log(f"ERRORE: {error}")
+        return 1
+    return 0 if problems == 0 else 1
+
+
+def command_inspect_roads(args: argparse.Namespace) -> int:
+    tile = vectorformat.read_tile(args.tile)
+    bounds = tiling.tile_bounds(tile.level, tile.x, tile.y)
+    log(f"tile    : livello {tile.level}, x={tile.x}, y={tile.y}")
+    log(f"bbox    : ovest {bounds.west:.6f}  sud {bounds.south:.6f}  "
+        f"est {bounds.east:.6f}  nord {bounds.north:.6f}")
+    log(f"linee   : {len(tile.features)}, punti {tile.point_count}, extent {tile.extent}, "
+        f"buffer {tile.buffer}")
+    counts: dict[int, int] = {}
+    for feature in tile.features:
+        counts[feature.class_id] = counts.get(feature.class_id, 0) + 1
+    for class_id, number in sorted(counts.items()):
+        name = roadclasses.BY_ID[class_id].name if class_id in roadclasses.BY_ID else "?"
+        log(f"  {name:14s} {number:6d}")
+    return 0
+
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="geoworld-pipeline",
@@ -849,6 +915,43 @@ def build_parser() -> argparse.ArgumentParser:
         "inspect-imagery", help="stampa il contenuto di una tile di immagine")
     inspect_img.add_argument("tile")
     inspect_img.set_defaults(func=command_inspect_imagery)
+
+    # --- Fase 8: strade, ferrovie, piste ---------------------------------
+    fetch_osm = subparsers.add_parser(
+        "fetch-osm", help="scarica un estratto OpenStreetMap da Geofabrik")
+    fetch_osm.add_argument("--area", default="torino", choices=sorted(fetchosm.AREAS),
+                           help="regione da scaricare (torino = nord-ovest, da tagliare)")
+    fetch_osm.add_argument("-o", "--output", required=True, help="cartella di destinazione")
+    fetch_osm.add_argument("--dry-run", action="store_true",
+                           help="dice solo quanto pesa, senza scaricare")
+    fetch_osm.set_defaults(func=command_fetch_osm)
+
+    build_roads = subparsers.add_parser(
+        "build-roads", help="da estratto OSM a tile vettoriali di strade e ferrovie")
+    build_roads.add_argument("-i", "--input", nargs="+", required=True,
+                             help="file .osm.pbf o .osm (accetta glob)")
+    build_roads.add_argument("-o", "--output", required=True, help="cartella radice del dataset")
+    build_roads.add_argument("--work", help="cartella degli intermedi (default: <output>/_work)")
+    build_roads.add_argument("--name", default="OpenStreetMap")
+    build_roads.add_argument("--bbox", nargs=4, type=float,
+                             metavar=("OVEST", "SUD", "EST", "NORD"),
+                             help="tiene solo le linee che toccano quest'area")
+    build_roads.add_argument("--min-level", type=int, default=vectorbuild.DEFAULT_MIN_LEVEL,
+                             help="primo livello (default 10, ~20 km: autostrade e ferrovie)")
+    build_roads.add_argument("--max-level", type=int, default=vectorbuild.DEFAULT_MAX_LEVEL,
+                             help="ultimo livello (default 13, ~2 km: tutto)")
+    build_roads.add_argument("--jobs", type=int, default=max(1, (os.cpu_count() or 2) // 2))
+    build_roads.set_defaults(func=command_build_roads)
+
+    verify_roads = subparsers.add_parser(
+        "verify-roads", help="controlla un dataset di strade gia' generato")
+    verify_roads.add_argument("-o", "--output", required=True)
+    verify_roads.set_defaults(func=command_verify_roads)
+
+    inspect_roads = subparsers.add_parser(
+        "inspect-roads", help="stampa il contenuto di una tile vettoriale")
+    inspect_roads.add_argument("tile")
+    inspect_roads.set_defaults(func=command_inspect_roads)
 
     return parser
 

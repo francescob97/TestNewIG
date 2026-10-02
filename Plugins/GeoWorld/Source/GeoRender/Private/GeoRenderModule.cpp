@@ -9,8 +9,10 @@
 #include "Georeference/GeoTransformComponent.h"
 #include "Imagery/GeoImagerySubsystem.h"
 #include "Lod/GeoQuadtreeSubsystem.h"
+#include "Roads/GeoRoadsSubsystem.h"
 #include "Terrain/GeoTerrainSubsystem.h"
 #include "Streaming/GeoImageryStreamingSubsystem.h"
+#include "Streaming/GeoVectorStreamingSubsystem.h"
 #include "Streaming/GeoTileStreamingSubsystem.h"
 #include "Georeference/GeoreferenceSubsystem.h"
 #include "Georeference/GeoPlaces.h"
@@ -1061,6 +1063,11 @@ static FAutoConsoleCommandWithWorldAndArgs GeoQualityCommand(
 			Terrain->SetMeshBudget(600);
 			Terrain->SetBuildsInFlight(4);
 			Terrain->SetWarmupTilesPerFrame(8);
+			if (UGeoRoadsSubsystem* Roads = World->GetSubsystem<UGeoRoadsSubsystem>())
+			{
+				Roads->SetResolution(256, 512);
+				Roads->SetVideoBudgetMB(384);
+			}
 		}
 		else if (Profile == TEXT("workstation"))
 		{
@@ -1070,6 +1077,11 @@ static FAutoConsoleCommandWithWorldAndArgs GeoQualityCommand(
 			Terrain->SetMeshBudget(3000);
 			Terrain->SetBuildsInFlight(8);
 			Terrain->SetWarmupTilesPerFrame(16);
+			if (UGeoRoadsSubsystem* Roads = World->GetSubsystem<UGeoRoadsSubsystem>())
+			{
+				Roads->SetResolution(512, 1024);
+				Roads->SetVideoBudgetMB(1536);
+			}
 		}
 		else
 		{
@@ -1344,4 +1356,251 @@ static FAutoConsoleCommandWithWorldAndArgs GeoTerrainDemoCommand(
 		GeoTerrainConsole::Report(TEXT("  geo.Terrain.Boxes 1  (scatole di debug sui bounds)"), FColor::Yellow);
 		GeoTerrainConsole::Report(TEXT("  r.Fog 0              (la nebbia cancella il terreno lontano)"), FColor::Yellow);
 		GeoTerrainConsole::Report(TEXT("  geo.Terrain.Diag     (i numeri del renderer)"), FColor::Yellow);
+	}));
+
+// ============================================================================
+//  STRADE, FERROVIE, PISTE (Fase 8) -- docs/fase8-design.md
+// ============================================================================
+
+namespace GeoRoadsConsole
+{
+	static UGeoRoadsSubsystem* Get(UWorld* World)
+	{
+		return World ? World->GetSubsystem<UGeoRoadsSubsystem>() : nullptr;
+	}
+
+	static UGeoVectorStreamingSubsystem* GetStreaming(UWorld* World)
+	{
+		return World ? World->GetSubsystem<UGeoVectorStreamingSubsystem>() : nullptr;
+	}
+
+	/** Apre il dataset e dice cosa c'e' dentro. Usato da Open e da Demo. */
+	static bool Open(UWorld* World, const FString& Directory)
+	{
+		UGeoVectorStreamingSubsystem* Streaming = GetStreaming(World);
+		UGeoRoadsSubsystem* Roads = Get(World);
+		if (!Streaming || !Roads) { return false; }
+
+		FString Error;
+		if (!Streaming->OpenDataset(Directory, Error))
+		{
+			GeoTerrainConsole::Report(FString::Printf(TEXT("Strade: %s"), *Error), FColor::Red);
+			return false;
+		}
+		// Le texture disegnate dal dataset di prima non valgono piu'.
+		Roads->InvalidateAll();
+
+		const FGeoVectorDataset& Dataset = Streaming->GetDataset();
+		double West, South, East, North;
+		Dataset.GetBoundingBox(West, South, East, North);
+		GeoTerrainConsole::Report(FString::Printf(
+			TEXT("Strade '%s': livelli %d..%d, %lld tile"),
+			*Dataset.GetDatasetName(), Dataset.GetMinLevel(), Dataset.GetMaxLevel(),
+			static_cast<long long>(Dataset.GetIndexedTileCount())));
+		GeoTerrainConsole::Report(FString::Printf(
+			TEXT("Area: ovest %.4f  sud %.4f  est %.4f  nord %.4f"), West, South, East, North));
+		if (!Dataset.GetClassWarning().IsEmpty())
+		{
+			GeoTerrainConsole::Report(Dataset.GetClassWarning(), FColor::Yellow);
+		}
+		return true;
+	}
+}
+
+static FAutoConsoleCommandWithWorldAndArgs GeoRoadsOpenCommand(
+	TEXT("geo.Roads.Open"),
+	TEXT("geo.Roads.Open <cartella> - apre un dataset di strade (python run.py build-roads)."),
+	FConsoleCommandWithWorldAndArgsDelegate::CreateStatic(
+		[](const TArray<FString>& Args, UWorld* World)
+	{
+		if (Args.Num() < 1)
+		{
+			GeoTerrainConsole::Report(TEXT("Uso: geo.Roads.Open <cartella del dataset>"), FColor::Red);
+			return;
+		}
+		GeoRoadsConsole::Open(World, Args[0]);
+	}));
+
+static FAutoConsoleCommandWithWorldAndArgs GeoRoadsEnableCommand(
+	TEXT("geo.Roads.Enable"),
+	TEXT("geo.Roads.Enable <0|1> - disegna strade, ferrovie e piste sul terreno."),
+	FConsoleCommandWithWorldAndArgsDelegate::CreateStatic(
+		[](const TArray<FString>& Args, UWorld* World)
+	{
+		UGeoRoadsSubsystem* Roads = GeoRoadsConsole::Get(World);
+		if (!Roads) { return; }
+		const bool bWas = Roads->IsEnabled();
+		const bool bValue = (Args.Num() >= 1) ? (FCString::Atoi(*Args[0]) != 0) : !bWas;
+		Roads->SetEnabled(bValue);
+		GeoTerrainConsole::Report(FString::Printf(TEXT("Strade: %s (era %s)"),
+			bValue ? TEXT("ON") : TEXT("OFF"), bWas ? TEXT("ON") : TEXT("OFF")));
+	}));
+
+static FAutoConsoleCommandWithWorldAndArgs GeoRoadsStyleCommand(
+	TEXT("geo.Roads.Style"),
+	TEXT("geo.Roads.Style <realistico|mappa> - colori veri, o da carta stradale per controllare l'allineamento."),
+	FConsoleCommandWithWorldAndArgsDelegate::CreateStatic(
+		[](const TArray<FString>& Args, UWorld* World)
+	{
+		UGeoRoadsSubsystem* Roads = GeoRoadsConsole::Get(World);
+		if (!Roads) { return; }
+		const FString Which = (Args.Num() >= 1) ? Args[0].ToLower() : FString();
+		if (Which == TEXT("mappa") || Which == TEXT("map"))
+		{
+			Roads->SetStyle(GeoWorld::Roads::ERoadStyle::Map);
+		}
+		else if (Which == TEXT("realistico") || Which == TEXT("realistic"))
+		{
+			Roads->SetStyle(GeoWorld::Roads::ERoadStyle::Realistic);
+		}
+		else
+		{
+			GeoTerrainConsole::Report(TEXT("Uso: geo.Roads.Style realistico | mappa"), FColor::Yellow);
+		}
+		GeoTerrainConsole::Report(FString::Printf(TEXT("Stile delle strade: %s"),
+			Roads->GetStyle() == GeoWorld::Roads::ERoadStyle::Map ? TEXT("mappa") : TEXT("realistico")));
+	}));
+
+static FAutoConsoleCommandWithWorldAndArgs GeoRoadsResolutionCommand(
+	TEXT("geo.Roads.Resolution"),
+	TEXT("geo.Roads.Resolution <base> [livello piu' fine] - pixel per tile (potenze di 2, 64..2048)."),
+	FConsoleCommandWithWorldAndArgsDelegate::CreateStatic(
+		[](const TArray<FString>& Args, UWorld* World)
+	{
+		UGeoRoadsSubsystem* Roads = GeoRoadsConsole::Get(World);
+		if (!Roads) { return; }
+		if (Args.Num() >= 1)
+		{
+			const int32 Base = FCString::Atoi(*Args[0]);
+			const int32 Finest = (Args.Num() >= 2) ? FCString::Atoi(*Args[1]) : Base * 2;
+			Roads->SetResolution(Base, Finest);
+		}
+		GeoTerrainConsole::Report(FString::Printf(
+			TEXT("Strade: %d pixel per tile, %d al livello piu' fine del terreno"),
+			Roads->GetBaseResolution(), Roads->GetFinestResolution()));
+		GeoTerrainConsole::Report(
+			TEXT("  Ogni raddoppio quadruplica la memoria video: guarda geo.Roads.Debug 1"), FColor::White);
+	}));
+
+static FAutoConsoleCommandWithWorldAndArgs GeoRoadsBudgetCommand(
+	TEXT("geo.Roads.Budget"),
+	TEXT("geo.Roads.Budget <MB> - memoria video massima per le strade (le tile a schermo l'hanno sempre)."),
+	FConsoleCommandWithWorldAndArgsDelegate::CreateStatic(
+		[](const TArray<FString>& Args, UWorld* World)
+	{
+		UGeoRoadsSubsystem* Roads = GeoRoadsConsole::Get(World);
+		if (!Roads) { return; }
+		if (Args.Num() >= 1) { Roads->SetVideoBudgetMB(FCString::Atoi(*Args[0])); }
+		GeoTerrainConsole::Report(FString::Printf(TEXT("Budget video delle strade: %d MB"),
+			Roads->GetVideoBudgetMB()));
+	}));
+
+static FAutoConsoleCommandWithWorldAndArgs GeoRoadsStrengthCommand(
+	TEXT("geo.Roads.Strength"),
+	TEXT("geo.Roads.Strength <0..1> - quanto si vedono le strade sopra la foto (1 = come disegnate)."),
+	FConsoleCommandWithWorldAndArgsDelegate::CreateStatic(
+		[](const TArray<FString>& Args, UWorld* World)
+	{
+		UGeoRoadsSubsystem* Roads = GeoRoadsConsole::Get(World);
+		if (!Roads) { return; }
+		if (Args.Num() >= 1) { Roads->SetStrength(FCString::Atof(*Args[0])); }
+		GeoTerrainConsole::Report(FString::Printf(TEXT("Strade: forza %.2f"), Roads->GetStrength()));
+	}));
+
+static FAutoConsoleCommandWithWorldAndArgs GeoRoadsDebugCommand(
+	TEXT("geo.Roads.Debug"),
+	TEXT("geo.Roads.Debug <0|1> - overlay con le statistiche delle strade."),
+	FConsoleCommandWithWorldAndArgsDelegate::CreateStatic(
+		[](const TArray<FString>& Args, UWorld* World)
+	{
+		UGeoRoadsSubsystem* Roads = GeoRoadsConsole::Get(World);
+		if (!Roads) { return; }
+		const bool bValue = (Args.Num() >= 1) ? (FCString::Atoi(*Args[0]) != 0) : !Roads->IsDebugOverlayEnabled();
+		Roads->SetDebugOverlayEnabled(bValue);
+	}));
+
+static FAutoConsoleCommandWithWorld GeoRoadsStatsCommand(
+	TEXT("geo.Roads.Stats"),
+	TEXT("Statistiche delle strade e del caricamento delle tile di linee."),
+	FConsoleCommandWithWorldDelegate::CreateStatic([](UWorld* World)
+	{
+		UGeoRoadsSubsystem* Roads = GeoRoadsConsole::Get(World);
+		UGeoVectorStreamingSubsystem* Streaming = GeoRoadsConsole::GetStreaming(World);
+		if (!Roads || !Streaming) { return; }
+
+		const FGeoRoadsStats Stats = Roads->GetStats();
+		const FGeoVectorStreamingStats StreamStats = Streaming->GetStats();
+		GeoTerrainConsole::Report(TEXT("--- Strade ---"));
+		GeoTerrainConsole::Report(FString::Printf(
+			TEXT("Tile: %d con le proprie strade, %d con quelle di un antenato, %d senza, %d in attesa, %d fuori budget"),
+			Stats.TileConStrade, Stats.TileConStradeDiAntenato, Stats.TileSenzaStrade,
+			Stats.TileInAttesa, Stats.TileFuoriBudget));
+		GeoTerrainConsole::Report(FString::Printf(
+			TEXT("Texture: %d, %.0f/%.0f MB video; disegno medio %.1f ms"),
+			Stats.TextureInMemoria, Stats.MemoriaVideoMB, Stats.BudgetVideoMB, Stats.MillisecondiPerDisegno));
+		GeoTerrainConsole::Report(FString::Printf(
+			TEXT("Tile di linee: %d in cache, %.1f/%.0f MB, %d letture (%.2f ms l'una), %d errori"),
+			StreamStats.TileResidenti, StreamStats.MemoriaMB, StreamStats.BudgetMB,
+			StreamStats.CaricamentiTotali, StreamStats.TempoMedioCaricamentoMs, StreamStats.ErroriDiCaricamento));
+	}));
+
+// --- geo.Roads.Demo -----------------------------------------------------------
+static FAutoConsoleCommandWithWorldAndArgs GeoRoadsDemoCommand(
+	TEXT("geo.Roads.Demo"),
+	TEXT("geo.Roads.Demo <terreno> <ortofoto|-> <strade> - apre tutto, accende e si mette sopra le strade."),
+	FConsoleCommandWithWorldAndArgsDelegate::CreateStatic(
+		[](const TArray<FString>& Args, UWorld* World)
+	{
+		UGeoTerrainSubsystem* Terrain = GeoTerrainConsole::Get(World);
+		UGeoImagerySubsystem* Imagery = World ? World->GetSubsystem<UGeoImagerySubsystem>() : nullptr;
+		UGeoImageryStreamingSubsystem* ImageStreaming = World ? World->GetSubsystem<UGeoImageryStreamingSubsystem>() : nullptr;
+		UGeoTileStreamingSubsystem* Heights = World ? World->GetSubsystem<UGeoTileStreamingSubsystem>() : nullptr;
+		UGeoQuadtreeSubsystem* Quadtree = World ? World->GetSubsystem<UGeoQuadtreeSubsystem>() : nullptr;
+		UGeoreferenceSubsystem* Georeference = World ? World->GetSubsystem<UGeoreferenceSubsystem>() : nullptr;
+		UGeoRoadsSubsystem* Roads = GeoRoadsConsole::Get(World);
+		UGeoVectorStreamingSubsystem* RoadStreaming = GeoRoadsConsole::GetStreaming(World);
+		if (!Terrain || !Imagery || !ImageStreaming || !Heights || !Quadtree || !Georeference
+		    || !Roads || !RoadStreaming)
+		{
+			return;
+		}
+
+		if (Args.Num() < 3)
+		{
+			GeoTerrainConsole::Report(
+				TEXT("Uso: geo.Roads.Demo <terreno> <ortofoto, o - per nessuna> <strade>"), FColor::Red);
+			return;
+		}
+
+		FString Error;
+		if (!Heights->OpenDataset(Args[0], Error))
+		{
+			GeoTerrainConsole::Report(FString::Printf(TEXT("Terreno: %s"), *Error), FColor::Red);
+			return;
+		}
+		const bool bWithImagery = (Args[1] != TEXT("-"));
+		if (bWithImagery && !ImageStreaming->OpenDataset(Args[1], Error))
+		{
+			GeoTerrainConsole::Report(FString::Printf(TEXT("Ortofoto: %s"), *Error), FColor::Red);
+			return;
+		}
+		if (!GeoRoadsConsole::Open(World, Args[2])) { return; }
+
+		// Ci si mette sopra il centro delle STRADE, non del terreno: il terreno
+		// puo' essere l'Italia intera e le strade solo Torino.
+		double West, South, East, North;
+		RoadStreaming->GetDataset().GetBoundingBox(West, South, East, North);
+		Georeference->TeleportViewTo(GeoWorld::Core::FGeodetic::FromDegrees(
+			(South + North) * 0.5, (West + East) * 0.5, 2500.0));
+
+		Quadtree->SetEnabled(true);
+		Terrain->SetEnabled(true);
+		Terrain->SetWireframe(false);
+		Imagery->SetEnabled(bWithImagery);
+		Roads->SetEnabled(true);
+		Roads->SetDebugOverlayEnabled(true);
+
+		GeoTerrainConsole::Report(TEXT("Strade accese. Quota 2,5 km sopra il centro del dataset di strade."));
+		GeoTerrainConsole::Report(TEXT("Per controllare l'allineamento: geo.Roads.Style mappa"));
+		GeoTerrainConsole::Report(TEXT("Se non si vedono: geo.Imagery.CreateMaterial (serve il materiale con le strade)"));
 	}));

@@ -25,6 +25,18 @@
 //  R e G, estratte con una ComponentMask), che e' il ritaglio calcolato in
 //  ImageryMapping.h.
 //
+//  LE STRADE (FASE 8)
+//  Sopra la foto si compone una seconda texture, trasparente, con le strade:
+//
+//      colore = foto * (1 - Overlay.A * OverlayStrength) + Overlay.RGB * OverlayStrength
+//
+//  Overlay e' in alfa PREMOLTIPLICATO (il colore e' gia' moltiplicato per la
+//  copertura: vedi Roads/RoadRasterizer.h), quindi la composizione e' una
+//  moltiplicazione e una somma, senza divisioni. OverlayUv e' il ritaglio, come
+//  DrapeUv. OverlayStrength vale 0 di default: una tile a cui nessuno ha dato
+//  le strade mostra la foto e basta, anche se la texture di default del
+//  parametro (quella del motore) non e' trasparente.
+//
 //  IL BUG DELLA PRIMA VERSIONE, E PERCHE' IL PARAMETRO HA CAMBIATO NOME
 //  La prima versione collegava all'Add l'uscita "R" del parametro. Un'uscita
 //  di un solo canale e' uno SCALARE, e Unreal somma uno scalare a entrambe le
@@ -46,6 +58,8 @@
 #include "Materials/MaterialExpressionAdd.h"
 #include "Materials/MaterialExpressionComponentMask.h"
 #include "Materials/MaterialExpressionMultiply.h"
+#include "Materials/MaterialExpressionOneMinus.h"
+#include "Materials/MaterialExpressionScalarParameter.h"
 #include "Materials/MaterialExpressionTextureCoordinate.h"
 #include "Materials/MaterialExpressionTextureSampleParameter2D.h"
 #include "Materials/MaterialExpressionVectorParameter.h"
@@ -151,7 +165,77 @@ namespace
 		UMaterialEditingLibrary::ConnectMaterialExpressions(OffsetMask, TEXT(""), Offset, TEXT("B"));
 		UMaterialEditingLibrary::ConnectMaterialExpressions(Offset, TEXT(""), Sampler, TEXT("UVs"));
 
-		UMaterialEditingLibrary::ConnectMaterialProperty(Sampler, TEXT(""), MP_BaseColor);
+		// --- Fase 8: le strade sopra la foto ----------------------------------
+		auto Create = [Material](UClass* Class, int32 X, int32 Y)
+		{
+			return UMaterialEditingLibrary::CreateMaterialExpression(Material, Class, X, Y);
+		};
+
+		UMaterialExpressionVectorParameter* OverlayUvParameter = Cast<UMaterialExpressionVectorParameter>(
+			Create(UMaterialExpressionVectorParameter::StaticClass(), -1100, 500));
+		UMaterialExpressionComponentMask* OverlayMask = Cast<UMaterialExpressionComponentMask>(
+			Create(UMaterialExpressionComponentMask::StaticClass(), -650, 500));
+		UMaterialExpressionMultiply* OverlayScale = Cast<UMaterialExpressionMultiply>(
+			Create(UMaterialExpressionMultiply::StaticClass(), -650, 350));
+		UMaterialExpressionAdd* OverlayOffset = Cast<UMaterialExpressionAdd>(
+			Create(UMaterialExpressionAdd::StaticClass(), -450, 350));
+		UMaterialExpressionTextureSampleParameter2D* OverlaySampler =
+			Cast<UMaterialExpressionTextureSampleParameter2D>(
+				Create(UMaterialExpressionTextureSampleParameter2D::StaticClass(), -250, 350));
+		UMaterialExpressionScalarParameter* Strength = Cast<UMaterialExpressionScalarParameter>(
+			Create(UMaterialExpressionScalarParameter::StaticClass(), -250, 650));
+		UMaterialExpressionMultiply* AlphaTimesStrength = Cast<UMaterialExpressionMultiply>(
+			Create(UMaterialExpressionMultiply::StaticClass(), 0, 500));
+		UMaterialExpressionOneMinus* PhotoWeight = Cast<UMaterialExpressionOneMinus>(
+			Create(UMaterialExpressionOneMinus::StaticClass(), 150, 500));
+		UMaterialExpressionMultiply* PhotoPart = Cast<UMaterialExpressionMultiply>(
+			Create(UMaterialExpressionMultiply::StaticClass(), 300, 0));
+		UMaterialExpressionMultiply* RoadPart = Cast<UMaterialExpressionMultiply>(
+			Create(UMaterialExpressionMultiply::StaticClass(), 150, 350));
+		UMaterialExpressionAdd* Composite = Cast<UMaterialExpressionAdd>(
+			Create(UMaterialExpressionAdd::StaticClass(), 450, 150));
+
+		if (!OverlayUvParameter || !OverlayMask || !OverlayScale || !OverlayOffset || !OverlaySampler ||
+		    !Strength || !AlphaTimesStrength || !PhotoWeight || !PhotoPart || !RoadPart || !Composite)
+		{
+			return false;
+		}
+
+		OverlayUvParameter->ParameterName = TEXT("OverlayUv");
+		OverlayUvParameter->DefaultValue = FLinearColor(0.0f, 0.0f, 1.0f, 1.0f);
+		OverlayMask->R = true;
+		OverlayMask->G = true;
+		OverlayMask->B = false;
+		OverlayMask->A = false;
+
+		OverlaySampler->ParameterName = TEXT("Overlay");
+		// Color = sRGB: il rasterizzatore scrive il colore premoltiplicato
+		// codificato sRGB, e la texture e' creata con SRGB = true.
+		OverlaySampler->SamplerType = SAMPLERTYPE_Color;
+
+		Strength->ParameterName = TEXT("OverlayStrength");
+		Strength->DefaultValue = 0.0f;
+
+		// uv strade = TexCoord * OverlayUv.B + OverlayUv.RG  (come il drappeggio)
+		UMaterialEditingLibrary::ConnectMaterialExpressions(Coordinates, TEXT(""), OverlayScale, TEXT("A"));
+		UMaterialEditingLibrary::ConnectMaterialExpressions(OverlayUvParameter, TEXT("B"), OverlayScale, TEXT("B"));
+		UMaterialEditingLibrary::ConnectMaterialExpressions(OverlayUvParameter, TEXT(""), OverlayMask, TEXT(""));
+		UMaterialEditingLibrary::ConnectMaterialExpressions(OverlayScale, TEXT(""), OverlayOffset, TEXT("A"));
+		UMaterialEditingLibrary::ConnectMaterialExpressions(OverlayMask, TEXT(""), OverlayOffset, TEXT("B"));
+		UMaterialEditingLibrary::ConnectMaterialExpressions(OverlayOffset, TEXT(""), OverlaySampler, TEXT("UVs"));
+
+		// colore = foto * (1 - A * forza) + RGB * forza
+		UMaterialEditingLibrary::ConnectMaterialExpressions(OverlaySampler, TEXT("A"), AlphaTimesStrength, TEXT("A"));
+		UMaterialEditingLibrary::ConnectMaterialExpressions(Strength, TEXT(""), AlphaTimesStrength, TEXT("B"));
+		UMaterialEditingLibrary::ConnectMaterialExpressions(AlphaTimesStrength, TEXT(""), PhotoWeight, TEXT(""));
+		UMaterialEditingLibrary::ConnectMaterialExpressions(Sampler, TEXT(""), PhotoPart, TEXT("A"));
+		UMaterialEditingLibrary::ConnectMaterialExpressions(PhotoWeight, TEXT(""), PhotoPart, TEXT("B"));
+		UMaterialEditingLibrary::ConnectMaterialExpressions(OverlaySampler, TEXT(""), RoadPart, TEXT("A"));
+		UMaterialEditingLibrary::ConnectMaterialExpressions(Strength, TEXT(""), RoadPart, TEXT("B"));
+		UMaterialEditingLibrary::ConnectMaterialExpressions(PhotoPart, TEXT(""), Composite, TEXT("A"));
+		UMaterialEditingLibrary::ConnectMaterialExpressions(RoadPart, TEXT(""), Composite, TEXT("B"));
+
+		UMaterialEditingLibrary::ConnectMaterialProperty(Composite, TEXT(""), MP_BaseColor);
 
 		UMaterialEditingLibrary::RecompileMaterial(Material);
 		return true;

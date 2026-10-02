@@ -207,12 +207,28 @@ public:
 	 * registrano qui la loro risposta, e il terreno la aggiunge a "ha la
 	 * mesh" nella readiness che da' al quadtree: una tile compare solo vestita,
 	 * e fino ad allora resta a schermo il padre.
+	 *
+	 * DALLA FASE 8 I VESTITORI SONO PIU' D'UNO: le ortofoto e le strade. Ognuno
+	 * registra il proprio predicato con un nome, e una tile e' vestita quando
+	 * TUTTI dicono di si'. Con un predicato solo, il secondo a registrarsi
+	 * avrebbe cancellato il primo, e le tile sarebbero tornate a comparire
+	 * senza foto (o senza strade, che spuntano un attimo dopo).
 	 */
-	void SetDressPredicate(TFunction<bool(const GeoWorld::Tiles::FTileKey&)> InPredicate)
+	void SetDressPredicate(FName Owner, TFunction<bool(const GeoWorld::Tiles::FTileKey&)> InPredicate)
 	{
-		DressPredicate = MoveTemp(InPredicate);
+		DressPredicates.Add(Owner, MoveTemp(InPredicate));
 	}
-	void ClearDressPredicate() { DressPredicate = nullptr; }
+	void ClearDressPredicate(FName Owner) { DressPredicates.Remove(Owner); }
+
+	/** Tutti i vestitori registrati dicono che la tile e' pronta? */
+	bool IsTileDressed(const GeoWorld::Tiles::FTileKey& Key) const
+	{
+		for (const TPair<FName, TFunction<bool(const GeoWorld::Tiles::FTileKey&)>>& Pair : DressPredicates)
+		{
+			if (Pair.Value && !Pair.Value(Key)) { return false; }
+		}
+		return true;
+	}
 
 	/** Il provider, per chi deve vestire le tile. Puo' essere nullo. */
 	IGeoTerrainMeshProvider* GetProvider() const { return Provider.Get(); }
@@ -270,7 +286,8 @@ private:
 	 * costruirla costerebbe migliaia di mesh per posti dove probabilmente non
 	 * si andra'. Ricalcolato solo quando il quadtree rifa' il piano.
 	 */
-	TFunction<bool(const GeoWorld::Tiles::FTileKey&)> DressPredicate;
+	/** I vestitori, per nome ("Ortofoto", "Strade"): vedi SetDressPredicate. */
+	TMap<FName, TFunction<bool(const GeoWorld::Tiles::FTileKey&)>> DressPredicates;
 
 	TSet<uint64> PlanMeshKeys;
 	int32 PlanGenerationSeen = -1;

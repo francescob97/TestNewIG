@@ -67,6 +67,7 @@ INTERESTING_DRIVERS = {
     "MrSID": "MrSID: anch'esso con SDK proprietario",
     "JPEG": "JPEG: il payload delle tile di immagine",
     "PNG": "PNG",
+    "OSM": "OpenStreetMap .osm.pbf: le strade della Fase 8",
     "WMS": "servizi WMS remoti",
 }
 
@@ -74,6 +75,21 @@ INTERESTING_DRIVERS = {
 def _driver_availability(gdal) -> dict:
     return {name: gdal.GetDriverByName(name) is not None
             for name in INTERESTING_DRIVERS}
+
+
+def _geos_available() -> bool:
+    """
+    GEOS e' la libreria geometrica di GDAL: ritaglia e semplifica le linee
+    delle strade (Fase 8). Le build di conda la includono; alcune build
+    minimali no, e senza il taglio delle strade fallirebbe a meta'.
+    """
+    try:
+        from osgeo import ogr
+        line = ogr.CreateGeometryFromWkt("LINESTRING(0 0,2 2)")
+        box = ogr.CreateGeometryFromWkt("POLYGON((0 0,1 0,1 1,0 1,0 0))")
+        return line.Intersection(box) is not None
+    except Exception:                               # noqa: BLE001
+        return False
 
 
 def _gdal_info() -> dict:
@@ -90,6 +106,7 @@ def _gdal_info() -> dict:
             "driverGTiff": gdal.GetDriverByName("GTiff") is not None,
             "driverVRT": gdal.GetDriverByName("VRT") is not None,
             "drivers": _driver_availability(gdal),
+            "geos": _geos_available(),
             "dataPath": gdal.GetConfigOption("GDAL_DATA") or "(default interno)",
         }
     except Exception as error:                      # noqa: BLE001
@@ -243,6 +260,8 @@ def format_report(report: Report) -> str:
                 present = drivers.get(name, False)
                 flag = "si" if present else "NO"
                 lines.append(f"      [{flag:>2}] {name:<12} {description}")
+            lines.append(f"      [{'si' if report.gdal.get('geos') else 'NO':>2}] GEOS         "
+                         "ritaglio e semplificazione delle strade (Fase 8)")
             if not drivers.get("ECW", False):
                 lines.append("")
                 lines.append("    Nota sulle ECW: il driver manca, come nella quasi totalita'")

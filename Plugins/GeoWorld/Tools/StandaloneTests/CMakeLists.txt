@@ -89,9 +89,22 @@ else()
 	target_compile_options(geoimagery_tests PRIVATE -Wall -Wextra -O2)
 endif()
 
+# --- Strade (Fase 8): formato .gvt e rasterizzatore delle linee -------------
+add_executable(georoads_tests georoads_main.cpp)
+target_include_directories(georoads_tests PRIVATE
+	${GEORENDER_DIR}/Public ${GEOTILES_DIR}/Public ${GEOCORE_DIR}/Public)
+
+if (MSVC)
+	target_compile_options(georoads_tests PRIVATE /W4)
+else()
+	target_compile_options(georoads_tests PRIVATE -Wall -Wextra -O2)
+endif()
+
 enable_testing()
 add_test(NAME geocore COMMAND geocore_tests)
 add_test(NAME geotiles COMMAND geotiles_tests)
 add_test(NAME geoquadtree COMMAND geoquadtree_tests)
 add_test(NAME geomesh COMMAND geomesh_tests)
 add_test(NAME geoimagery COMMAND geoimagery_tests)
+add_test(NAME georoads COMMAND georoads_tests
+	${CMAKE_CURRENT_SOURCE_DIR}/../../Source/GeoTiles/TestData/vector_fixture.gvt)

@@ -88,6 +88,17 @@ void FDynamicMeshTerrainProvider::Initialize(UWorld* World)
 			                  TEXT("rifallo con geo.Imagery.CreateMaterial");
 			UE_LOG(LogGeoWorld, Warning, TEXT("[GeoTerrain] %s"), *MaterialProblem);
 		}
+
+		// Fase 8: le strade vogliono tre parametri in piu'. Un M_GeoTerrain fatto
+		// prima della Fase 8 non li ha, e le strade semplicemente non si
+		// vedrebbero, senza un errore: lo si dice qui.
+		UTexture* UnusedTexture = nullptr;
+		if (!Drape->GetTextureParameterValue(FHashedMaterialParameterInfo(TEXT("Overlay")), UnusedTexture))
+		{
+			OverlayMaterialProblem = TEXT("M_GeoTerrain non ha i parametri delle strade (Overlay): ")
+			                         TEXT("rifallo con geo.Imagery.CreateMaterial");
+			UE_LOG(LogGeoWorld, Warning, TEXT("[GeoTerrain] %s"), *OverlayMaterialProblem);
+		}
 	}
 
 	if (!DrapeMaterial.IsValid())
@@ -405,18 +416,30 @@ void FDynamicMeshTerrainProvider::SetTileDrape(const Tiles::FTileKey& Key,
 	UDynamicMeshComponent* Component = Entry->Component.Get();
 	if (!Component) { return; }
 
-	// Togliere il drappeggio: si torna al materiale grigio di base.
+	// Togliere il drappeggio: si torna al materiale grigio di base. Ma se la
+	// tile ha le strade addosso, l'istanza resta: si azzerano i suoi parametri
+	// (la foto torna quella di default del materiale) e si rimettono le strade.
 	if (!Texture)
 	{
 		if (Entry->bDraped)
 		{
-			if (UMaterialInterface* BaseMaterial = Material.Get())
-			{
-				Component->SetMaterial(0, BaseMaterial);
-			}
-			Entry->Material.Reset();
 			Entry->bDraped = false;
 			Entry->DrapedTexture.Reset();
+
+			UMaterialInstanceDynamic* Instance = Entry->Material.Get();
+			if (Entry->bOverlaid && Instance)
+			{
+				Instance->ClearParameterValues();
+				ApplyOverlayParameters(*Entry, Instance);
+			}
+			else
+			{
+				if (UMaterialInterface* BaseMaterial = Material.Get())
+				{
+					Component->SetMaterial(0, BaseMaterial);
+				}
+				Entry->Material.Reset();
+			}
 		}
 		return;
 	}
@@ -436,18 +459,8 @@ void FDynamicMeshTerrainProvider::SetTileDrape(const Tiles::FTileKey& Key,
 		return;
 	}
 
-	UMaterialInstanceDynamic* Instance = Entry->Material.Get();
-	if (!Instance)
-	{
-		// NOTA UE: l'outer dell'istanza e' il COMPONENTE, non l'attore. Cosi'
-		// quando il componente viene distrutto l'istanza lo segue, senza doverla
-		// liberare a mano e senza che il garbage collector la trovi orfana.
-		Instance = UMaterialInstanceDynamic::Create(Parent, Component);
-		if (!Instance) { return; }
-
-		Entry->Material = Instance;
-		Component->SetMaterial(0, Instance);
-	}
+	UMaterialInstanceDynamic* Instance = EnsureDrapeInstance(*Entry, Component);
+	if (!Instance) { return; }
 
 	Instance->SetTextureParameterValue(TEXT("BaseColor"), Texture);
 
@@ -475,4 +488,119 @@ int32 FDynamicMeshTerrainProvider::GetDrapedTileCount() const
 		if (Pair.Value.bDraped) { ++Count; }
 	}
 	return Count;
+}
+
+// ---------------------------------------------------------------------------
+//  Strade, ferrovie, piste (Fase 8)
+// ---------------------------------------------------------------------------
+
+UMaterialInstanceDynamic* FDynamicMeshTerrainProvider::EnsureDrapeInstance(FTileEntry& Entry,
+                                                                           UDynamicMeshComponent* Component)
+{
+	if (UMaterialInstanceDynamic* Existing = Entry.Material.Get()) { return Existing; }
+
+	UMaterialInterface* Parent = DrapeMaterial.Get();
+	if (!Parent || !Component) { return nullptr; }
+
+	// NOTA UE: l'outer dell'istanza e' il COMPONENTE, non l'attore. Cosi'
+	// quando il componente viene distrutto l'istanza lo segue, senza doverla
+	// liberare a mano e senza che il garbage collector la trovi orfana.
+	UMaterialInstanceDynamic* Instance = UMaterialInstanceDynamic::Create(Parent, Component);
+	if (!Instance) { return nullptr; }
+
+	Entry.Material = Instance;
+	Component->SetMaterial(0, Instance);
+	return Instance;
+}
+
+void FDynamicMeshTerrainProvider::ApplyOverlayParameters(const FTileEntry& Entry,
+                                                        UMaterialInstanceDynamic* Instance) const
+{
+	if (!Instance) { return; }
+	if (!Entry.bOverlaid || !Entry.OverlayTexture.IsValid())
+	{
+		// Senza strade la forza va a zero: la texture di default del parametro
+		// (quella del motore) non e' trasparente, e si vedrebbe.
+		Instance->SetScalarParameterValue(TEXT("OverlayStrength"), 0.0f);
+		return;
+	}
+
+	const GeoWorld::Imagery::FDrapeTransform& Window = Entry.OverlayTransform;
+	Instance->SetTextureParameterValue(TEXT("Overlay"), Entry.OverlayTexture.Get());
+	Instance->SetVectorParameterValue(TEXT("OverlayUv"),
+		FLinearColor(Window.OffsetU, Window.OffsetV, Window.Scale, Window.Scale));
+	Instance->SetScalarParameterValue(TEXT("OverlayStrength"), OverlayStrength);
+}
+
+void FDynamicMeshTerrainProvider::SetTileOverlay(const Tiles::FTileKey& Key, UTexture2D* Texture,
+                                                 const GeoWorld::Imagery::FDrapeTransform& Window)
+{
+	FTileEntry* Entry = Tiles.Find(Key.Pack());
+	if (!Entry) { return; }
+
+	UDynamicMeshComponent* Component = Entry->Component.Get();
+	if (!Component) { return; }
+
+	if (!Texture)
+	{
+		if (!Entry->bOverlaid) { return; }
+		Entry->bOverlaid = false;
+		Entry->OverlayTexture.Reset();
+
+		UMaterialInstanceDynamic* Instance = Entry->Material.Get();
+		if (Entry->bDraped && Instance)
+		{
+			ApplyOverlayParameters(*Entry, Instance);     // forza a zero
+		}
+		else
+		{
+			// Ne' foto ne' strade: il materiale grigio di base, come prima.
+			if (UMaterialInterface* BaseMaterial = Material.Get())
+			{
+				Component->SetMaterial(0, BaseMaterial);
+			}
+			Entry->Material.Reset();
+		}
+		return;
+	}
+
+	// Come per il drappeggio: chiamato per tutte le tile a ogni frame, tocca il
+	// materiale solo se qualcosa e' cambiato.
+	if (Entry->bOverlaid && Entry->OverlayTexture.Get() == Texture &&
+	    Entry->OverlayTransform.OffsetU == Window.OffsetU &&
+	    Entry->OverlayTransform.OffsetV == Window.OffsetV &&
+	    Entry->OverlayTransform.Scale == Window.Scale)
+	{
+		return;
+	}
+
+	UMaterialInstanceDynamic* Instance = EnsureDrapeInstance(*Entry, Component);
+	if (!Instance) { return; }     // manca M_GeoTerrain: gia' segnalato in Initialize
+
+	Entry->bOverlaid = true;
+	Entry->OverlayTexture = Texture;
+	Entry->OverlayTransform = Window;
+	ApplyOverlayParameters(*Entry, Instance);
+}
+
+int32 FDynamicMeshTerrainProvider::GetOverlaidTileCount() const
+{
+	int32 Count = 0;
+	for (const TPair<uint64, FTileEntry>& Pair : Tiles)
+	{
+		if (Pair.Value.bOverlaid) { ++Count; }
+	}
+	return Count;
+}
+
+void FDynamicMeshTerrainProvider::SetOverlayStrength(float Strength)
+{
+	OverlayStrength = FMath::Clamp(Strength, 0.0f, 1.0f);
+	for (TPair<uint64, FTileEntry>& Pair : Tiles)
+	{
+		if (Pair.Value.bOverlaid)
+		{
+			ApplyOverlayParameters(Pair.Value, Pair.Value.Material.Get());
+		}
+	}
 }

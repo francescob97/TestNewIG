@@ -62,6 +62,18 @@ public:
 	}
 	virtual FString GetMaterialProblem() const override { return MaterialProblem; }
 
+	virtual void SetTileOverlay(const GeoWorld::Tiles::FTileKey& Key,
+	                            UTexture2D* Texture,
+	                            const GeoWorld::Imagery::FDrapeTransform& Window) override;
+	virtual bool IsTileOverlaid(const GeoWorld::Tiles::FTileKey& Key) const override
+	{
+		const FTileEntry* Entry = Tiles.Find(Key.Pack());
+		return Entry && Entry->bOverlaid;
+	}
+	virtual int32 GetOverlaidTileCount() const override;
+	virtual void SetOverlayStrength(float Strength) override;
+	virtual FString GetOverlayMaterialProblem() const override { return OverlayMaterialProblem; }
+
 	virtual int32 GetRealizedTriangleCount() const override;
 	virtual void GetDiagnostics(TArray<FGeoTerrainTileDiagnostic>& Out,
 	                            int32 MaxEntries) const override;
@@ -86,7 +98,18 @@ private:
 		/** Ultimo drappeggio applicato: se non cambia, non si tocca il materiale. */
 		TWeakObjectPtr<UTexture2D> DrapedTexture;
 		GeoWorld::Imagery::FDrapeTransform DrapedTransform;
+
+		/** Strade (Fase 8): stesso schema del drappeggio, su parametri propri. */
+		bool bOverlaid = false;
+		TWeakObjectPtr<UTexture2D> OverlayTexture;
+		GeoWorld::Imagery::FDrapeTransform OverlayTransform;
 	};
+
+	/** L'istanza di materiale della tile, creata se manca. Nullptr senza M_GeoTerrain. */
+	UMaterialInstanceDynamic* EnsureDrapeInstance(FTileEntry& Entry, UDynamicMeshComponent* Component);
+
+	/** Scrive sull'istanza i parametri delle strade che l'entry ricorda. */
+	void ApplyOverlayParameters(const FTileEntry& Entry, UMaterialInstanceDynamic* Instance) const;
 
 	TWeakObjectPtr<AActor> Container;
 
@@ -108,4 +131,9 @@ private:
 
 	/** Vuota se il materiale del drappeggio e' quello giusto. */
 	FString MaterialProblem;
+
+	/** Vuota se il materiale ha i parametri delle strade (Overlay, OverlayUv, OverlayStrength). */
+	FString OverlayMaterialProblem;
+
+	float OverlayStrength = 1.0f;
 };

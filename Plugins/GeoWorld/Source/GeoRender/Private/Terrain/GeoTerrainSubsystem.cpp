@@ -83,7 +83,7 @@ void UGeoTerrainSubsystem::Deinitialize()
 	Provider.Reset();
 	BuiltTiles.Empty();
 	PlanMeshKeys.Empty();
-	DressPredicate = nullptr;
+	DressPredicates.Empty();
 
 	Super::Deinitialize();
 }
@@ -119,7 +119,7 @@ void UGeoTerrainSubsystem::SetEnabled(bool bInEnabled)
 			{
 				// Costruita, e (se le ortofoto sono accese) vestita: vedi
 				// SetDressPredicate. Altrimenti il padre resta a schermo.
-				return BuiltTiles.Contains(Key.Pack()) && (!DressPredicate || DressPredicate(Key));
+				return BuiltTiles.Contains(Key.Pack()) && IsTileDressed(Key);
 			});
 		}
 		bWarmingUp = true;
