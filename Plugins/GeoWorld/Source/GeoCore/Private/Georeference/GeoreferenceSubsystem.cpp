@@ -159,7 +159,13 @@ void UGeoreferenceSubsystem::Tick(float DeltaTime)
 	// nell'origine dello spazio di Unreal (0,0,0), per costruzione della
 	// trasformazione. Quindi la distanza dall'origine e' semplicemente la norma
 	// della posizione: non serve passare per l'ECEF.
-	const double DistanceMeters = Snapshot.DistanceFromOriginMeters(ViewLocation);
+	// DISTANZA ORIZZONTALE, non la distanza 3D. L'origine sta sempre a quota
+	// zero (vedi ApplyRebase): con la distanza 3D un aereo a 12 km di quota
+	// sarebbe sempre "oltre soglia" e farebbe un rebase ogni 10 frame. La
+	// precisione che il rebase protegge e' quella orizzontale: in verticale
+	// si resta comunque entro qualche decina di km dall'origine.
+	const double DistanceMeters =
+		FVector2D(ViewLocation.X, ViewLocation.Y).Size() * GeoWorld::Units::UuToMeters;
 
 	if (DistanceMeters < RebaseThresholdMeters)
 	{
@@ -168,9 +174,10 @@ void UGeoreferenceSubsystem::Tick(float DeltaTime)
 
 	LastRebaseDistanceMeters = DistanceMeters;
 
-	// La nuova origine e' la posizione ATTUALE della camera: cosi' la distanza
-	// riparte esattamente da zero ed e' praticamente impossibile che un secondo
-	// rebase scatti subito dopo (il MinFramesBetweenRebases e' il paracadute).
+	// La nuova origine e' il punto del suolo SOTTO la camera (quota zero): la
+	// distanza orizzontale riparte esattamente da zero ed e' praticamente
+	// impossibile che un secondo rebase scatti subito dopo (il
+	// MinFramesBetweenRebases e' il paracadute).
 	ApplyRebase(Snapshot.UnrealToGeodetic(ViewLocation));
 }
 
@@ -179,13 +186,34 @@ void UGeoreferenceSubsystem::SetOrigin(const FGeodetic& NewOrigin)
 	ApplyRebase(NewOrigin);
 }
 
-void UGeoreferenceSubsystem::ApplyRebase(const FGeodetic& NewOrigin)
+void UGeoreferenceSubsystem::ApplyRebase(const FGeodetic& RequestedOrigin)
 {
 	UWorld* World = GetWorld();
 	if (!World)
 	{
 		return;
 	}
+
+	// --------------------------------------------------------------------
+	//  L'ORIGINE STA SEMPRE A QUOTA ZERO (sull'ellissoide), qualunque quota
+	//  abbia la camera.
+	//
+	//  Fino alla Fase 8 l'origine nuova era la posizione della camera, quota
+	//  compresa. Sembrava innocuo, ed era la causa dei FLASH che restavano
+	//  muovendosi: Unreal ancora il cielo (SkyAtmosphere, "pianeta con la cima
+	//  nell'origine del mondo") e la nebbia (ExponentialHeightFog, densita' che
+	//  dipende dalla Z del mondo) alla Z = 0. Con l'origine alla quota della
+	//  camera, il terreno stava 2-6 km SOTTO lo zero del mondo, e a ogni
+	//  rebase saltava di colpo di quanto si era saliti o scesi: cambiava di
+	//  colpo quanta nebbia e quanta atmosfera c'erano fra la camera e il suolo,
+	//  cioe' tutto lo schermo cambiava luminosita' in un frame.
+	//
+	//  Con l'origine a quota zero la Z del mondo e' la quota sull'ellissoide
+	//  (a meno della curvatura: 8 m a 10 km dall'origine), il terreno sta dove
+	//  cielo e nebbia se lo aspettano, e un rebase sposta il mondo solo in
+	//  orizzontale.
+	// --------------------------------------------------------------------
+	const FGeodetic NewOrigin = FGeodetic::FromRadians(RequestedOrigin.LatRad, RequestedOrigin.LonRad, 0.0);
 
 	// --------------------------------------------------------------------
 	//  PASSO 1 - Congelare in ECEF cio' che NON e' georeferenziato e che
@@ -407,9 +435,10 @@ bool UGeoreferenceSubsystem::TeleportViewTo(const FGeodetic& Destination)
 		return false;
 	}
 
-	// Il rebase PRIMA del teletrasporto: cosi' la destinazione finisce
-	// nell'origine (0,0,0) e non si passa mai per coordinate enormi, nemmeno
-	// per un frame.
+	// Il rebase PRIMA del teletrasporto: cosi' la destinazione finisce sulla
+	// verticale dell'origine, a (0, 0, quota), e non si passa mai per
+	// coordinate enormi, nemmeno per un frame. L'origine sta a quota zero, non
+	// alla quota della destinazione: vedi ApplyRebase.
 	ApplyRebase(Destination);
 
 	// Un po' di quota per non ritrovarsi dentro il terreno (che in Fase 1 non

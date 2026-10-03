@@ -26,10 +26,15 @@ class UTexture2D;
  * La texture e' sRGB, con indirizzamento CLAMP (mai WRAP: il filtro al bordo
  * prenderebbe i pixel del bordo opposto) e il filtro del gruppo World
  * (anisotropico).
+ *
+ * `bWrapV`: ripete la texture lungo V invece di bloccarla. Serve all'atlante
+ * delle strade 3D, che si ripete lungo la strada ogni 12 m; per le foto e le
+ * strade dipinte resta CLAMP.
  */
 GEORENDER_API UTexture2D* CreateGeoRuntimeTexture(int32 Width, int32 Height,
                                                   const std::vector<uint8_t>& Pixels,
-                                                  const std::vector<std::vector<uint8_t>>& Mips);
+                                                  const std::vector<std::vector<uint8_t>>& Mips,
+                                                  bool bWrapV = false);
 
 /** Byte occupati in memoria video da una texture BGRA quadrata con le mipmap. */
 inline double GeoRuntimeTextureBytes(int32 Side)

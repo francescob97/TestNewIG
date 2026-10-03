@@ -1067,6 +1067,7 @@ static FAutoConsoleCommandWithWorldAndArgs GeoQualityCommand(
 			{
 				Roads->SetResolution(256, 512);
 				Roads->SetVideoBudgetMB(384);
+				Roads->Set3DLevels(1);
 			}
 		}
 		else if (Profile == TEXT("workstation"))
@@ -1081,6 +1082,7 @@ static FAutoConsoleCommandWithWorldAndArgs GeoQualityCommand(
 			{
 				Roads->SetResolution(512, 1024);
 				Roads->SetVideoBudgetMB(1536);
+				Roads->Set3DLevels(2);
 			}
 		}
 		else
@@ -1507,6 +1509,38 @@ static FAutoConsoleCommandWithWorldAndArgs GeoRoadsStrengthCommand(
 		GeoTerrainConsole::Report(FString::Printf(TEXT("Strade: forza %.2f"), Roads->GetStrength()));
 	}));
 
+static FAutoConsoleCommandWithWorldAndArgs GeoRoads3DCommand(
+	TEXT("geo.Roads.3D"),
+	TEXT("geo.Roads.3D <0|1> - strade 3D (asfalto, segnaletica, binari, ponti) vicino alla camera."),
+	FConsoleCommandWithWorldAndArgsDelegate::CreateStatic(
+		[](const TArray<FString>& Args, UWorld* World)
+	{
+		UGeoRoadsSubsystem* Roads = GeoRoadsConsole::Get(World);
+		if (!Roads) { return; }
+		const bool bValue = (Args.Num() >= 1) ? (FCString::Atoi(*Args[0]) != 0) : !Roads->Is3DEnabled();
+		Roads->Set3DEnabled(bValue);
+		GeoTerrainConsole::Report(FString::Printf(TEXT("Strade 3D: %s"), bValue ? TEXT("ON") : TEXT("OFF")));
+		if (bValue)
+		{
+			GeoTerrainConsole::Report(
+				TEXT("  Compaiono sulle tile di terreno piu' fini: scendi sotto i 1.000-1.500 m dal suolo."),
+				FColor::White);
+		}
+	}));
+
+static FAutoConsoleCommandWithWorldAndArgs GeoRoads3DLevelsCommand(
+	TEXT("geo.Roads.3DLevels"),
+	TEXT("geo.Roads.3DLevels <1..3> - quanti livelli di terreno, dal piu' fine, hanno le strade 3D (piu' livelli = piu' lontano, piu' triangoli)."),
+	FConsoleCommandWithWorldAndArgsDelegate::CreateStatic(
+		[](const TArray<FString>& Args, UWorld* World)
+	{
+		UGeoRoadsSubsystem* Roads = GeoRoadsConsole::Get(World);
+		if (!Roads) { return; }
+		if (Args.Num() >= 1) { Roads->Set3DLevels(FCString::Atoi(*Args[0])); }
+		GeoTerrainConsole::Report(FString::Printf(TEXT("Strade 3D sui %d livelli di terreno piu' fini"),
+			Roads->Get3DLevels()));
+	}));
+
 static FAutoConsoleCommandWithWorldAndArgs GeoRoadsDebugCommand(
 	TEXT("geo.Roads.Debug"),
 	TEXT("geo.Roads.Debug <0|1> - overlay con le statistiche delle strade."),
@@ -1601,6 +1635,7 @@ static FAutoConsoleCommandWithWorldAndArgs GeoRoadsDemoCommand(
 		Roads->SetDebugOverlayEnabled(true);
 
 		GeoTerrainConsole::Report(TEXT("Strade accese. Quota 2,5 km sopra il centro del dataset di strade."));
+		GeoTerrainConsole::Report(TEXT("Le strade 3D compaiono scendendo sotto i 1.000-1.500 m dal suolo (geo.Roads.3D)."));
 		GeoTerrainConsole::Report(TEXT("Per controllare l'allineamento: geo.Roads.Style mappa"));
 		GeoTerrainConsole::Report(TEXT("Se non si vedono: geo.Imagery.CreateMaterial (serve il materiale con le strade)"));
 	}));

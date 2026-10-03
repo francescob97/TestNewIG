@@ -326,10 +326,9 @@ servirebbe.
 
 ## 8. Cosa NON fa, e cosa viene dopo
 
-- **Le strade sono disegnate SUL terreno, non sono geometria.** Un ponte è una
-  striscia dipinta sul fondovalle, un viadotto non ha piloni. Per l'aereo va
-  bene; per un veicolo a terra servono strade 3D, che sono un lavoro a sé (la
-  geometria deve seguire il LOD del terreno). Le tile vettoriali ci sono già.
+- **Da lontano le strade sono dipinte SUL terreno**, e un ponte è una striscia
+  sul fondovalle. Da vicino, dopo la prima prova, sono diventate **3D**:
+  `docs/strade-3d.md`.
 - **Niente segnaletica orizzontale** (strisce, mezzeria): a 1 m per pixel non si
   vedrebbe. Arriverà con le strade 3D o con un dettaglio procedurale nel
   materiale.

@@ -56,7 +56,9 @@ void UGeoRoadsSubsystem::Initialize(FSubsystemCollectionBase& Collection)
 	Terrain = World->GetSubsystem<UGeoTerrainSubsystem>();
 
 	RasterQueue = MakeShared<FRasterQueue, ESPMode::ThreadSafe>();
+	MeshQueue = MakeShared<FMeshQueue, ESPMode::ThreadSafe>();
 	Style = Roads::MakeRoadStyle(StyleKind);
+	Style3D = Roads::MakeRoad3DStyle();
 
 	// La memoria video non si legge in modo portabile; la RAM si', ed e' un
 	// buon indizio della classe di macchina. Un portatile da 16 GB ha di norma
@@ -83,9 +85,15 @@ void UGeoRoadsSubsystem::Deinitialize()
 	// I disegni in corso eseguono codice di questo modulo: si aspetta che
 	// finiscano prima di lasciar scaricare la DLL. Durano millisecondi.
 	for (TPair<uint64, UE::Tasks::FTask>& Pair : InFlight) { Pair.Value.Wait(); }
+	for (TPair<uint64, UE::Tasks::FTask>& Pair : MeshInFlight) { Pair.Value.Wait(); }
 	for (UE::Tasks::FTask& Task : Orphans) { Task.Wait(); }
 	InFlight.Empty();
+	MeshInFlight.Empty();
 	Orphans.Empty();
+	PendingMeshCommits.Empty();
+	Meshes3D.Empty();
+	RoadAtlas.Reset();
+	MeshQueue.Reset();
 
 	Overlays.Empty();
 	PendingUploads.Empty();
@@ -133,7 +141,7 @@ void UGeoRoadsSubsystem::SetEnabled(bool bInEnabled)
 		// risulterebbe pronta.
 		Terrain->ClearDressPredicate(RoadsDressOwnerName);
 		RemoveAllOverlays();
-		InvalidateAll();
+		InvalidateAll();      // toglie anche le strade 3D
 	}
 }
 
@@ -189,6 +197,44 @@ void UGeoRoadsSubsystem::InvalidateAll()
 	Overlays.Empty();
 	PendingUploads.Empty();
 	Dressed.Empty();
+	RemoveAllRoadMeshes();
+}
+
+void UGeoRoadsSubsystem::Set3DEnabled(bool bInEnabled)
+{
+	if (b3DEnabled == bInEnabled) { return; }
+	b3DEnabled = bInEnabled;
+	if (!b3DEnabled) { RemoveAllRoadMeshes(); }
+}
+
+void UGeoRoadsSubsystem::Set3DLevels(int32 InLevels)
+{
+	const int32 Clamped = FMath::Clamp(InLevels, 1, 3);
+	if (Clamped == Levels3D) { return; }
+	// Se diminuiscono, le strade 3D di troppo le toglie Synchronise3D (non
+	// servono piu'); se aumentano, le nuove si costruiscono. Quelle che
+	// restano valide non si rifanno.
+	Levels3D = Clamped;
+}
+
+void UGeoRoadsSubsystem::RemoveAllRoadMeshes()
+{
+	++MeshGeneration;
+	for (TPair<uint64, UE::Tasks::FTask>& Pair : MeshInFlight) { Orphans.Add(Pair.Value); }
+	MeshInFlight.Empty();
+	PendingMeshCommits.Empty();
+
+	if (Terrain)
+	{
+		if (IGeoTerrainMeshProvider* Provider = Terrain->GetProvider())
+		{
+			for (const TPair<uint64, FMesh3DState>& Pair : Meshes3D)
+			{
+				if (!Pair.Value.bEmpty) { Provider->RemoveRoadMesh(Pair.Value.Key); }
+			}
+		}
+	}
+	Meshes3D.Empty();
 }
 
 void UGeoRoadsSubsystem::RemoveAllOverlays()
@@ -378,6 +424,11 @@ void UGeoRoadsSubsystem::Synchronise()
 	TSet<uint64> Built;
 	Built.Reserve(Keys.Num());
 
+	// Le tile con le strade DIPINTE a posto (proprie, di un antenato, o senza
+	// niente da dipingere). Diventano "vestite" dopo il passaggio delle
+	// strade 3D, qui sotto.
+	TSet<uint64> OverlayReady;
+
 	for (int32 Index = 0; Index < Keys.Num(); ++Index)
 	{
 		const FTileKey& Key = Keys[Index];
@@ -396,7 +447,7 @@ void UGeoRoadsSubsystem::Synchronise()
 		if (VectorLevel < 0 || !Dataset.TileExists(VectorKey))
 		{
 			Provider->SetTileOverlay(Key, nullptr, FDrapeTransform{});
-			Dressed.Add(Packed);
+			OverlayReady.Add(Packed);
 			++Stats.TileSenzaStrade;
 			continue;
 		}
@@ -449,7 +500,7 @@ void UGeoRoadsSubsystem::Synchronise()
 			{
 				Provider->SetTileOverlay(Key, nullptr, FDrapeTransform{});
 				StillUsed.Add(Packed);
-				Dressed.Add(Packed);
+				OverlayReady.Add(Packed);
 				++Stats.TileSenzaStrade;
 				continue;
 			}
@@ -460,7 +511,7 @@ void UGeoRoadsSubsystem::Synchronise()
 				UsedBytes += OwnBytes;
 				StillUsed.Add(Packed);
 				Provider->SetTileOverlay(Key, Own->Texture.Get(), FDrapeTransform{});
-				Dressed.Add(Packed);
+				OverlayReady.Add(Packed);
 				++Stats.TileConStrade;
 				continue;
 			}
@@ -488,7 +539,7 @@ void UGeoRoadsSubsystem::Synchronise()
 				// linee non si puo' leggere (file rovinato, gia' segnalato nel
 				// log), la tile di terreno non la aspetta per sempre.
 				Provider->SetTileOverlay(Key, nullptr, FDrapeTransform{});
-				Dressed.Add(Packed);
+				OverlayReady.Add(Packed);
 				++Stats.TileSenzaStrade;
 				continue;
 			}
@@ -512,13 +563,18 @@ void UGeoRoadsSubsystem::Synchronise()
 			Window.ImageKey = Ancestor;
 			Provider->SetTileOverlay(Key, Theirs->Texture.Get(), Window);
 			StillUsed.Add(Ancestor.Pack());
-			Dressed.Add(Packed);
+			OverlayReady.Add(Packed);
 			++Stats.TileConStradeDiAntenato;
 			bFallback = true;
 		}
 
 		if (!bFallback) { ++Stats.TileInAttesa; }
 	}
+
+	// --- Strade 3D --------------------------------------------------------
+	// Le chiavi sono gia' in ordine di urgenza (a schermo, attese, le altre):
+	// le costruzioni 3D partono nello stesso ordine.
+	Synchronise3D(Provider, Keys, VisibleCount, OverlayReady, Built);
 
 	// Le texture che nessuno usa piu' si liberano; i disegni pronti per tile
 	// che non esistono piu' si buttano.
@@ -545,6 +601,241 @@ void UGeoRoadsSubsystem::Synchronise()
 	Stats.DisegniInCorso = InFlight.Num();
 	Stats.MillisecondiPerDisegno = (CompletedJobs > 0)
 		? static_cast<float>(TotalJobSeconds / CompletedJobs * 1000.0) : 0.0f;
+}
+
+
+// ============================================================================
+//  Strade 3D
+// ============================================================================
+
+bool UGeoRoadsSubsystem::Needs3D(const FTileKey& Key, int32& OutVectorLevel) const
+{
+	OutVectorLevel = -1;
+	if (DeepestTerrainLevel == MAX_int32) { return false; }
+
+	// Solo le tile piu' fini: sono quelle vicine alla camera quando si vola
+	// bassi. Salendo di quota il quadtree smette di sceglierle, e le strade
+	// tornano dipinte da sole.
+	if (static_cast<int32>(Key.Level) < DeepestTerrainLevel - Levels3D + 1) { return false; }
+
+	const FGeoVectorDataset& Dataset = Streaming->GetDataset();
+	OutVectorLevel = Roads::ChooseVectorLevel(Key.Level, Dataset.GetLevelNumbers());
+	return OutVectorLevel >= 0
+	    && Dataset.TileExists(Imagery::AncestorOf(Key, static_cast<uint32>(OutVectorLevel)));
+}
+
+void UGeoRoadsSubsystem::EnsureRoadAtlas(IGeoTerrainMeshProvider* Provider)
+{
+	if (!RoadAtlas.IsValid())
+	{
+		std::vector<uint8_t> Pixels;
+		Roads::BuildRoadAtlas(Pixels);
+		std::vector<std::vector<uint8_t>> Mips;
+		Tiles::BuildMipChain(Pixels, Roads::RoadAtlasWidth, Roads::RoadAtlasHeight, Mips);
+		// Ripetuta lungo V: la strada scorre lungo la V per chilometri.
+		RoadAtlas.Reset(CreateGeoRuntimeTexture(Roads::RoadAtlasWidth, Roads::RoadAtlasHeight,
+			Pixels, Mips, /*bWrapV=*/true));
+	}
+	if (RoadAtlas.IsValid() && Provider && !Provider->HasRoadAtlas())
+	{
+		Provider->SetRoadAtlas(RoadAtlas.Get());
+	}
+}
+
+bool UGeoRoadsSubsystem::LaunchMeshJob(IGeoTerrainMeshProvider* Provider, const FTileKey& TerrainKey,
+                                       uint32 VectorLevel, int32 Step)
+{
+	const FTileKey VectorKey = Imagery::AncestorOf(TerrainKey, VectorLevel);
+	const UGeoVectorStreamingSubsystem::FVectorTilePtr Vector = Streaming->FindLoadedTile(VectorKey);
+	if (!Vector)
+	{
+		Streaming->RequestTile(VectorKey, 0);
+		return false;
+	}
+
+	UGeoTileStreamingSubsystem* Heights = GetWorld()->GetSubsystem<UGeoTileStreamingSubsystem>();
+	if (!Heights || !Provider || !MeshQueue.IsValid()) { return false; }
+
+	// Le quote della tile: il terreno le ha appena usate, quindi di norma sono
+	// in cache. Se la cache le ha gia' buttate, si richiedono e si riprova.
+	const UGeoTileStreamingSubsystem::FTilePtr Height = Heights->FindLoadedTile(TerrainKey);
+	if (!Height)
+	{
+		Heights->RequestTile(TerrainKey, 0);
+		return false;
+	}
+	// Facoltativa: le quote dell'antenato che copre tutta la tile vettoriale,
+	// per le spalle dei ponti che cadono fuori da questa tile.
+	const UGeoTileStreamingSubsystem::FTilePtr Wide = (VectorLevel < TerrainKey.Level)
+		? Heights->FindLoadedTile(Imagery::AncestorOf(TerrainKey, VectorLevel)) : nullptr;
+
+	const FGeoPrepareTileMeshFunction Prepare = Provider->GetPrepareFunction();
+	if (!Prepare) { return false; }
+
+	Roads::FRoadMeshParameters Parameters = MeshParameters3D;
+	Parameters.Step = Step;
+	Parameters.bFlipWinding = Terrain->IsFlipWinding();
+	const Roads::FVectorWindow Window = Roads::MakeVectorWindow(TerrainKey, VectorLevel, Vector->Extent);
+	const Roads::FRoad3DStyle StyleCopy = Style3D;
+	const int32 JobGeneration = MeshGeneration;
+	TSharedPtr<FMeshQueue, ESPMode::ThreadSafe> Queue = MeshQueue;
+
+	// Tutto per copia, niente "this": come il disegno delle strade dipinte e
+	// le mesh del terreno.
+	UE::Tasks::FTask Task = UE::Tasks::Launch(TEXT("GeoRoads3D"),
+		[Height, Wide, Vector, Window, StyleCopy, Parameters, Prepare, JobGeneration, TerrainKey, Queue]()
+		{
+			const double Started = FPlatformTime::Seconds();
+
+			FMeshResult Result;
+			Result.Key = TerrainKey;
+			Result.Generation = JobGeneration;
+			Result.Step = Parameters.Step;
+
+			const Roads::FSurfaceSampler Surface(*Height, Parameters.Step);
+			const Roads::FSurfaceSampler WideSurface(Wide ? *Wide : *Height, Wide ? 1 : Parameters.Step);
+
+			Mesh::FTileMeshData MeshData;
+			Roads::BuildRoadMesh(*Height, Surface, Wide ? &WideSurface : nullptr, *Vector, Window,
+				StyleCopy, Parameters, MeshData);
+
+			if (MeshData.TriangleCount > 0) { Result.Prepared = Prepare(MeshData); }
+			Result.bEmpty = !Result.Prepared.IsValid();
+			Result.Seconds = FPlatformTime::Seconds() - Started;
+			Queue->Completed.Enqueue(MoveTemp(Result));
+		},
+		UE::Tasks::ETaskPriority::BackgroundNormal);
+
+	MeshInFlight.Add(TerrainKey.Pack(), Task);
+	return true;
+}
+
+void UGeoRoadsSubsystem::DrainFinishedMeshes(IGeoTerrainMeshProvider* Provider, int32& InOutCommitBudget)
+{
+	if (MeshQueue.IsValid())
+	{
+		FMeshResult Result;
+		while (MeshQueue->Completed.Dequeue(Result))
+		{
+			if (Result.Generation != MeshGeneration) { continue; }
+			MeshInFlight.Remove(Result.Key.Pack());
+			++CompletedMeshJobs;
+			TotalMeshSeconds += Result.Seconds;
+			PendingMeshCommits.Add(MoveTemp(Result));
+		}
+	}
+
+	// La consegna al componente costa sul game thread (il proxy di scena):
+	// poche per frame, come le mesh del terreno.
+	int32 Index = 0;
+	while (Index < PendingMeshCommits.Num())
+	{
+		FMeshResult& Pending = PendingMeshCommits[Index];
+		const uint64 Packed = Pending.Key.Pack();
+
+		if (Pending.bEmpty)
+		{
+			// Niente strade in questa tile: si ricorda, e si toglie la mesh
+			// vecchia se c'era (per esempio dopo un cambio di passo).
+			const FMesh3DState* Previous = Meshes3D.Find(Packed);
+			if (Previous && !Previous->bEmpty) { Provider->RemoveRoadMesh(Pending.Key); }
+			Meshes3D.Add(Packed, FMesh3DState{ Pending.Key, Pending.Step, true });
+			PendingMeshCommits.RemoveAt(Index);
+			continue;
+		}
+
+		if (InOutCommitBudget <= 0) { ++Index; continue; }
+
+		if (Pending.Prepared.IsValid() && Provider->CommitRoadMesh(Pending.Key, *Pending.Prepared))
+		{
+			Meshes3D.Add(Packed, FMesh3DState{ Pending.Key, Pending.Step, false });
+			++Stats.Consegne3DQuestoFrame;
+			--InOutCommitBudget;
+		}
+		PendingMeshCommits.RemoveAt(Index);
+	}
+}
+
+void UGeoRoadsSubsystem::Synchronise3D(IGeoTerrainMeshProvider* Provider, const TArray<FTileKey>& Keys,
+                                       int32 VisibleCount, const TSet<uint64>& OverlayReady,
+                                       const TSet<uint64>& Built)
+{
+	if (b3DEnabled) { EnsureRoadAtlas(Provider); }
+
+	int32 CommitBudget = Terrain->IsWarmingUp()
+		? FMath::Max(MaxMeshCommitsPerFrame, WarmupMeshCommitsPerFrame) : MaxMeshCommitsPerFrame;
+	DrainFinishedMeshes(Provider, CommitBudget);
+
+	const int32 Step = Terrain->GetMeshStep();
+	const bool bMaterialUsable = Provider->GetRoadMaterialProblem().IsEmpty();
+
+	for (int32 Index = 0; Index < Keys.Num(); ++Index)
+	{
+		const FTileKey& Key = Keys[Index];
+		const uint64 Packed = Key.Pack();
+		const bool bOnScreen = Index < VisibleCount;
+
+		int32 VectorLevel = -1;
+		const bool bWants = b3DEnabled && Needs3D(Key, VectorLevel);
+		bool bReady3D = true;
+
+		if (!bWants)
+		{
+			if (const FMesh3DState* Old = Meshes3D.Find(Packed))
+			{
+				if (!Old->bEmpty) { Provider->RemoveRoadMesh(Key); }
+				Meshes3D.Remove(Packed);
+			}
+		}
+		else
+		{
+			const FMesh3DState* State = Meshes3D.Find(Packed);
+			// La tile puo' essere stata ricostruita dal terreno (il provider
+			// ha perso la strada): allora la mesh va rifatta.
+			const bool bHas = State && (State->bEmpty || Provider->HasRoadMesh(Key));
+			const bool bCurrent = bHas && State->Step == Step;
+
+			if (bHas) { (State->bEmpty ? Stats.Tile3DVuote : Stats.Tile3D)++; }
+			else
+			{
+				bReady3D = false;
+				++Stats.Tile3DInAttesa;
+			}
+
+			const bool bPending = PendingMeshCommits.ContainsByPredicate(
+				[Packed](const FMeshResult& Pending) { return Pending.Key.Pack() == Packed; });
+			if (!bCurrent && !bPending && !MeshInFlight.Contains(Packed) && MeshInFlight.Num() < MaxMeshJobsInFlight)
+			{
+				LaunchMeshJob(Provider, Key, static_cast<uint32>(VectorLevel), Step);
+			}
+
+			// Senza M_GeoRoad le strade 3D sarebbero grigie: si costruiscono
+			// lo stesso, ma non si fa aspettare il terreno per loro.
+			if (!bMaterialUsable) { bReady3D = true; }
+		}
+
+		// VESTITA = strade dipinte a posto E (strade 3D pronte, o non servono).
+		// Una tile GIA' A SCHERMO non si "sveste" mai per colpa del 3D: se la
+		// sua strada 3D manca (le quote buttate dalla cache, un cambio di
+		// passo), resta a schermo con le strade dipinte e la 3D arriva dopo.
+		// Svestirla farebbe tornare il padre per qualche frame: un lampo.
+		if (OverlayReady.Contains(Packed) && (bReady3D || bOnScreen))
+		{
+			Dressed.Add(Packed);
+		}
+	}
+
+	// Lo stato delle tile che il terreno non ha piu' si dimentica (le loro
+	// strade 3D sono sparite con loro, nel provider).
+	for (auto It = Meshes3D.CreateIterator(); It; ++It)
+	{
+		if (!Built.Contains(It.Key())) { It.RemoveCurrent(); }
+	}
+	PendingMeshCommits.RemoveAll([&Built](const FMeshResult& Pending) { return !Built.Contains(Pending.Key.Pack()); });
+
+	Stats.Costruzioni3DInCorso = MeshInFlight.Num();
+	Stats.MillisecondiPerCostruzione3D = (CompletedMeshJobs > 0)
+		? static_cast<float>(TotalMeshSeconds / CompletedMeshJobs * 1000.0) : 0.0f;
 }
 
 // ============================================================================
@@ -606,6 +897,30 @@ void UGeoRoadsSubsystem::DrawDebugOverlay()
 		TEXT("Tile di linee: %d in cache (%.1f/%.0f MB), %d in volo, %.2f ms a lettura   errori %d"),
 		StreamStats.TileResidenti, StreamStats.MemoriaMB, StreamStats.BudgetMB,
 		StreamStats.TileInVolo, StreamStats.TempoMedioCaricamentoMs, StreamStats.ErroriDiCaricamento));
+
+	if (!b3DEnabled)
+	{
+		Line(FColor::White, TEXT("Strade 3D : spente (geo.Roads.3D 1)"));
+	}
+	else
+	{
+		const IGeoTerrainMeshProvider* Provider = Terrain ? Terrain->GetProvider() : nullptr;
+		if (Provider && !Provider->GetRoadMaterialProblem().IsEmpty())
+		{
+			Line(FColor::Red, Provider->GetRoadMaterialProblem());
+		}
+		const int32 Triangles = Provider ? Provider->GetRoadTriangleCount() : 0;
+		Line(Stats.Tile3DInAttesa > 0 ? FColor::Yellow : FColor::Green, FString::Printf(
+			TEXT("Strade 3D : %d tile (%d senza strade), %d in attesa, %d in costruzione, +%d questo frame   %.1f k triangoli   %.1f ms l'una"),
+			Stats.Tile3D, Stats.Tile3DVuote, Stats.Tile3DInAttesa, Stats.Costruzioni3DInCorso,
+			Stats.Consegne3DQuestoFrame, Triangles / 1000.0f, Stats.MillisecondiPerCostruzione3D));
+		if (Stats.Tile3D + Stats.Tile3DVuote + Stats.Tile3DInAttesa == 0)
+		{
+			Line(FColor::White, FString::Printf(
+				TEXT("            nessuna tile al livello %d: scendi di quota per vederle"),
+				DeepestTerrainLevel == MAX_int32 ? 0 : DeepestTerrainLevel - Levels3D + 1));
+		}
+	}
 
 	if (StyleKind == Roads::ERoadStyle::Map)
 	{

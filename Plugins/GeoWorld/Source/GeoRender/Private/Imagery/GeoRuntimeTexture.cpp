@@ -5,7 +5,8 @@
 
 UTexture2D* CreateGeoRuntimeTexture(int32 Width, int32 Height,
                                     const std::vector<uint8_t>& Pixels,
-                                    const std::vector<std::vector<uint8_t>>& Mips)
+                                    const std::vector<std::vector<uint8_t>>& Mips,
+                                    bool bWrapV)
 {
 	if (Width <= 0 || Height <= 0 ||
 	    Pixels.size() != static_cast<size_t>(Width) * static_cast<size_t>(Height) * 4)
@@ -39,7 +40,7 @@ UTexture2D* CreateGeoRuntimeTexture(int32 Width, int32 Height,
 
 	Texture->SRGB = true;
 	Texture->AddressX = TextureAddress::TA_Clamp;
-	Texture->AddressY = TextureAddress::TA_Clamp;
+	Texture->AddressY = bWrapV ? TextureAddress::TA_Wrap : TextureAddress::TA_Clamp;
 	Texture->NeverStream = true;
 
 	// FILTRO. La prima versione era TF_Bilinear senza mipmap: da lontano il

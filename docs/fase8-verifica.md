@@ -54,7 +54,8 @@ volta).
    geo.Imagery.CreateMaterial
    ```
    Il materiale vecchio non ha i parametri delle strade: senza questo passo le
-   strade non si vedono e l'overlay lo dice in rosso.
+   strade non si vedono e l'overlay lo dice in rosso. Lo stesso comando crea
+   anche `M_GeoRoad`, il materiale delle strade 3D (`docs/strade-3d.md`).
 3. **Lancia il Play** e nella console:
    ```
    geo.Roads.Demo dataset\terreno dataset\ortofoto_torino_v2 dataset\strade_torino

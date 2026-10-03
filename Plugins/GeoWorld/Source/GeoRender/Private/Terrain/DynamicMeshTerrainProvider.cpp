@@ -12,6 +12,7 @@
 #include "Materials/MaterialInstanceDynamic.h"
 #include "Materials/MaterialInterface.h"
 #include "UObject/ConstructorHelpers.h"
+#include "UObject/Package.h"
 
 using namespace GeoWorld;
 
@@ -101,6 +102,17 @@ void FDynamicMeshTerrainProvider::Initialize(UWorld* World)
 		}
 	}
 
+	// Il materiale delle strade 3D: come M_GeoTerrain, nasce da
+	// geo.Imagery.CreateMaterial. Senza, le strade 3D usano il grigio di base.
+	RoadMaterial.Reset(LoadObject<UMaterialInterface>(
+		nullptr, TEXT("/GeoWorld/Materials/M_GeoRoad.M_GeoRoad")));
+	if (!RoadMaterial.IsValid())
+	{
+		RoadMaterialProblem = TEXT("manca M_GeoRoad: le strade 3D restano grigie. ")
+		                      TEXT("Crealo con geo.Imagery.CreateMaterial");
+		UE_LOG(LogGeoWorld, Warning, TEXT("[GeoTerrain] %s"), *RoadMaterialProblem);
+	}
+
 	if (!DrapeMaterial.IsValid())
 	{
 		UE_LOG(LogGeoWorld, Warning,
@@ -117,6 +129,7 @@ void FDynamicMeshTerrainProvider::Shutdown()
 	RemoveAllTiles();
 	if (AActor* Actor = Container.Get()) { Actor->Destroy(); }
 	Container = nullptr;
+	RoadMaterialInstance.Reset();
 }
 
 namespace
@@ -279,6 +292,11 @@ void FDynamicMeshTerrainProvider::RemoveTile(const Tiles::FTileKey& Key)
 		{
 			Component->DestroyComponent();
 		}
+		// La strada sparisce con la sua tile, nello stesso istante.
+		if (UDynamicMeshComponent* Road = Entry.RoadComponent.Get())
+		{
+			Road->DestroyComponent();
+		}
 	}
 }
 
@@ -286,7 +304,15 @@ void FDynamicMeshTerrainProvider::SetTileVisible(const Tiles::FTileKey& Key, boo
 {
 	const FTileEntry* Entry = Tiles.Find(Key.Pack());
 	UDynamicMeshComponent* Component = Entry ? Entry->Component.Get() : nullptr;
-	if (!Component || Component->GetVisibleFlag() == bVisible) { return; }
+	if (!Component) { return; }
+
+	// La strada 3D segue la sua tile: si mostra e si nasconde nello stesso
+	// frame, altrimenti per un frame si vedrebbe una senza l'altra.
+	if (UDynamicMeshComponent* Road = Entry->RoadComponent.Get())
+	{
+		if (Road->GetVisibleFlag() != bVisible) { Road->SetVisibility(bVisible); }
+	}
+	if (Component->GetVisibleFlag() == bVisible) { return; }
 
 	// ------------------------------------------------------------------
 	//  NOTA UE: SetVisibility e non SetHiddenInGame.
@@ -313,6 +339,10 @@ void FDynamicMeshTerrainProvider::RemoveAllTiles()
 		{
 			Component->DestroyComponent();
 		}
+		if (UDynamicMeshComponent* Road = Pair.Value.RoadComponent.Get())
+		{
+			Road->DestroyComponent();
+		}
 	}
 	Tiles.Empty();
 }
@@ -330,6 +360,13 @@ void FDynamicMeshTerrainProvider::RefreshTransforms(const FGeoreferenceSnapshot&
 		FTransform Transform = Snapshot.GetLocalNeuTransform(Pair.Value.Origin);
 		Transform.SetScale3D(FVector(GeoWorld::Units::MetersToUu));
 		Component->SetWorldTransform(Transform);
+
+		// Stessa origine, stessa trasformazione: la strada si sposta con il
+		// suo terreno nello stesso rebase.
+		if (UDynamicMeshComponent* Road = Pair.Value.RoadComponent.Get())
+		{
+			Road->SetWorldTransform(Transform);
+		}
 	}
 }
 
@@ -603,4 +640,114 @@ void FDynamicMeshTerrainProvider::SetOverlayStrength(float Strength)
 			ApplyOverlayParameters(Pair.Value, Pair.Value.Material.Get());
 		}
 	}
+}
+
+// ---------------------------------------------------------------------------
+//  Strade 3D
+// ---------------------------------------------------------------------------
+
+UMaterialInterface* FDynamicMeshTerrainProvider::GetRoadMaterialForComponent() const
+{
+	if (UMaterialInstanceDynamic* Instance = RoadMaterialInstance.Get()) { return Instance; }
+	if (UMaterialInterface* Road = RoadMaterial.Get()) { return Road; }
+	return Material.Get();
+}
+
+void FDynamicMeshTerrainProvider::SetRoadAtlas(UTexture2D* Atlas)
+{
+	UMaterialInterface* Parent = RoadMaterial.Get();
+	if (!Parent || !Atlas) { return; }
+
+	// Un'istanza sola per tutte le strade: l'atlante e' lo stesso. L'outer e'
+	// il pacchetto transitorio (non un componente: l'istanza deve vivere
+	// finche' vive il provider, che la tiene con un puntatore forte).
+	if (!RoadMaterialInstance.IsValid())
+	{
+		RoadMaterialInstance.Reset(UMaterialInstanceDynamic::Create(Parent, GetTransientPackage()));
+	}
+	if (UMaterialInstanceDynamic* Instance = RoadMaterialInstance.Get())
+	{
+		Instance->SetTextureParameterValue(TEXT("RoadAtlas"), Atlas);
+	}
+
+	for (TPair<uint64, FTileEntry>& Pair : Tiles)
+	{
+		if (UDynamicMeshComponent* Road = Pair.Value.RoadComponent.Get())
+		{
+			Road->SetMaterial(0, GetRoadMaterialForComponent());
+		}
+	}
+}
+
+bool FDynamicMeshTerrainProvider::CommitRoadMesh(const Tiles::FTileKey& Key, FGeoPreparedTileMesh& Prepared)
+{
+	AActor* Actor = Container.Get();
+	FTileEntry* Entry = Tiles.Find(Key.Pack());
+	if (!Actor || !Entry) { return false; }
+
+	UDynamicMeshComponent* Tile = Entry->Component.Get();
+	if (!Tile) { return false; }
+
+	FDynamicMeshPrepared& Ready = static_cast<FDynamicMeshPrepared&>(Prepared);
+
+	UDynamicMeshComponent* Road = Entry->RoadComponent.Get();
+	if (!Road)
+	{
+		Road = NewObject<UDynamicMeshComponent>(Actor);
+		Road->SetupAttachment(Actor->GetRootComponent());
+		Road->SetMobility(EComponentMobility::Movable);
+		Road->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+		// Niente ombre: un nastro sollevato di 20 cm farebbe un'ombra sottile
+		// e tremolante sul terreno sotto, che nessuna strada vera ha.
+		Road->SetCastShadow(false);
+		Road->SetEnableRaytracing(false);
+		Road->SetMaterial(0, GetRoadMaterialForComponent());
+		ApplyWireframe(Road, bWireframe);
+		Road->RegisterComponent();
+		Entry->RoadComponent = Road;
+	}
+
+	Road->SetMesh(MoveTemp(Ready.Mesh));
+	Road->NotifyMeshUpdated();
+	// La trasformazione e la visibilita' sono quelle della tile, adesso: la
+	// strada nasce gia' allineata e gia' nascosta se la tile e' nascosta.
+	Road->SetWorldTransform(Tile->GetComponentTransform());
+	Road->SetVisibility(Tile->GetVisibleFlag());
+	return true;
+}
+
+void FDynamicMeshTerrainProvider::RemoveRoadMesh(const Tiles::FTileKey& Key)
+{
+	FTileEntry* Entry = Tiles.Find(Key.Pack());
+	if (!Entry) { return; }
+	if (UDynamicMeshComponent* Road = Entry->RoadComponent.Get())
+	{
+		Road->DestroyComponent();
+	}
+	Entry->RoadComponent.Reset();
+}
+
+int32 FDynamicMeshTerrainProvider::GetRoadMeshCount() const
+{
+	int32 Count = 0;
+	for (const TPair<uint64, FTileEntry>& Pair : Tiles)
+	{
+		if (Pair.Value.RoadComponent.IsValid()) { ++Count; }
+	}
+	return Count;
+}
+
+int32 FDynamicMeshTerrainProvider::GetRoadTriangleCount() const
+{
+	int32 Total = 0;
+	for (const TPair<uint64, FTileEntry>& Pair : Tiles)
+	{
+		const UDynamicMeshComponent* Road = Pair.Value.RoadComponent.Get();
+		if (!Road) { continue; }
+		if (const UE::Geometry::FDynamicMesh3* RoadMeshData = Road->GetMesh())
+		{
+			Total += RoadMeshData->TriangleCount();
+		}
+	}
+	return Total;
 }

@@ -191,7 +191,8 @@ public:
 	bool TeleportViewTo(const FGeodetic& Destination);
 
 private:
-	void ApplyRebase(const FGeodetic& NewOrigin);
+	/** Sposta l'origine sul punto dato, ma sempre a QUOTA ZERO (vedi il .cpp). */
+	void ApplyRebase(const FGeodetic& RequestedOrigin);
 	void RefreshRegisteredComponents();
 	void DrawDebugOverlay() const;
 

@@ -57,6 +57,7 @@
 #include "Materials/Material.h"
 #include "Materials/MaterialExpressionAdd.h"
 #include "Materials/MaterialExpressionComponentMask.h"
+#include "Materials/MaterialExpressionConstant.h"
 #include "Materials/MaterialExpressionMultiply.h"
 #include "Materials/MaterialExpressionOneMinus.h"
 #include "Materials/MaterialExpressionScalarParameter.h"
@@ -79,13 +80,13 @@ namespace
 		if (GEngine) { GEngine->AddOnScreenDebugMessage(-1, 12.0f, Colour, Message); }
 	}
 
-	bool SaveMaterialPackage(UPackage* Package, UMaterial* Material, bool bIsNew)
+	bool SaveMaterialPackage(UPackage* Package, UMaterial* Material, bool bIsNew, const TCHAR* PackagePath)
 	{
 		Package->MarkPackageDirty();
 		if (bIsNew) { FAssetRegistryModule::AssetCreated(Material); }
 
 		const FString FileName = FPackageName::LongPackageNameToFilename(
-			MaterialPackagePath, FPackageName::GetAssetPackageExtension());
+			PackagePath, FPackageName::GetAssetPackageExtension());
 
 		FSavePackageArgs Arguments;
 		Arguments.TopLevelFlags = RF_Public | RF_Standalone;
@@ -242,56 +243,119 @@ namespace
 	}
 }
 
-static FAutoConsoleCommand GeoImageryCreateMaterialCommand(
-	TEXT("geo.Imagery.CreateMaterial"),
-	TEXT("Costruisce (o RIFA') /GeoWorld/Materials/M_GeoTerrain, il materiale del drappeggio."),
-	FConsoleCommandDelegate::CreateStatic([]()
+namespace
+{
+	const TCHAR* RoadMaterialPackagePath = TEXT("/GeoWorld/Materials/M_GeoRoad");
+	const TCHAR* RoadMaterialAssetName = TEXT("M_GeoRoad");
+
+	/**
+	 * M_GeoRoad, il materiale delle strade 3D: l'atlante delle superfici
+	 * (Roads/RoadMesh.h) letto con le UV della mesh, e una ruvidita' da asfalto.
+	 *
+	 *     TextureCoordinate ---> TextureSampleParameter2D ("RoadAtlas") ---> Base Color
+	 *     Constant 0.85 ------------------------------------------------------> Roughness
+	 *
+	 * Le UV fanno tutto: la U sceglie la striscia dell'atlante (asfalto,
+	 * binari...) e la attraversa da un bordo all'altro della strada, la V scorre
+	 * lungo la strada e si ripete ogni 12 m.
+	 */
+	bool BuildRoadGraph(UMaterial* Material)
 	{
-		// Se esiste lo si rifa' SUL POSTO: si svuota il grafo e lo si ricostruisce.
-		// Cancellarlo e crearne uno nuovo lascerebbe riferimenti rotti nelle
-		// istanze dinamiche gia' create, e costringerebbe a chiudere l'editor.
-		UMaterial* Material = LoadObject<UMaterial>(nullptr, MaterialPackagePath);
+		Material->MaterialDomain = MD_Surface;
+		Material->SetShadingModel(MSM_DefaultLit);
+
+		UMaterialExpressionTextureCoordinate* Coordinates =
+			Cast<UMaterialExpressionTextureCoordinate>(UMaterialEditingLibrary::CreateMaterialExpression(
+				Material, UMaterialExpressionTextureCoordinate::StaticClass(), -600, 0));
+		UMaterialExpressionTextureSampleParameter2D* Atlas =
+			Cast<UMaterialExpressionTextureSampleParameter2D>(UMaterialEditingLibrary::CreateMaterialExpression(
+				Material, UMaterialExpressionTextureSampleParameter2D::StaticClass(), -300, 0));
+		UMaterialExpressionConstant* Roughness =
+			Cast<UMaterialExpressionConstant>(UMaterialEditingLibrary::CreateMaterialExpression(
+				Material, UMaterialExpressionConstant::StaticClass(), -300, 250));
+		if (!Coordinates || !Atlas || !Roughness) { return false; }
+
+		Atlas->ParameterName = TEXT("RoadAtlas");
+		Atlas->SamplerType = SAMPLERTYPE_Color;
+		Roughness->R = 0.85f;
+
+		UMaterialEditingLibrary::ConnectMaterialExpressions(Coordinates, TEXT(""), Atlas, TEXT("UVs"));
+		UMaterialEditingLibrary::ConnectMaterialProperty(Atlas, TEXT(""), MP_BaseColor);
+		UMaterialEditingLibrary::ConnectMaterialProperty(Roughness, TEXT(""), MP_Roughness);
+
+		UMaterialEditingLibrary::RecompileMaterial(Material);
+		return true;
+	}
+
+	/**
+	 * Crea il materiale, o lo RIFA' sul posto se esiste: si svuota il grafo e
+	 * lo si ricostruisce. Cancellarlo e crearne uno nuovo lascerebbe
+	 * riferimenti rotti nelle istanze dinamiche gia' create, e costringerebbe a
+	 * chiudere l'editor. Ritorna false se qualcosa e' andato storto (e lo dice).
+	 */
+	bool CreateOrRebuildMaterial(const TCHAR* PackagePath, const TCHAR* AssetName,
+	                             bool (*BuildGraph)(UMaterial*))
+	{
+		UMaterial* Material = LoadObject<UMaterial>(nullptr, PackagePath);
 		const bool bIsNew = (Material == nullptr);
 
 		UPackage* Package = nullptr;
 		if (bIsNew)
 		{
-			Package = CreatePackage(MaterialPackagePath);
+			Package = CreatePackage(PackagePath);
 			if (!Package)
 			{
-				Report(TEXT("Non riesco a creare il package. Fallo a mano: docs/fase6-verifica.md"), FColor::Red);
-				return;
+				Report(FString::Printf(TEXT("%s: non riesco a creare il package. Fallo a mano: docs/fase6-verifica.md"),
+					AssetName), FColor::Red);
+				return false;
 			}
-			Material = NewObject<UMaterial>(Package, MaterialAssetName, RF_Public | RF_Standalone);
+			Material = NewObject<UMaterial>(Package, AssetName, RF_Public | RF_Standalone);
 			if (!Material)
 			{
-				Report(TEXT("Non riesco a creare il materiale. Fallo a mano: docs/fase6-verifica.md"), FColor::Red);
-				return;
+				Report(FString::Printf(TEXT("%s: non riesco a creare il materiale."), AssetName), FColor::Red);
+				return false;
 			}
 		}
 		else
 		{
 			Package = Material->GetOutermost();
 			UMaterialEditingLibrary::DeleteAllMaterialExpressions(Material);
-			Report(TEXT("M_GeoTerrain esiste: lo rifaccio con il grafo corretto."), FColor::Yellow);
+			Report(FString::Printf(TEXT("%s esiste: lo rifaccio con il grafo corretto."), AssetName), FColor::Yellow);
 		}
 
-		if (!BuildDrapeGraph(Material))
+		if (!BuildGraph(Material))
 		{
-			Report(TEXT("Creazione dei nodi fallita. Fallo a mano: docs/fase6-verifica.md"), FColor::Red);
-			return;
+			Report(FString::Printf(TEXT("%s: creazione dei nodi fallita."), AssetName), FColor::Red);
+			return false;
 		}
 
-		if (!SaveMaterialPackage(Package, Material, bIsNew))
+		if (!SaveMaterialPackage(Package, Material, bIsNew, PackagePath))
 		{
-			Report(TEXT("Materiale costruito ma NON salvato: salvalo tu dal Content Browser."),
+			Report(FString::Printf(TEXT("%s costruito ma NON salvato: salvalo tu dal Content Browser."), AssetName),
 				FColor::Yellow);
-			return;
+			return false;
 		}
 
-		Report(bIsNew
-			? TEXT("M_GeoTerrain creato in /GeoWorld/Materials. Rilancia geo.Imagery.Demo.")
-			: TEXT("M_GeoTerrain rifatto. Riavvia il Play (o rilancia geo.Imagery.Demo)."));
+		Report(FString::Printf(bIsNew ? TEXT("%s creato in /GeoWorld/Materials.") : TEXT("%s rifatto."), AssetName));
+		return true;
+	}
+}
+
+static FAutoConsoleCommand GeoImageryCreateMaterialCommand(
+	TEXT("geo.Imagery.CreateMaterial"),
+	TEXT("Costruisce (o RIFA') M_GeoTerrain (foto e strade dipinte) e M_GeoRoad (strade 3D) in /GeoWorld/Materials."),
+	FConsoleCommandDelegate::CreateStatic([]()
+	{
+		const bool bTerrain = CreateOrRebuildMaterial(MaterialPackagePath, MaterialAssetName, &BuildDrapeGraph);
+		const bool bRoad = CreateOrRebuildMaterial(RoadMaterialPackagePath, RoadMaterialAssetName, &BuildRoadGraph);
+		if (bTerrain && bRoad)
+		{
+			Report(TEXT("Materiali pronti. Riavvia il Play (o rilancia geo.Roads.Demo / geo.Imagery.Demo)."));
+		}
+		else if (!bTerrain)
+		{
+			Report(TEXT("M_GeoTerrain non fatto: puoi costruirlo a mano, docs/fase6-verifica.md"), FColor::Red);
+		}
 	}));
 
 #endif  // WITH_EDITOR

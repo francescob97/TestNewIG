@@ -28,7 +28,9 @@
 #include "Tasks/Task.h"
 #include "UObject/StrongObjectPtr.h"
 
+#include "Roads/RoadMesh.h"
 #include "Roads/RoadRasterizer.h"
+#include "Terrain/GeoTerrainMeshProvider.h"
 #include "Tiles/TileKey.h"
 
 #include <cstdint>
@@ -63,6 +65,18 @@ struct FGeoRoadsStats
 	UPROPERTY() float MemoriaVideoMB = 0.0f;
 	UPROPERTY() float BudgetVideoMB = 0.0f;
 	UPROPERTY() float MillisecondiPerDisegno = 0.0f;
+
+	// --- Strade 3D ---------------------------------------------------------
+	/** Tile con le strade 3D costruite. */
+	UPROPERTY() int32 Tile3D = 0;
+	/** Tile 3D senza nessuna strada da costruire (campi, boschi). */
+	UPROPERTY() int32 Tile3DVuote = 0;
+	/** Tile che vorrebbero le strade 3D e non le hanno ancora. */
+	UPROPERTY() int32 Tile3DInAttesa = 0;
+	UPROPERTY() int32 Costruzioni3DInCorso = 0;
+	UPROPERTY() int32 Consegne3DQuestoFrame = 0;
+	UPROPERTY() int32 Triangoli3D = 0;
+	UPROPERTY() float MillisecondiPerCostruzione3D = 0.0f;
 };
 
 UCLASS()
@@ -100,6 +114,18 @@ public:
 	void SetVideoBudgetMB(int32 Megabytes);
 	int32 GetVideoBudgetMB() const { return VideoBudgetMB; }
 
+	/**
+	 * Strade 3D: sulle tile di terreno piu' fini, cioe' vicino alla camera
+	 * quando si vola bassi, le strade diventano geometria (Roads/RoadMesh.h).
+	 * Piu' in alto restano dipinte.
+	 */
+	void Set3DEnabled(bool bInEnabled);
+	bool Is3DEnabled() const { return b3DEnabled; }
+
+	/** Quanti livelli di terreno, a partire dal piu' fine, hanno le strade 3D (1..3). */
+	void Set3DLevels(int32 InLevels);
+	int32 Get3DLevels() const { return Levels3D; }
+
 	/** Quanto si vedono: 0 = per niente, 1 = come disegnate. */
 	void SetStrength(float InStrength);
 	float GetStrength() const { return Strength; }
@@ -119,6 +145,15 @@ private:
 	int32 ResolutionFor(const FTileKey& TerrainKey) const;
 	bool IsDressedOrUndressable(const FTileKey& Key) const;
 	void RemoveAllOverlays();
+
+	// --- Strade 3D ---------------------------------------------------------
+	void Synchronise3D(IGeoTerrainMeshProvider* Provider, const TArray<FTileKey>& Keys, int32 VisibleCount,
+	                   const TSet<uint64>& OverlayReady, const TSet<uint64>& Built);
+	void DrainFinishedMeshes(IGeoTerrainMeshProvider* Provider, int32& InOutCommitBudget);
+	bool LaunchMeshJob(IGeoTerrainMeshProvider* Provider, const FTileKey& TerrainKey, uint32 VectorLevel, int32 Step);
+	bool Needs3D(const FTileKey& Key, int32& OutVectorLevel) const;
+	void RemoveAllRoadMeshes();
+	void EnsureRoadAtlas(IGeoTerrainMeshProvider* Provider);
 	void DrawDebugOverlay();
 
 	UPROPERTY(Transient)
@@ -173,6 +208,63 @@ private:
 
 	/** Cresce quando cambiano stile, risoluzione o dataset: i disegni vecchi si buttano. */
 	int32 Generation = 0;
+
+	// --- Strade 3D ---------------------------------------------------------
+
+	/** La mesh delle strade 3D di una tile, come la consegna il worker. */
+	struct FMeshResult
+	{
+		FTileKey Key;
+		int32 Generation = 0;
+		int32 Step = 0;
+		FGeoPreparedTileMeshPtr Prepared;
+		bool bEmpty = false;
+		double Seconds = 0.0;
+	};
+	struct FMeshQueue
+	{
+		TQueue<FMeshResult, EQueueMode::Mpsc> Completed;
+	};
+	TSharedPtr<FMeshQueue, ESPMode::ThreadSafe> MeshQueue;
+
+	/** Costruzioni in corso, per chiave di terreno. */
+	TMap<uint64, UE::Tasks::FTask> MeshInFlight;
+
+	/** Mesh pronte da consegnare (budget per frame). */
+	TArray<FMeshResult> PendingMeshCommits;
+
+	/**
+	 * Cosa e' stato costruito in 3D per ogni tile. La chiave intera sta anche
+	 * nel valore: FTileKey::Pack non e' invertibile, e per togliere una strada
+	 * bisogna sapere di quale tile si parla.
+	 */
+	struct FMesh3DState
+	{
+		FTileKey Key;
+		/** Il passo della mesh del terreno con cui e' stata costruita. */
+		int32 Step = 0;
+		/** Costruita, ma senza nessuna strada dentro (campi, boschi). */
+		bool bEmpty = false;
+	};
+	TMap<uint64, FMesh3DState> Meshes3D;
+
+	/** Cresce quando le strade 3D vanno rifatte (dataset, livelli, spegnimento). */
+	int32 MeshGeneration = 0;
+
+	bool b3DEnabled = true;
+	int32 Levels3D = 1;
+	int32 MaxMeshJobsInFlight = 4;
+	int32 MaxMeshCommitsPerFrame = 4;
+	int32 WarmupMeshCommitsPerFrame = 16;
+
+	GeoWorld::Roads::FRoad3DStyle Style3D;
+	GeoWorld::Roads::FRoadMeshParameters MeshParameters3D;
+
+	/** L'atlante delle superfici: generato una volta, dato al provider. */
+	TStrongObjectPtr<UTexture2D> RoadAtlas;
+
+	int32 CompletedMeshJobs = 0;
+	double TotalMeshSeconds = 0.0;
 
 	bool bRoadsEnabled = false;
 	bool bShowDebugOverlay = false;

@@ -6,6 +6,7 @@
 
 #include "CoreMinimal.h"
 #include "Terrain/GeoTerrainMeshProvider.h"
+#include "UObject/StrongObjectPtr.h"
 
 class AActor;
 class UDynamicMeshComponent;
@@ -74,6 +75,19 @@ public:
 	virtual void SetOverlayStrength(float Strength) override;
 	virtual FString GetOverlayMaterialProblem() const override { return OverlayMaterialProblem; }
 
+	virtual bool CommitRoadMesh(const GeoWorld::Tiles::FTileKey& Key, FGeoPreparedTileMesh& Prepared) override;
+	virtual void RemoveRoadMesh(const GeoWorld::Tiles::FTileKey& Key) override;
+	virtual bool HasRoadMesh(const GeoWorld::Tiles::FTileKey& Key) const override
+	{
+		const FTileEntry* Entry = Tiles.Find(Key.Pack());
+		return Entry && Entry->RoadComponent.IsValid();
+	}
+	virtual int32 GetRoadMeshCount() const override;
+	virtual int32 GetRoadTriangleCount() const override;
+	virtual void SetRoadAtlas(UTexture2D* Atlas) override;
+	virtual bool HasRoadAtlas() const override { return RoadMaterialInstance.IsValid() || !RoadMaterial.IsValid(); }
+	virtual FString GetRoadMaterialProblem() const override { return RoadMaterialProblem; }
+
 	virtual int32 GetRealizedTriangleCount() const override;
 	virtual void GetDiagnostics(TArray<FGeoTerrainTileDiagnostic>& Out,
 	                            int32 MaxEntries) const override;
@@ -98,6 +112,9 @@ private:
 		/** Ultimo drappeggio applicato: se non cambia, non si tocca il materiale. */
 		TWeakObjectPtr<UTexture2D> DrapedTexture;
 		GeoWorld::Imagery::FDrapeTransform DrapedTransform;
+
+		/** Strade 3D: un secondo componente, nello stesso frame locale della tile. */
+		TWeakObjectPtr<UDynamicMeshComponent> RoadComponent;
 
 		/** Strade (Fase 8): stesso schema del drappeggio, su parametri propri. */
 		bool bOverlaid = false;
@@ -136,4 +153,12 @@ private:
 	FString OverlayMaterialProblem;
 
 	float OverlayStrength = 1.0f;
+
+	/** Materiale delle strade 3D, e la sua istanza con l'atlante. */
+	TStrongObjectPtr<UMaterialInterface> RoadMaterial;
+	TStrongObjectPtr<UMaterialInstanceDynamic> RoadMaterialInstance;
+	FString RoadMaterialProblem;
+
+	/** Il materiale da dare a un componente di strada: l'istanza, o il ripiego. */
+	UMaterialInterface* GetRoadMaterialForComponent() const;
 };

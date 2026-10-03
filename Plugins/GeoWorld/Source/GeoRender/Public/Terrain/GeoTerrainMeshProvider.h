@@ -218,6 +218,31 @@ public:
 	/** Come GetMaterialProblem, per i parametri delle strade (vuota se a posto). */
 	virtual FString GetOverlayMaterialProblem() const { return FString(); }
 
+	// --- Strade 3D ---------------------------------------------------------
+	//
+	// Una seconda mesh per tile: i nastri delle strade (Roads/RoadMesh.h),
+	// costruiti nello STESSO frame locale della tile. Il provider la tratta
+	// come parte della tile: stessa trasformazione, stessa visibilita', stesso
+	// rebase, e sparisce con lei. Cosi' una strada non puo' restare a schermo
+	// senza il suo terreno, ne' il terreno comparire senza la sua strada per
+	// colpa di chi aggiorna cosa per primo.
+
+	/** Consegna la mesh delle strade di una tile ESISTENTE. Preparata con GetPrepareFunction(). */
+	virtual bool CommitRoadMesh(const GeoWorld::Tiles::FTileKey& Key, FGeoPreparedTileMesh& Prepared) = 0;
+	virtual void RemoveRoadMesh(const GeoWorld::Tiles::FTileKey& Key) = 0;
+	virtual bool HasRoadMesh(const GeoWorld::Tiles::FTileKey& Key) const = 0;
+	virtual int32 GetRoadMeshCount() const = 0;
+	virtual int32 GetRoadTriangleCount() const = 0;
+
+	/** L'atlante delle superfici (asfalto, binari...): una texture per tutte le strade 3D. */
+	virtual void SetRoadAtlas(UTexture2D* Atlas) = 0;
+
+	/** L'atlante e' gia' stato dato (o non serve, perche' manca il materiale)? */
+	virtual bool HasRoadAtlas() const = 0;
+
+	/** Vuota se il materiale delle strade 3D (M_GeoRoad) c'e'. */
+	virtual FString GetRoadMaterialProblem() const { return FString(); }
+
 	/**
 	 * Un problema noto del materiale del drappeggio, da mostrare a schermo, o
 	 * stringa vuota. Esiste perche' un materiale sbagliato non da' errori: da'

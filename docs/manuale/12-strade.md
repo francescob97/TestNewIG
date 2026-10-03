@@ -189,12 +189,46 @@ schermo le hanno sempre.
 
 ---
 
+## 12.6 Le strade 3D
+
+Da vicino le strade diventano **geometria** (`Roads/RoadMesh.h`): sulle tile di
+terreno al livello più fine, cioè attorno alla camera quando si vola bassi.
+Salendo, il quadtree smette di scegliere quelle tile e le strade tornano
+dipinte da sole. Il racconto completo, con i numeri, è in `docs/strade-3d.md`.
+
+Il problema è **stare sul terreno**: non sul DEM, ma sulla mesh che si vede,
+con un post ogni due e le celle divise lungo la diagonale.
+
+1. La quota si prende dallo **stesso triangolo** che il terreno disegna
+   (`FSurfaceSampler`).
+2. La strada si **spezza** dove attraversa uno spigolo della mesh: fra due
+   tagli il terreno è un piano, e il nastro ci sta sopra.
+3. La si **solleva** di 20 cm, più 2 cm per gradino di importanza: agli
+   incroci la strada più importante sta sopra, e le due superfici non
+   lampeggiano l'una nell'altra (*z-fighting*).
+
+> 💡 **Esempio.** I ponti non seguono il terreno: l'impalcato va dritto fra le
+> due spalle e ha fianchi e fondo. Su una valle di 60 m il test misura la
+> strada normale a 340 m e l'impalcato a 400 m.
+
+> ⚠️ **Trappola (presa dai test).** Nelle curve strette i due bordi interni di
+> due sezioni consecutive si incrociano e il quadrilatero diventa un
+> "papillon": i suoi due triangoli guardano in direzioni opposte. Decidere il
+> verso una volta per quadrilatero ne lasciava uno su 1.740 rovesciato, cioè
+> invisibile dall'alto. Ora si decide triangolo per triangolo.
+
+La mesh della strada vive **nel provider, dentro la tile**: stessa
+trasformazione, stessa visibilità, stesso rebase. Non c'è un momento in cui il
+terreno è a schermo e la sua strada no, o il contrario.
+
+---
+
 ## Alternative considerate
 
 | Alternativa | Perché no |
 |---|---|
 | Disegnare le strade nella pipeline, come immagini | Decine di milioni di file per avere mezzo metro per pixel; stile fisso |
-| Strade come geometria 3D sopra il terreno | Devono seguire il LOD del terreno, che cambia: è un lavoro a sé, utile per i veicoli a terra. Le tile vettoriali servono anche a quello |
+| Strade 3D OVUNQUE, anche da lontano | Milioni di triangoli per linee larghe meno di un pixel. Da lontano dipinte, da vicino 3D (sezione 12.6) |
 | Decal di Unreal, una per segmento | Milioni di decal; ognuna costa nel renderer |
 | Runtime Virtual Texture di Unreal | Pensata per un Landscape locale, non per un pianeta con il rebasing |
 | Disegno sulla GPU (render target) | Più veloce, ma non si prova senza il motore. Il disegno su CPU costa 3–25 ms su un worker, accettabile |
@@ -261,6 +295,7 @@ lavoro non scrive in memoria già liberata.
 | `GeoTiles/Public/Tiles/VectorTileFormat.h` | lettura di `.gvt` |
 | `GeoTiles/.../Streaming/GeoVector*` | dataset e caricamento |
 | `GeoRender/Public/Roads/RoadRasterizer.h` | il disegno |
+| `GeoRender/Public/Roads/RoadMesh.h` | le strade 3D: superficie, nastri, ponti, atlante |
 | `GeoRender/.../Roads/GeoRoadsSubsystem.*` | il runtime |
 | `GeoRender/.../Imagery/GeoRuntimeTexture.*` | texture da pixel, condivisa con le foto |
 | `Tools/StandaloneTests/georoads_main.cpp` | i test che misurano |
@@ -277,6 +312,5 @@ lavoro non scrive in memoria già liberata.
 - Una tile compare **solo con le sue strade** o con quelle del padre: il terreno
   ora accetta più vestitori, per nome.
 - Dopo l'aggiornamento il materiale va **rifatto** (`geo.Imagery.CreateMaterial`).
-- Limite noto: da vicinissimo le strade sono morbide, perché il terreno non va
-  oltre il livello del DEM. La soluzione (terreno suddiviso oltre il DEM) è il
-  prossimo lavoro tecnico.
+- Da vicino le strade sono **3D**: posate sui triangoli del terreno, sollevate
+  di qualche centimetro per classe, con ponti dritti fra le spalle.

@@ -361,6 +361,16 @@ che non cambierà.
 
 **Passo 2 — Cambiare l'origine.** Nuova `O_ecef`, nuova base `M`.
 
+> ⚠️ **Trappola (trovata dopo la Fase 8): l'origine sta a QUOTA ZERO.** Fino
+> ad allora la nuova origine era la posizione della camera, quota compresa: a
+> 2.500 m di quota, la Z = 0 del mondo stava 2.500 m sopra il terreno. Unreal
+> però ancora alla Z = 0 il cielo (`SkyAtmosphere`) e la nebbia
+> (`ExponentialHeightFog`). A ogni rebase il terreno saltava, rispetto a cielo e
+> nebbia, di quanto si era saliti o scesi dall'ultimo: tutto lo schermo
+> cambiava luminosità in un frame. Erano i "flash ogni tanto, muovendosi". Ora
+> l'origine è il punto dell'ellissoide sotto la camera (quota 0), la Z del
+> mondo è la quota, e il rebase scatta sulla distanza **orizzontale**.
+
 **Passo 3 — Rimettere la camera dove stava geograficamente.** Dalla sua
 posizione ECEF (passo 1) si calcola la nuova posizione Unreal. Sullo schermo non
 cambia niente: la camera è nello stesso punto del mondo, sono cambiati solo i

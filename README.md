@@ -34,8 +34,9 @@ Il progetto `TestNewIG` e' un guscio vuoto: tutto il codice vive in
 - [x] **Fase 6** — ortofoto drappeggiate *(mai compilata in UE)*
 - [ ] Fase 7 — entità e interoperabilità (CIGI, DIS, HLA, memoria condivisa)
       *(solo design: `docs/fase7-design.md`)*
-- [x] **Fase 8** — strade, ferrovie e piste da OpenStreetMap *(mai compilata in UE;
-      `docs/fase8-design.md`, prova: `docs/fase8-verifica.md`)*
+- [x] **Fase 8** — strade, ferrovie e piste da OpenStreetMap, dipinte da lontano e
+      **3D da vicino** *(`docs/fase8-design.md`, prova: `docs/fase8-verifica.md`,
+      strade 3D e flash del rebase: `docs/strade-3d.md`)*
 - [ ] Fase 9 — acqua: mare, laghi, fiumi
 - [ ] Fase 10 — edifici e monumenti
 - [ ] Fase 11 — vegetazione
@@ -78,7 +79,7 @@ cmake --build build
 ./build/geoquadtree_tests    # 84 test  -- LOD, culling, orizzonte, residenza
 ./build/geomesh_tests        # 34 test  -- mesh, gonne, giunzioni, passo
 ./build/geoimagery_tests     # 52 test  -- drappeggio, formato immagine, mipmap
-./build/georoads_tests       # 42 test  -- strade: formato .gvt, larghezze misurate, ritagli
+./build/georoads_tests       # 63 test  -- strade: formato .gvt, larghezze misurate, ritagli, strade 3D
 
 ./Plugins/GeoWorld/Tools/CheckSourceDiscipline.sh
 python3 Plugins/GeoWorld/Tools/CheckShadowedParameters.py
@@ -92,7 +93,7 @@ le classi di errore di compilazione gia' incontrate su Windows -- shadowing,
 simboli non esportati fra moduli, tipi di comando console inesistenti,
 collisioni da build unity, metodi inesistenti chiamati sulle nostre classi.
 
-271 test C++ in totale, piu' 148 test Python della pipeline.
+292 test C++ in totale, piu' 149 test Python della pipeline.
 
 **Dopo la prima prova su Torino** (materiale, scene Sentinel, prestazioni): `docs/prova-torino.md`.
 **Dopo la seconda** (troppi triangoli, RAM): `docs/prova-torino-2.md`.
@@ -115,7 +116,7 @@ python run.py verify-imagery -o dataset/ortofoto
 python run.py fetch --area italia -o dati/copernicus_italia
 python run.py fetch-imagery --area italia -o dati/sentinel_italia --dry-run
 
-python -m unittest discover -s tests               :: 148 test, sorgente sintetico
+python -m unittest discover -s tests               :: 149 test, sorgente sintetico
 ```
 
 Su Windows serve conda: vedi `Pipeline/README.md`.
