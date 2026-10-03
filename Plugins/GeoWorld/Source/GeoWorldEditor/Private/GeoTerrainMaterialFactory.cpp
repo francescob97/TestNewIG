@@ -336,7 +336,11 @@ namespace
 			return false;
 		}
 
-		Report(FString::Printf(bIsNew ? TEXT("%s creato in /GeoWorld/Materials.") : TEXT("%s rifatto."), AssetName));
+		// NOTA UE: il formato di Printf DEVE essere un letterale TEXT("..."):
+		// da UE 5.5 lo si controlla in compilazione, e un "a ? TEXT(x) :
+		// TEXT(y)" non compila (C2664). Due chiamate, una per caso.
+		if (bIsNew) { Report(FString::Printf(TEXT("%s creato in /GeoWorld/Materials."), AssetName)); }
+		else { Report(FString::Printf(TEXT("%s rifatto."), AssetName)); }
 		return true;
 	}
 }

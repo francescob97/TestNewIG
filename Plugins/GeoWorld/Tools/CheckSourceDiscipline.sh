@@ -142,6 +142,22 @@ else
 fi
 
 echo
+echo "== Regola 6: il formato di Printf e' un letterale TEXT(\"...\") =="
+# Da UE 5.5 FString::Printf controlla il formato IN COMPILAZIONE, e vuole un
+# letterale. "Printf(bNuovo ? TEXT(\"a %s\") : TEXT(\"b %s\"), X)" non compila:
+# C2664, "cannot convert argument 1 from 'const wchar_t *'". E' successo con
+# M_GeoRoad. Si cerca ogni Printf( il cui primo argomento, anche a capo, non
+# comincia con TEXT(.
+BAD_PRINTF=$(grep -rlPz --include='*.h' --include='*.cpp' 'Printf\(\s*+(?!TEXT\()' "$SRC" 2>/dev/null || true)
+if [ -n "$BAD_PRINTF" ]; then
+	echo "  FALLITO - Printf con un formato che non e' un letterale TEXT(...):"
+	echo "$BAD_PRINTF" | sed 's/^/    /'
+	FAILURES=$((FAILURES + 1))
+else
+	echo "  ok - ogni Printf ha un formato letterale"
+fi
+
+echo
 if [ "$FAILURES" -eq 0 ]; then
 	echo "TUTTI I CONTROLLI SUPERATI"
 	exit 0
