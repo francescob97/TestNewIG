@@ -370,5 +370,41 @@ class BuildOnSyntheticOsm(unittest.TestCase):
                     yield os.path.join(directory, name)
 
 
+@unittest.skipUnless(HAS_GDAL_OSM, "serve GDAL con il driver OSM e GEOS")
+class ManyPointsBeforeTheWays(unittest.TestCase):
+    """
+    Il caso della prima prova vera sul nord-ovest: un file con moltissimi nodi
+    "interessanti" (panchine, negozi, fermate) prima delle way. Leggendo solo il
+    layer delle linee, il driver OSM accumulava i punti finche' si fermava con
+    "Too many features have accumulated in points layer".
+    """
+
+    def test_lines_are_read_despite_150000_points(self):
+        from geoworld import osmextract
+        with tempfile.TemporaryDirectory() as directory:
+            path = os.path.join(directory, "punti.osm")
+            with open(path, "w", encoding="utf-8") as handle:
+                handle.write("<?xml version='1.0' encoding='UTF-8'?>\n<osm version=\"0.6\">\n")
+                for index in range(1, 150001):
+                    handle.write(f'<node id="{index}" lat="{45.0 + (index % 997) * 1e-4:.7f}" '
+                                 f'lon="{7.5 + (index % 991) * 1e-4:.7f}" version="1">'
+                                 '<tag k="amenity" v="bench"/></node>\n')
+                for index in range(200):
+                    a, b = 200001 + 2 * index, 200002 + 2 * index
+                    handle.write(f'<node id="{a}" lat="45.05" lon="{7.6 + index * 1e-4:.7f}" version="1"/>\n')
+                    handle.write(f'<node id="{b}" lat="45.06" lon="{7.6 + index * 1e-4:.7f}" version="1"/>\n')
+                for index in range(200):
+                    handle.write(f'<way id="{index + 1}" version="1"><nd ref="{200001 + 2 * index}"/>'
+                                 f'<nd ref="{200002 + 2 * index}"/><tag k="highway" v="residential"/></way>\n')
+                handle.write("</osm>\n")
+
+            counts = {}
+            lines = list(osmextract.iter_lines(path, counts=counts))
+            self.assertEqual(len(lines), 200)
+            # E il ritaglio sull'area funziona anche leggendo dal dataset.
+            inside = list(osmextract.iter_lines(path, bbox=(7.60, 45.0, 7.6099, 45.1)))
+            self.assertEqual(len(inside), 100)
+
+
 if __name__ == "__main__":
     unittest.main()

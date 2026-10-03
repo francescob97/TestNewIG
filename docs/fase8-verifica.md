@@ -136,6 +136,7 @@ geo.Roads.Resolution 512 2048
 | Sintomo | Causa probabile | Cosa fare |
 |---|---|---|
 | `[NO] OSM` in check-env | GDAL senza driver OSM | `conda install -c conda-forge gdal` (le build conda ce l'hanno) |
+| `Too many features have accumulated in points layer` | versione di prima della correzione: leggeva solo il layer delle linee e il driver OSM accumulava i punti | aggiorna il codice (`git pull`) e rilancia: ora si legge in modo interlacciato, solo le linee |
 | `build-roads` fermo a "leggo..." per molti minuti | è lo stadio lento: il driver ricompone le way | aspetta; un file regionale richiede minuti, l'Italia decine |
 | Le strade non si vedono, riga rossa sul materiale | `M_GeoTerrain` è quello di prima della Fase 8 | `geo.Imagery.CreateMaterial` |
 | Le strade non si vedono, nessuna riga rossa | dataset non aperto, o area diversa da quella del terreno | `geo.Roads.Debug 1`: guarda "senza niente" e l'area stampata da `geo.Roads.Open` |

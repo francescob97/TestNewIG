@@ -108,12 +108,27 @@ def iter_lines(path: str, bbox: tuple[float, float, float, float] | None = None,
     # lavorare quasi sempre su disco.
     gdal.SetConfigOption("OSM_MAX_TMPFILE_SIZE", "1024")
 
-    source = gdal.OpenEx(path, gdal.OF_VECTOR)
+    # LETTURA "INTERLACCIATA". Il driver OSM legge il file una volta sola, in
+    # ordine, e smista nodi, way e relazioni nei cinque layer. Leggendo un
+    # layer solo (layer.GetNextFeature), le feature degli altri si accumulano
+    # in memoria in attesa che qualcuno le chieda, finche' il driver si ferma
+    # con "Too many features have accumulated in points layer". Sul file
+    # sintetico dei test non succedeva: troppo piccolo. Sul nord-ovest si'.
+    #
+    # Il rimedio sono due cose insieme:
+    #   - "SET interest_layers = lines": il driver non costruisce nemmeno le
+    #     feature degli altri layer (niente punti, niente multipoligoni da
+    #     ricomporre), il che e' anche molto piu' veloce;
+    #   - la lettura dal DATASET (source.GetNextFeature), l'API che GDAL
+    #     chiede per questo driver: funziona qualunque layer arrivi.
+    source = gdal.OpenEx(path, gdal.OF_VECTOR, open_options=["INTERLEAVED_READING=YES"])
     if source is None:
         raise RuntimeError(f"GDAL non riesce ad aprire {path}")
     layer = source.GetLayerByName("lines")
     if layer is None:
         raise RuntimeError(f"{path}: nessun layer 'lines'. E' davvero un file OSM?")
+    if source.GetDriver().GetDescription() == "OSM":
+        source.ExecuteSQL("SET interest_layers = lines")
 
     definition = layer.GetLayerDefn()
     field_names = {definition.GetFieldDefn(i).GetName()
@@ -132,8 +147,17 @@ def iter_lines(path: str, bbox: tuple[float, float, float, float] | None = None,
     stats.setdefault("disegnate", 0)
     stats.setdefault("scartate", 0)
 
-    feature = layer.GetNextFeature()
-    while feature is not None:
+    # I filtri di attributo e di area restano sul layer (scartano in C quasi
+    # tutto cio' che non e' strada), ma non ci si fida che valgano anche
+    # leggendo dal dataset: il layer si controlla qui, l'area in fondo, e la
+    # classificazione scarta comunque cio' che non e' strada, ferrovia o pista.
+    lines_name = layer.GetName()
+    while True:
+        feature, owner = source.GetNextFeature(include_layer=True)
+        if feature is None:
+            break
+        if owner is None or owner.GetName() != lines_name:
+            continue
         stats["lette"] += 1
         if report and stats["lette"] % 200000 == 0:
             report(f"      {stats['lette']:,} linee lette, {stats['disegnate']:,} da disegnare")
@@ -150,8 +174,12 @@ def iter_lines(path: str, bbox: tuple[float, float, float, float] | None = None,
             stats["scartate"] += 1
         else:
             geometry.FlattenTo2D()
+            if bbox is not None:
+                west, east, south, north = geometry.GetEnvelope()
+                if east < bbox[0] or west > bbox[2] or north < bbox[1] or south > bbox[3]:
+                    stats["scartate"] += 1
+                    continue
             for part in _linestring_from_wkb(bytes(geometry.ExportToWkb(ogr.wkbNDR))):
                 if len(part) >= 2:
                     stats["disegnate"] += 1
                     yield classified, part
-        feature = layer.GetNextFeature()
