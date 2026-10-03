@@ -6,9 +6,10 @@
 **Cosa è già provato qui, senza Unreal:**
 
 - la pipeline intera (estrazione, taglio, indici, verifica, ripresa dopo
-  un'interruzione) su un estratto OSM sintetico: 28 test Python;
+  un'interruzione) su un estratto OSM sintetico: 30 test Python;
 - il lettore C++ su un file scritto dalla pipeline vera, e il disegno misurato
-  al centimetro: 42 test standalone (`georoads_tests`);
+  al centimetro, e le strade 3D (sezione trasversale, ponti, marciapiedi,
+  incroci): 80 test standalone (`georoads_tests`);
 - i controlli statici che intercettano gli errori di compilazione già visti.
 
 **Cosa non ho potuto provare:** la compilazione in Unreal e un estratto OSM

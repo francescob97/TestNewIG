@@ -993,6 +993,39 @@ static FAutoConsoleCommandWithWorldAndArgs GeoTerrainShadowsCommand(
 			TEXT("  (accese costano: centinaia di mesh non Nanite ridisegnate nelle mappe d'ombra)"), FColor::White);
 	}));
 
+// --- geo.Terrain.Debug ------------------------------------------------------
+static FAutoConsoleCommandWithWorldAndArgs GeoTerrainDebugCommand(
+	TEXT("geo.Terrain.Debug"),
+	TEXT("geo.Terrain.Debug <0|1> - overlay del terreno: mesh, triangoli, costruzione, transizioni."),
+	FConsoleCommandWithWorldAndArgsDelegate::CreateStatic(
+		[](const TArray<FString>& Args, UWorld* World)
+	{
+		GeoTerrainConsole::Toggle(Args, World, TEXT("Overlay del terreno"),
+			[](UGeoTerrainSubsystem* T, bool b) { T->SetDebugOverlayEnabled(b); },
+			[](UGeoTerrainSubsystem* T) { return T->IsDebugOverlayEnabled(); });
+	}));
+
+// --- geo.Terrain.Morph ------------------------------------------------------
+static FAutoConsoleCommandWithWorldAndArgs GeoTerrainMorphCommand(
+	TEXT("geo.Terrain.Morph"),
+	TEXT("geo.Terrain.Morph <secondi> - quando una tile si affina, quanto ci mette a passare dalla forma e dalla foto del padre alle proprie (default 0.6, 0 = di colpo)."),
+	FConsoleCommandWithWorldAndArgsDelegate::CreateStatic(
+		[](const TArray<FString>& Args, UWorld* World)
+	{
+		UGeoTerrainSubsystem* Terrain = GeoTerrainConsole::Get(World);
+		if (!Terrain) { return; }
+		if (Args.Num() >= 1) { Terrain->SetTransitionSeconds(FCString::Atof(*Args[0])); }
+		if (Terrain->GetTransitionSeconds() > 0.0f)
+		{
+			GeoTerrainConsole::Report(FString::Printf(
+				TEXT("Transizioni: %.2f s (forma, luce e foto del padre -> proprie)"), Terrain->GetTransitionSeconds()));
+		}
+		else
+		{
+			GeoTerrainConsole::Report(TEXT("Transizioni SPENTE: le tile cambiano di colpo (per confrontare)"));
+		}
+	}));
+
 // --- geo.Terrain.Threads ----------------------------------------------------
 static FAutoConsoleCommandWithWorldAndArgs GeoTerrainThreadsCommand(
 	TEXT("geo.Terrain.Threads"),

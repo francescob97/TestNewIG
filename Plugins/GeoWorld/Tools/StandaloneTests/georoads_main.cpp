@@ -582,19 +582,44 @@ static void TestSurfaceSampler()
 		Fmt("%.4f m di scarto", Sampled - Vertex.HeightM));
 }
 
+// Quanto un vertice della mesh delle strade sta sopra il terreno disegnato.
+static double AboveSurface(const Mesh::FTileMeshData& MeshData, size_t Vertex, const FSurfaceSampler& Surface)
+{
+	const Core::FGeodetic Point = VertexGeodetic(MeshData, Vertex);
+	return Point.HeightM - Surface.HeightAt(Point.LonRad / Core::DegToRad, Point.LatRad / Core::DegToRad);
+}
+
+// Il vertice usa la superficie `Surface` dell'atlante? (dalla sua U)
+static bool UsesSurface(const Mesh::FTileMeshData& MeshData, size_t Vertex, ERoadSurface Surface)
+{
+	float U0 = 0.0f, U1 = 0.0f;
+	SurfaceUvRange(Surface, U0, U1);
+	const float U = MeshData.UVs[Vertex * 2];
+	return U >= U0 - 1e-5f && U <= U1 + 1e-5f;
+}
+
+// Spostamento in metri (nord, est) fra due vertici.
+static void NorthEast(const Mesh::FTileMeshData& MeshData, size_t A, size_t B, double& North, double& East)
+{
+	const Core::FGeodetic PA = VertexGeodetic(MeshData, A);
+	const Core::FGeodetic PB = VertexGeodetic(MeshData, B);
+	North = (PB.LatRad - PA.LatRad) / Core::DegToRad * 111132.0;
+	East = (PB.LonRad - PA.LonRad) / Core::DegToRad * 111320.0 * std::cos(PA.LatRad);
+}
+
 static void TestRoadOnTerrain()
 {
-	Section("9. Strade 3D posate sul terreno");
+	Section("9. Strade 3D posate sul terreno: carreggiata in piano, scarpate");
 
 	const Tiles::FHeightTile Tile = MakeTerrain([](int I, int J)
 		{ return 300.0 + 35.0 * std::sin(I * 0.13) * std::cos(J * 0.11) + 0.8 * J; });
 	const FSurfaceSampler Surface(Tile, 2);
 
-	// Una primaria in diagonale e una residenziale curva, nel quarto NO della
+	// Una primaria in diagonale e una terziaria curva, nel quarto NO della
 	// tile vettoriale del 13 (cioe' dentro la tile 14), piu' una che esce.
 	const FVectorTile Vectors = RoadsInNorthWestQuarter({
 		{ ERoadClass::Primary, 0, 0, 80, { {500, 600}, {3000, 2500}, {7500, 7000} } },
-		{ ERoadClass::Residential, 0, 0, 55, { {1000, 7000}, {2500, 6000}, {4000, 6500}, {6000, 5200} } },
+		{ ERoadClass::Tertiary, 0, 0, 55, { {1000, 7000}, {2500, 6000}, {4000, 6500}, {6000, 5200} } },
 		{ ERoadClass::Primary, 0, 0, 80, { {4000, 4000}, {12000, 4100} } } });
 
 	const FVectorWindow Window = MakeVectorWindow(Terrain14, 13, 16384);
@@ -617,45 +642,59 @@ static void TestRoadOnTerrain()
 	Check(Roads.Origin.LatRad == Terrain.Origin.LatRad && Roads.Origin.LonRad == Terrain.Origin.LonRad
 		&& Roads.Origin.HeightM == Terrain.Origin.HeightM, "origine identica a quella della mesh del terreno");
 
-	// Ogni vertice sta sopra la superficie disegnata, di poco: il
-	// sollevamento (20 cm piu' qualche cm per classe), mai sotto.
-	double Lowest = 1e9, Highest = -1e9;
+	// La carreggiata non e' MAI sotto il terreno: sta al suo punto piu' alto
+	// piu' il sollevamento. I piedi delle scarpate invece entrano nel
+	// terreno di FootSink: niente fessure fra strada e prato.
+	double DeckLowest = 1e9, DeckHighest = -1e9, FootLowest = 1e9;
 	double WestMost = 1e9, EastMost = -1e9;
 	const Tiles::FTileBounds Bounds = Tiles::GetTileBounds(Tile.Key.Level, Tile.Key.X, Tile.Key.Y);
 	for (size_t Vertex = 0; Vertex < Roads.Positions.size() / 3; ++Vertex)
 	{
-		const Core::FGeodetic Point = VertexGeodetic(Roads, Vertex);
-		const double Lon = Point.LonRad / Core::DegToRad;
-		const double Lat = Point.LatRad / Core::DegToRad;
-		const double Above = Point.HeightM - Surface.HeightAt(Lon, Lat);
-		Lowest = std::min(Lowest, Above);
-		Highest = std::max(Highest, Above);
+		const double Above = AboveSurface(Roads, Vertex, Surface);
+		if (UsesSurface(Roads, Vertex, ERoadSurface::MajorAsphalt))
+		{
+			DeckLowest = std::min(DeckLowest, Above);
+			DeckHighest = std::max(DeckHighest, Above);
+		}
+		if (UsesSurface(Roads, Vertex, ERoadSurface::Verge)) { FootLowest = std::min(FootLowest, Above); }
+		const double Lon = VertexGeodetic(Roads, Vertex).LonRad / Core::DegToRad;
 		WestMost = std::min(WestMost, Lon);
 		EastMost = std::max(EastMost, Lon);
 	}
-	Check(Lowest > 0.15 && Highest < 0.45, "ogni vertice fra 15 e 45 cm sopra il terreno disegnato",
-		Fmt("da %.3f a %.3f m", Lowest, Highest));
+	Check(DeckLowest >= Parameters.Lift - 1e-3, "nessun punto della carreggiata sotto il terreno (+ sollevamento)",
+		Fmt("minimo %.3f m sopra", DeckLowest));
+	// Ma neanche sospesa piu' di quanto il pendio impone: su questo terreno,
+	// ripidissimo (fino al 65% di traverso), il bordo a valle di una strada da
+	// 8 m puo' stare al massimo ~5 m sopra il suo terreno, e la scarpata lo
+	// raccorda. Su pendii veri (10-30%) sono decine di centimetri.
+	Check(DeckHighest < Parameters.Lift + 0.25 + 0.65 * 8.0, "ne' sospesa piu' di quanto impone il pendio",
+		Fmt("massimo %.2f m sopra", DeckHighest));
+	Check(std::fabs(FootLowest + Parameters.FootSink) < 0.01, "il piede della scarpata entra nel terreno",
+		Fmt("%.3f m", FootLowest));
 
-	// La strada che esce a est si ferma al bordo (piu' mezza larghezza).
-	const double HalfWidthDeg = 4.0 / (111320.0 * std::cos(Bounds.CentreLat() * Core::DegToRad));
-	Check(EastMost <= Bounds.East + HalfWidthDeg * 1.5 && WestMost >= Bounds.West - HalfWidthDeg * 1.5,
+	// La strada che esce a est si ferma al bordo (piu' strada e scarpata).
+	const double ReachDeg = (4.0 + Parameters.VergeMaxWidth) / (111320.0 * std::cos(Bounds.CentreLat() * Core::DegToRad));
+	Check(EastMost <= Bounds.East + ReachDeg && WestMost >= Bounds.West - ReachDeg,
 		"la strada che esce dalla tile si ferma al bordo");
 
-	// Larghezza: sulla primaria dritta, le due coppie sinistra/destra di ogni
-	// quadrilatero distano 8 m in orizzontale.
+	// Larghezza e pendenza trasversale: sulla primaria dritta il primo
+	// quadrilatero e' la carreggiata. I suoi due bordi distano 8 m e stanno
+	// alla STESSA quota, anche su un terreno in pendenza: in piano di traverso.
 	const FVectorTile Straight = RoadsInNorthWestQuarter({ { ERoadClass::Primary, 0, 0, 80, { {1000, 4000}, {7000, 4000} } } });
 	Mesh::FTileMeshData Single;
 	BuildRoadMesh(Tile, Surface, nullptr, Straight, Window, Style, Parameters, Single);
-	const Core::FGeodetic Left = VertexGeodetic(Single, 0);
-	const Core::FGeodetic Right = VertexGeodetic(Single, 1);
-	const double DeltaNorth = (Left.LatRad - Right.LatRad) / Core::DegToRad * 111132.0;
-	const double DeltaEast = (Left.LonRad - Right.LonRad) / Core::DegToRad * 111320.0 * std::cos(Left.LatRad);
-	const double Width = std::sqrt(DeltaNorth * DeltaNorth + DeltaEast * DeltaEast);
+	double North = 0.0, East = 0.0;
+	NorthEast(Single, 0, 1, North, East);
+	const double Width = std::sqrt(North * North + East * East);
 	Check(std::fabs(Width - 8.0) < 0.05, "una primaria da 8 m e' larga 8 m", Fmt("%.3f m", Width));
+	const double Tilt = VertexGeodetic(Single, 0).HeightM - VertexGeodetic(Single, 1).HeightM;
+	Check(std::fabs(Tilt) < 0.01, "la carreggiata e' in piano di traverso (il terreno sale di 0,8 m per post)",
+		Fmt("%.4f m fra i due bordi", Tilt));
 
 	// Le facce guardano dalla stessa parte del terreno. Con l'inversione
 	// attiva (default) la normale geometrica "matematica" punta in giu', come
-	// quella dei triangoli del terreno; senza, in su.
+	// quella dei triangoli del terreno; senza, in su. Le facce verticali
+	// (cordoli, guardrail, parapetti) non contano: guardano di lato.
 	auto CountUp = [](const Mesh::FTileMeshData& MeshData)
 	{
 		int Up = 0, Down = 0;
@@ -666,8 +705,10 @@ static void TestRoadOnTerrain()
 			const float* C = &MeshData.Positions[MeshData.Indices[Triangle * 3 + 2] * 3];
 			const double E1[3] = { B[0] - A[0], B[1] - A[1], B[2] - A[2] };
 			const double E2[3] = { C[0] - A[0], C[1] - A[1], C[2] - A[2] };
-			const double Z = E1[0] * E2[1] - E1[1] * E2[0];
-			(Z > 0.0 ? Up : Down)++;
+			const double N[3] = { E1[1] * E2[2] - E1[2] * E2[1], E1[2] * E2[0] - E1[0] * E2[2], E1[0] * E2[1] - E1[1] * E2[0] };
+			const double Len = std::sqrt(N[0] * N[0] + N[1] * N[1] + N[2] * N[2]);
+			if (Len <= 0.0 || std::fabs(N[2]) < 0.5 * Len) { continue; }
+			(N[2] > 0.0 ? Up : Down)++;
 		}
 		return std::make_pair(Up, Down);
 	};
@@ -688,11 +729,17 @@ static void TestRoadOnTerrain()
 	const double LiftResidential = Parameters.Lift + Parameters.LiftPerTier * Style.Classes[static_cast<int>(ERoadClass::Residential)].Tier;
 	Check(LiftPrimary - LiftResidential >= 0.05, "agli incroci la primaria sta almeno 5 cm sopra la residenziale",
 		Fmt("%.2f m", LiftPrimary - LiftResidential));
+
+	// I sentieri restano dipinti: in 3D sarebbero nastri sotto il pixel.
+	Mesh::FTileMeshData PathMesh;
+	BuildRoadMesh(Tile, Surface, nullptr, RoadsInNorthWestQuarter({ { ERoadClass::Path, 0, 0, 15, { {1000, 1000}, {5000, 5000} } } }),
+		Window, Style, Parameters, PathMesh);
+	Check(PathMesh.TriangleCount == 0, "i sentieri non diventano 3D");
 }
 
 static void TestBridge()
 {
-	Section("10. I ponti stanno sopra la valle");
+	Section("10. I ponti stanno sopra la valle, con parapetti e pile");
 
 	// Una valle a V nord-sud al centro della tile, profonda 60 m.
 	const Tiles::FHeightTile Tile = MakeTerrain([](int I, int) { return 400.0 - 60.0 * std::max(0.0, 1.0 - std::fabs(I - 64) / 20.0); });
@@ -711,46 +758,212 @@ static void TestBridge()
 	BuildRoadMesh(Tile, Surface, nullptr, Bridge, Window, MakeRoad3DStyle(), Parameters, BridgeMesh, &Stats);
 	BuildRoadMesh(Tile, Surface, nullptr, Road, Window, MakeRoad3DStyle(), Parameters, RoadMesh);
 
-	auto Lowest = [](const Mesh::FTileMeshData& MeshData, bool bTopOnly)
+	auto Extreme = [](const Mesh::FTileMeshData& MeshData, ERoadSurface Surface, bool bLowest)
 	{
-		double Low = 1e9;
+		double Value = bLowest ? 1e9 : -1e9;
 		for (size_t Vertex = 0; Vertex < MeshData.Positions.size() / 3; ++Vertex)
 		{
-			// Le facce di sopra hanno la normale verso l'alto.
-			if (bTopOnly && MeshData.Normals[Vertex * 3 + 2] < 0.5f) { continue; }
-			Low = std::min(Low, VertexGeodetic(MeshData, Vertex).HeightM);
+			if (!UsesSurface(MeshData, Vertex, Surface)) { continue; }
+			const double H = VertexGeodetic(MeshData, Vertex).HeightM;
+			Value = bLowest ? std::min(Value, H) : std::max(Value, H);
 		}
-		return Low;
+		return Value;
 	};
-	const double RoadLow = Lowest(RoadMesh, true);
-	const double DeckLow = Lowest(BridgeMesh, true);
+	const double RoadLow = Extreme(RoadMesh, ERoadSurface::MajorAsphalt, true);
+	const double DeckLow = Extreme(BridgeMesh, ERoadSurface::MajorAsphalt, true);
+	const double DeckHigh = Extreme(BridgeMesh, ERoadSurface::MajorAsphalt, false);
 	Check(RoadLow < 345.0, "la strada normale scende nella valle", Fmt("minimo %.1f m", RoadLow));
 	Check(DeckLow > 395.0, "il ponte resta all'altezza delle spalle", Fmt("impalcato minimo %.1f m", DeckLow));
-	Check(Stats.Bridges == 1 && BridgeMesh.TriangleCount > 3 * RoadMesh.TriangleCount,
-		"il ponte ha anche fianchi e fondo", Fmt("%.0f triangoli contro %.0f", BridgeMesh.TriangleCount, RoadMesh.TriangleCount));
+
+	// Il cemento del ponte va dal fondo dell'impalcato (1,2 m sotto) alla
+	// cima del parapetto (1 m sopra).
+	const double ConcreteHigh = Extreme(BridgeMesh, ERoadSurface::Concrete, false);
+	Check(std::fabs(ConcreteHigh - DeckHigh - Parameters.ParapetHeight) < 0.01, "parapetti alti un metro",
+		Fmt("%.2f m sopra l'impalcato", ConcreteHigh - DeckHigh));
+	Check(Stats.Bridges == 1 && BridgeMesh.TriangleCount > 2 * RoadMesh.TriangleCount,
+		"il ponte ha anche parapetti, fianchi e fondo",
+		Fmt("%.0f triangoli contro %.0f", BridgeMesh.TriangleCount, RoadMesh.TriangleCount));
+
+	// Le pile: dove l'impalcato sta alto sulla valle, e da nessun'altra parte.
+	const double ConcreteLow = Extreme(BridgeMesh, ERoadSurface::Concrete, true);
+	Check(Stats.Piers > 0 && ConcreteLow < 345.0, "pile fino al fondo della valle",
+		Fmt("%.0f pile, la piu' bassa a %.1f m", Stats.Piers, ConcreteLow));
+}
+
+static void TestSidewalksAndJunctions()
+{
+	Section("11. Marciapiedi, incroci, guardrail");
+
+	const Tiles::FHeightTile Flat = MakeTerrain([](int, int) { return 250.0; });
+	const FSurfaceSampler Surface(Flat, 2);
+	const FVectorWindow Window = MakeVectorWindow(Terrain14, 13, 16384);
+	const FRoad3DStyle Style = MakeRoad3DStyle();
+	FRoadMeshParameters Parameters;
+
+	// Una residenziale senza tag: marciapiedi da tutte e due le parti, un
+	// cordolo sopra la carreggiata.
+	Mesh::FTileMeshData Street;
+	FRoadMeshStats Stats;
+	BuildRoadMesh(Flat, Surface, nullptr, RoadsInNorthWestQuarter({ { ERoadClass::Residential, 0, 0, 60, { {1000, 4000}, {7000, 4000} } } }),
+		Window, Style, Parameters, Street, &Stats);
+	double PavingHeight = -1.0, AsphaltHeight = -1.0;
+	int North = 0, South = 0;
+	const double CentreLat = VertexGeodetic(Street, 0).LatRad;   // la carreggiata e' simmetrica: si usa la media dopo
+	double DeckLatSum = 0.0;
+	int DeckCount = 0;
+	for (size_t Vertex = 0; Vertex < Street.Positions.size() / 3; ++Vertex)
+	{
+		if (UsesSurface(Street, Vertex, ERoadSurface::MinorAsphalt))
+		{
+			AsphaltHeight = VertexGeodetic(Street, Vertex).HeightM;
+			DeckLatSum += VertexGeodetic(Street, Vertex).LatRad;
+			++DeckCount;
+		}
+	}
+	const double AxisLat = DeckCount > 0 ? DeckLatSum / DeckCount : CentreLat;
+	for (size_t Vertex = 0; Vertex < Street.Positions.size() / 3; ++Vertex)
+	{
+		if (!UsesSurface(Street, Vertex, ERoadSurface::Paving)) { continue; }
+		const Core::FGeodetic Point = VertexGeodetic(Street, Vertex);
+		PavingHeight = Point.HeightM;
+		(Point.LatRad > AxisLat ? North : South)++;
+	}
+	Check(North > 0 && South > 0 && Stats.SidewalkSections > 0, "residenziale senza tag: marciapiedi sui due lati",
+		Fmt("%.0f vertici a nord, %.0f a sud", North, South));
+	Check(std::fabs(PavingHeight - AsphaltHeight - Parameters.KerbHeight) < 0.005, "il marciapiede sta un cordolo (15 cm) sopra",
+		Fmt("%.3f m", PavingHeight - AsphaltHeight));
+
+	// Il tag OSM decide il lato, nel verso della linea: verso est, la DESTRA
+	// e' il sud.
+	Mesh::FTileMeshData RightOnly;
+	BuildRoadMesh(Flat, Surface, nullptr,
+		RoadsInNorthWestQuarter({ { ERoadClass::Secondary, Tiles::RoadFlagSidewalkKnown | Tiles::RoadFlagSidewalkRight, 0, 70,
+			{ {1000, 4000}, {7000, 4000} } } }), Window, Style, Parameters, RightOnly);
+	North = South = 0;
+	for (size_t Vertex = 0; Vertex < RightOnly.Positions.size() / 3; ++Vertex)
+	{
+		if (UsesSurface(RightOnly, Vertex, ERoadSurface::Paving))
+		{
+			(VertexGeodetic(RightOnly, Vertex).LatRad > AxisLat ? North : South)++;
+		}
+	}
+	Check(North == 0 && South > 0, "sidewalk=right verso est: il marciapiede e' a sud",
+		Fmt("%.0f a nord, %.0f a sud", North, South));
+
+	// Un incrocio: due residenziali a croce. I marciapiedi si fermano dove
+	// incontrano l'altra carreggiata, invece di attraversarla.
+	Mesh::FTileMeshData Cross;
+	FRoadMeshStats CrossStats;
+	BuildRoadMesh(Flat, Surface, nullptr, RoadsInNorthWestQuarter({
+			{ ERoadClass::Residential, 0, 0, 60, { {1000, 4000}, {7000, 4000} } },
+			{ ERoadClass::Residential, 0, 0, 60, { {4000, 1000}, {4000, 7000} } } }),
+		Window, Style, Parameters, Cross, &CrossStats);
+	// Dove sta l'asse nord-sud: la media delle longitudini del suo asfalto
+	// non serve, basta il punto 4000 della tile 13 in metri dal bordo ovest.
+	const Tiles::FTileBounds Bounds = Tiles::GetTileBounds(Flat.Key.Level, Flat.Key.X, Flat.Key.Y);
+	const double AxisLon = Bounds.West + (Bounds.East - Bounds.West) * (4000.0 / 8192.0);
+	const double AxisLatDeg = Bounds.North - (Bounds.North - Bounds.South) * (4000.0 / 8192.0);
+	const double MetresLon = 111320.0 * std::cos(Bounds.CentreLat() * Core::DegToRad);
+	int InsideOther = 0;
+	for (size_t Vertex = 0; Vertex < Cross.Positions.size() / 3; ++Vertex)
+	{
+		if (!UsesSurface(Cross, Vertex, ERoadSurface::Paving)) { continue; }
+		const Core::FGeodetic Point = VertexGeodetic(Cross, Vertex);
+		const double FromNS = std::fabs(Point.LonRad / Core::DegToRad - AxisLon) * MetresLon;
+		const double FromEW = std::fabs(Point.LatRad / Core::DegToRad - AxisLatDeg) * 111132.0;
+		// Dentro una carreggiata (3 m dall'asse) e fuori dalla propria.
+		if ((FromNS < 2.9 && FromEW > 3.1) || (FromEW < 2.9 && FromNS > 3.1)) { ++InsideOther; }
+	}
+	Check(CrossStats.JunctionCuts > 0 && InsideOther == 0, "all'incrocio i marciapiedi non attraversano l'altra strada",
+		Fmt("%.0f tratti tolti, %.0f vertici di marciapiede in mezzo alla strada", CrossStats.JunctionCuts, InsideOther));
+
+	// Le autostrade hanno il guardrail, le residenziali no.
+	Mesh::FTileMeshData Motorway;
+	BuildRoadMesh(Flat, Surface, nullptr, RoadsInNorthWestQuarter({ { ERoadClass::Motorway, 0, 0, 110, { {1000, 4000}, {7000, 4000} } } }),
+		Window, Style, Parameters, Motorway);
+	auto CountSurface = [](const Mesh::FTileMeshData& MeshData, ERoadSurface Surface)
+	{
+		int Count = 0;
+		for (size_t Vertex = 0; Vertex < MeshData.Positions.size() / 3; ++Vertex) { Count += UsesSurface(MeshData, Vertex, Surface) ? 1 : 0; }
+		return Count;
+	};
+	Check(CountSurface(Motorway, ERoadSurface::Steel) > 0 && CountSurface(Street, ERoadSurface::Steel) == 0,
+		"guardrail sull'autostrada, non sulla residenziale");
+
+	// Il geomorphing: con la superficie del padre ogni vertice ha il suo
+	// spostamento; quello dei ponti e' zero (non seguono il terreno).
+	const Tiles::FHeightTile Bumpy = MakeTerrain([](int I, int J) { return 250.0 + 3.0 * std::sin(I * 0.7) * std::cos(J * 0.5); });
+	const FSurfaceSampler BumpySurface(Bumpy, 2);
+	Mesh::FTileMeshData Morphing;
+	BuildRoadMesh(Bumpy, BumpySurface, nullptr, RoadsInNorthWestQuarter({ { ERoadClass::Residential, 0, 0, 60, { {1000, 4000}, {7000, 4000} } } }),
+		Window, Style, Parameters, Morphing, nullptr, &Surface);
+	double LargestDelta = 0.0;
+	for (const float Delta : Morphing.MorphDeltas) { LargestDelta = std::max(LargestDelta, std::fabs(static_cast<double>(Delta))); }
+	Check(Morphing.MorphDeltas.size() == Morphing.Positions.size() / 3 && Morphing.ParentNormals.size() == Morphing.Normals.size()
+		&& LargestDelta > 0.5 && LargestDelta < 3.01,
+		"strade e geomorphing: uno spostamento per vertice, quanto il terreno",
+		Fmt("massimo %.2f m", LargestDelta));
+	Mesh::FTileMeshData NoMorph;
+	BuildRoadMesh(Bumpy, BumpySurface, nullptr, RoadsInNorthWestQuarter({ { ERoadClass::Residential, 0, 0, 60, { {1000, 4000}, {7000, 4000} } } }),
+		Window, Style, Parameters, NoMorph);
+	Check(NoMorph.MorphDeltas.empty(), "senza il padre, niente dati di morphing (il provider usa zero)");
 }
 
 static void TestAtlasAndCost()
 {
-	Section("11. Atlante delle superfici e costo di una tile di citta'");
+	Section("12. Atlante delle superfici e costo di una tile di citta'");
 
 	std::vector<uint8_t> Atlas;
 	BuildRoadAtlas(Atlas);
-	Check(Atlas.size() == static_cast<size_t>(RoadAtlasWidth) * RoadAtlasHeight * 4, "atlante 256 x 256 BGRA");
+	Check(Atlas.size() == static_cast<size_t>(RoadAtlasWidth) * RoadAtlasHeight * 4, "atlante 1024 x 512 BGRA");
 
 	auto Pixel = [&Atlas](int X, int Y) { return Atlas.data() + (static_cast<size_t>(Y) * RoadAtlasWidth + X) * 4; };
 	const int Strip = RoadAtlasStripPixels;
-	Check(Pixel(Strip / 2, 10)[2] > 200 && Pixel(Strip / 2, 200)[2] < 110,
+	const int Guard = RoadAtlasGuardPixels;
+	const int Content = RoadAtlasContentPixels;
+	Check(Pixel(Guard + Content / 2, 10)[2] > 150 && Pixel(Guard + Content / 2, 300)[2] < 110,
 		"asfalto principale: mezzeria bianca a tratti (4,5 m su 12)");
-	Check(Pixel(2, 100)[2] > 200, "asfalto principale: striscia bianca di bordo");
-	Check(Pixel(3 * Strip + 11, 3)[2] > 135, "ferrovia: la rotaia e' grigio acciaio");
-	Check(std::abs(Pixel(1 * Strip + 5, 50)[2] - Pixel(1 * Strip + 5, 50)[0]) < 8, "asfalto semplice: grigio neutro");
+	Check(Pixel(Guard + 2, 100)[2] > 200, "asfalto principale: striscia bianca di bordo");
+	Check(Pixel(Guard + 6, 100)[3] > 190 && Pixel(Guard + 2, 100)[3] < 160,
+		"ruvidita' nell'alfa: l'asfalto e' opaco, la vernice meno");
+	const int RailColumn = 3 * Strip + Guard + static_cast<int>(Content * 0.5 - 1.435 / 4.5 * Content * 0.5);
+	Check(Pixel(RailColumn, 30)[2] > 145 && Pixel(RailColumn, 30)[3] < 110, "ferrovia: la rotaia e' acciaio, e luccica",
+		Fmt("colonna %.0f: R %.0f, ruvidita' %.0f", RailColumn, Pixel(RailColumn, 30)[2], Pixel(RailColumn, 30)[3]));
+	Check(std::abs(Pixel(1 * Strip + Guard + 5, 50)[2] - Pixel(1 * Strip + Guard + 5, 50)[0]) < 8, "asfalto semplice: grigio neutro");
+
+	// La banda di guardia ripete il bordo della striscia.
+	bool bGuardOk = true;
+	for (int S = 0; S < 11; ++S)
+	{
+		for (int Column = 0; Column < Guard; ++Column)
+		{
+			for (int Channel = 0; Channel < 4; ++Channel)
+			{
+				bGuardOk &= Pixel(S * Strip + Column, 77)[Channel] == Pixel(S * Strip + Guard, 77)[Channel];
+				bGuardOk &= Pixel((S + 1) * Strip - 1 - Column, 77)[Channel] == Pixel((S + 1) * Strip - 1 - Guard, 77)[Channel];
+			}
+		}
+	}
+	Check(bGuardOk, "bande di guardia: 8 pixel per lato che ripetono il bordo");
 
 	float U0 = 0.0f, U1 = 0.0f;
 	SurfaceUvRange(ERoadSurface::Rail, U0, U1);
-	Check(U0 > 3.0f / 8.0f && U1 < 4.0f / 8.0f, "la U della ferrovia sta dentro la sua striscia, con margine");
+	Check(U0 * RoadAtlasWidth >= 3 * Strip + Guard && U1 * RoadAtlasWidth <= 4 * Strip - Guard,
+		"la U della ferrovia sta nella parte utile della sua striscia");
 
-	// Il costo: una tile di citta' con 3000 strade corte.
+	// Le mipmap a blocchi 2x2 non mescolano due strisce: al mip 4 (strisce da
+	// 4 pixel) la striscia del cemento ha ancora il colore del cemento.
+	std::vector<std::vector<uint8_t>> Mips;
+	Tiles::BuildMipChain(Atlas, RoadAtlasWidth, RoadAtlasHeight, Mips);
+	const std::vector<uint8_t>& Mip4 = Mips[3];
+	const int Mip4Width = RoadAtlasWidth / 16;
+	const int ConcreteRed = Pixel(4 * Strip + Guard + 20, 40)[2];
+	const int Mip4Red = Mip4[(static_cast<size_t>(5) * Mip4Width + 4 * (Strip / 16)) * 4 + 2];
+	Check(std::abs(Mip4Red - ConcreteRed) < 15, "mip 4: il bordo della striscia del cemento e' ancora cemento",
+		Fmt("%.0f contro %.0f", Mip4Red, ConcreteRed));
+
+	// Il costo: una tile di citta' con 3000 strade corte, tutte con i
+	// marciapiedi e piene di incroci.
 	const Tiles::FHeightTile Tile = MakeTerrain([](int I, int J) { return 240.0 + 0.3 * I + 0.2 * J; });
 	const FSurfaceSampler Surface(Tile, 2);
 	std::vector<FTestLine> Dense;
@@ -766,10 +979,12 @@ static void TestAtlasAndCost()
 	Mesh::FTileMeshData Roads;
 	FRoadMeshStats Stats;
 	BuildRoadMesh(Tile, Surface, nullptr, City, MakeVectorWindow(Terrain14, 13, 16384), MakeRoad3DStyle(),
-		FRoadMeshParameters{}, Roads, &Stats);
+		FRoadMeshParameters{}, Roads, &Stats, &Surface);
 	const double Ms = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - Start).count();
-	std::printf("  %d strade, %d sezioni, %d triangoli, %.1f ms\n", Stats.Features, Stats.CrossSections, Stats.Triangles, Ms);
-	Check(Ms < 400.0, "3000 strade in meno di 400 ms (su un worker)", Fmt("%.1f ms", Ms));
+	std::printf("  %d strade, %d sezioni, %d triangoli, %d tratti tolti agli incroci, %.1f ms\n",
+		Stats.Features, Stats.CrossSections, Stats.Triangles, Stats.JunctionCuts, Ms);
+	Check(Ms < 1500.0, "3000 strade in meno di 1,5 s (su un worker)", Fmt("%.1f ms", Ms));
+	Check(Stats.Triangles < 600000, "meno di 600.000 triangoli", Fmt("%.0f", Stats.Triangles));
 }
 
 // ===========================================================================
@@ -792,6 +1007,7 @@ int main(int ArgCount, char** Arguments)
 	TestSurfaceSampler();
 	TestRoadOnTerrain();
 	TestBridge();
+	TestSidewalksAndJunctions();
 	TestAtlasAndCost();
 
 	std::printf("\n=====================================================\n");

@@ -90,6 +90,27 @@ class Classification(unittest.TestCase):
         self.assertFalse(self.classify(highway="footway").flags & roadclasses.FLAG_UNPAVED)
         self.assertTrue(self.classify(highway="path").flags & roadclasses.FLAG_UNPAVED)
 
+    def test_sidewalks(self):
+        L, R, K = (roadclasses.FLAG_SIDEWALK_LEFT, roadclasses.FLAG_SIDEWALK_RIGHT,
+                   roadclasses.FLAG_SIDEWALK_KNOWN)
+        mask = L | R | K
+
+        def sides(**tags):
+            return self.classify(**tags).flags & mask
+
+        self.assertEqual(sides(highway="residential"), 0)                    # niente tag: decide il C++
+        self.assertEqual(sides(highway="residential", sidewalk="both"), L | R | K)
+        self.assertEqual(sides(highway="residential", sidewalk="left"), L | K)
+        self.assertEqual(sides(highway="residential", sidewalk="right"), R | K)
+        self.assertEqual(sides(highway="residential", sidewalk="no"), K)
+        self.assertEqual(sides(highway="residential", sidewalk="separate"), K)
+        # Lo schema per lato vince sul tag generico.
+        self.assertEqual(sides(highway="primary", sidewalk="both", **{"sidewalk:left": "separate"}), R | K)
+        self.assertEqual(sides(highway="primary", **{"sidewalk:both": "yes"}), L | R | K)
+        self.assertEqual(sides(highway="primary", **{"sidewalk:right": "yes"}), R | K)
+        # Binari e piste non hanno marciapiedi, qualunque cosa dicano i tag.
+        self.assertEqual(self.classify(railway="rail", sidewalk="both").flags & mask, 0)
+
     def test_railways(self):
         self.assertEqual(self.classify(railway="rail").class_id, roadclasses.BY_NAME["rail"].id)
         self.assertEqual(self.classify(railway="rail", service="yard").class_id,
@@ -143,7 +164,10 @@ class ContractWithCpp(unittest.TestCase):
 
     def test_flags_match(self):
         for name, value in (("Bridge", roadclasses.FLAG_BRIDGE), ("Tunnel", roadclasses.FLAG_TUNNEL),
-                            ("Unpaved", roadclasses.FLAG_UNPAVED), ("Link", roadclasses.FLAG_LINK)):
+                            ("Unpaved", roadclasses.FLAG_UNPAVED), ("Link", roadclasses.FLAG_LINK),
+                            ("SidewalkLeft", roadclasses.FLAG_SIDEWALK_LEFT),
+                            ("SidewalkRight", roadclasses.FLAG_SIDEWALK_RIGHT),
+                            ("SidewalkKnown", roadclasses.FLAG_SIDEWALK_KNOWN)):
             match = re.search(rf"RoadFlag{name}\s*=\s*1\s*<<\s*(\d+)", self.header)
             self.assertIsNotNone(match, name)
             self.assertEqual(1 << int(match.group(1)), value, name)

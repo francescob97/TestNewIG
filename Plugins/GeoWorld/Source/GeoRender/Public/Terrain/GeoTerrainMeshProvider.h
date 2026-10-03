@@ -31,6 +31,8 @@ struct FGeoPreparedTileMesh
 	/** Origine del frame locale: serve per calcolare la trasformazione alla consegna. */
 	GeoWorld::Core::FGeodetic Origin;
 	int32 TriangleCount = 0;
+	/** Porta i dati del geomorphing (si puo' far nascere con la forma del padre). */
+	bool bHasMorph = false;
 };
 
 using FGeoPreparedTileMeshPtr = TSharedPtr<FGeoPreparedTileMesh, ESPMode::ThreadSafe>;
@@ -217,6 +219,42 @@ public:
 
 	/** Come GetMaterialProblem, per i parametri delle strade (vuota se a posto). */
 	virtual FString GetOverlayMaterialProblem() const { return FString(); }
+
+	// --- Transizioni morbide ---------------------------------------------------
+	//
+	// Quando una tile si raffina, le figlie sostituiscono il padre in un frame:
+	// cambiano forma, luce e foto tutte insieme, e l'occhio lo vede come un
+	// lampo. Due strumenti, entrambi a carico del materiale:
+	//
+	//  - il GEOMORPHING: la figlia nasce con la forma e le normali del padre e
+	//    scivola verso le proprie (SetTileMorph, 1 -> 0);
+	//  - la DISSOLVENZA: la figlia nasce con la foto e le strade dipinte del
+	//    padre, e sfuma verso le proprie (BeginTransitionFromParent); lo stesso
+	//    quando a una tile visibile cambia la foto (ancestor -> propria).
+	//
+	// I valori viaggiano come Custom Primitive Data del componente (0 =
+	// morphing, 1 = peso della foto precedente): un float per tile, senza
+	// toccare i parametri del materiale a ogni frame.
+
+	/** 1 = forma e luce del padre, 0 = proprie. Vale anche per la strada 3D della tile. */
+	virtual void SetTileMorph(const GeoWorld::Tiles::FTileKey& Key, float Morph) = 0;
+
+	/** La tile nasce con la foto e le strade dipinte del padre, e sfuma verso le proprie. */
+	virtual void BeginTransitionFromParent(const GeoWorld::Tiles::FTileKey& Child,
+	                                       const GeoWorld::Tiles::FTileKey& Parent) = 0;
+
+	/** Avanza le dissolvenze in corso. Da chiamare a ogni frame. */
+	virtual void TickTransitions(double NowSeconds) = 0;
+
+	/** Durata delle transizioni, in secondi (0 = istantanee). */
+	virtual void SetTransitionSeconds(float Seconds) = 0;
+	virtual float GetTransitionSeconds() const { return 0.0f; }
+
+	/** Quante tile stanno scivolando o sfumando adesso (per l'overlay). */
+	virtual int32 GetTransitionCount() const { return 0; }
+
+	/** Vuota se il materiale del terreno sa fare le transizioni. */
+	virtual FString GetTransitionMaterialProblem() const { return FString(); }
 
 	// --- Strade 3D ---------------------------------------------------------
 	//

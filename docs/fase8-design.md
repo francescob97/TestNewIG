@@ -92,7 +92,8 @@ campi di un file (`ogrinfo -so file.shp layer`) e lo aggiungo.
 
 Ogni way diventa una **classe** (17 in tutto: 12 di strade, 3 di ferrovie,
 2 di aeroporto), una **larghezza in metri**, dei **flag** (ponte, galleria,
-sterrato, rampa) e un **layer**. Tutto in `roadclasses.py`, in un punto solo.
+sterrato, rampa; dalla classificazione 2 anche i marciapiedi, per le strade
+3D: `docs/strade-3d.md`) e un **layer**. Tutto in `roadclasses.py`, in un punto solo.
 
 | Domanda | Risposta |
 |---|---|
@@ -353,7 +354,7 @@ servirebbe.
 | `Pipeline/geoworld/vectorformat.py` | formato `.gvt`, indice, manifest, fixture per i test C++ |
 | `Pipeline/geoworld/vectorbuild.py` | i tre stadi, la verifica |
 | `Pipeline/geoworld/fetchosm.py` | download da Geofabrik, ripresa, md5 |
-| `Pipeline/tests/test_roads.py` | 28 test, con un estratto OSM sintetico |
+| `Pipeline/tests/test_roads.py` | 30 test, con un estratto OSM sintetico |
 | `GeoTiles/Public/Tiles/VectorClasses.h` | le classi (contratto con la pipeline) |
 | `GeoTiles/Public/Tiles/VectorTileFormat.h` | lettura di `.gvt` e indici |
 | `GeoTiles/.../Streaming/GeoVectorDataset.*` | il dataset su disco |

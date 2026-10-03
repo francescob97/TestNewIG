@@ -39,7 +39,7 @@ from dataclasses import dataclass
 
 #: Versione della classificazione. Entra nell'impronta della pipeline: se
 #: cambia, le tile si rifanno invece di mescolare classificazioni diverse.
-CLASSIFICATION_VERSION = 1
+CLASSIFICATION_VERSION = 2   # 2: i marciapiedi (FLAG_SIDEWALK_*)
 
 
 @dataclass(frozen=True)
@@ -87,6 +87,13 @@ FLAG_BRIDGE = 1 << 0
 FLAG_TUNNEL = 1 << 1          # oggi le gallerie si scartano: il flag e' per dopo
 FLAG_UNPAVED = 1 << 2
 FLAG_LINK = 1 << 3            # rampa di svincolo (motorway_link e simili)
+# Marciapiedi, per le strade 3D: a SINISTRA e a DESTRA nel verso della way,
+# come il tag OSM. KNOWN dice che il tag c'era (anche se diceva "no", o
+# "separate": il marciapiede e' mappato a parte, come sentiero); senza, chi
+# disegna sceglie un default per classe (C++: Roads/RoadMesh.h).
+FLAG_SIDEWALK_LEFT = 1 << 4
+FLAG_SIDEWALK_RIGHT = 1 << 5
+FLAG_SIDEWALK_KNOWN = 1 << 6
 
 # --- Da tag OSM a classe --------------------------------------------------
 
@@ -188,6 +195,50 @@ def _lanes(text: str | None) -> int | None:
     return lanes if 1 <= lanes <= 12 else None
 
 
+_SIDEWALK_SIDES = {"both": (True, True), "left": (True, False), "right": (False, True),
+                   "yes": (True, True)}
+
+
+def sidewalk_flags(tags: dict[str, str]) -> int:
+    """
+    I flag dei marciapiedi dai tag OSM. Due schemi convivono in OSM:
+
+      sidewalk=both|left|right|no|none|separate
+      sidewalk:both=yes|no|separate, sidewalk:left=..., sidewalk:right=...
+
+    Il secondo, piu' preciso, vince lato per lato. "separate" vuol dire che il
+    marciapiede e' una way a parte (highway=footway): qui non si disegna, per
+    non averlo due volte.
+    """
+    left = right = False
+    known = False
+
+    value = tags.get("sidewalk")
+    if value is not None:
+        known = True
+        left, right = _SIDEWALK_SIDES.get(value, (False, False))
+
+    both = tags.get("sidewalk:both")
+    if both is not None:
+        known = True
+        left = right = both == "yes"
+    for side in ("left", "right"):
+        value = tags.get(f"sidewalk:{side}")
+        if value is not None:
+            known = True
+            if side == "left":
+                left = value == "yes"
+            else:
+                right = value == "yes"
+
+    flags = FLAG_SIDEWALK_KNOWN if known else 0
+    if left:
+        flags |= FLAG_SIDEWALK_LEFT
+    if right:
+        flags |= FLAG_SIDEWALK_RIGHT
+    return flags
+
+
 def classify(tags: dict[str, str]) -> Classified | None:
     """
     Decide cosa diventa una way di OSM, o None se non va disegnata.
@@ -232,6 +283,9 @@ def classify(tags: dict[str, str]) -> Classified | None:
 
     if tags.get("bridge") not in (None, "no"):
         flags |= FLAG_BRIDGE
+
+    if road_class.kind == "strada":
+        flags |= sidewalk_flags(tags)
 
     # Sterrato: dal tag `surface`; senza, i tratturi e i sentieri si assumono
     # sterrati, il resto asfaltato. `tracktype=grade1` e' una carrareccia

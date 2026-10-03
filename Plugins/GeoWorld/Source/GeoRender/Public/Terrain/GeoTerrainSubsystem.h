@@ -57,6 +57,10 @@ struct FGeoTerrainStats
 	/** Millisecondi spesi SUL GAME THREAD per consegnare le mesh, questo frame. */
 	UPROPERTY() float ConsegnaMsQuestoFrame = 0.0f;
 	UPROPERTY() bool OmbreAccese = false;
+
+	/** Tile comparse al posto di un antenato questo frame, e transizioni in corso. */
+	UPROPERTY() int32 RaffinateQuestoFrame = 0;
+	UPROPERTY() int32 InTransizione = 0;
 };
 
 /**
@@ -133,6 +137,17 @@ public:
 	void SetWarmupTilesPerFrame(int32 Count) { WarmupTilesPerFrame = FMath::Clamp(Count, 0, 256); }
 	int32 GetWarmupTilesPerFrame() const { return WarmupTilesPerFrame; }
 	bool IsWarmingUp() const { return bWarmingUp; }
+
+	/**
+	 * Durata delle transizioni quando una tile si affina (geomorphing e
+	 * dissolvenza della foto), in secondi. 0 = di colpo, come prima.
+	 */
+	void SetTransitionSeconds(float Seconds)
+	{
+		TransitionSeconds = FMath::Clamp(Seconds, 0.0f, 5.0f);
+		if (Provider.IsValid()) { Provider->SetTransitionSeconds(TransitionSeconds); }
+	}
+	float GetTransitionSeconds() const { return TransitionSeconds; }
 
 	void SetSkirtEnabled(bool bInSkirt);
 	bool IsSkirtEnabled() const { return MeshParameters.bGenerateSkirt; }
@@ -355,6 +370,7 @@ private:
 	int32 WarmupTilesPerFrame = 16;
 	int32 BuildsInFlight = 6;
 	bool bCastShadowsWanted = false;
+	float TransitionSeconds = 0.6f;
 	bool bWarmingUp = false;
 	bool bTerrainEnabled = false;
 	bool bShowDebugOverlay = false;

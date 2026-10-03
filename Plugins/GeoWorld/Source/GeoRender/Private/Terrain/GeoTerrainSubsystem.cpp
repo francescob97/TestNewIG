@@ -105,6 +105,7 @@ void UGeoTerrainSubsystem::SetEnabled(bool bInEnabled)
 			Provider = MakeUnique<FDynamicMeshTerrainProvider>();
 			Provider->Initialize(GetWorld());
 			Provider->SetCastShadows(bCastShadowsWanted);
+			Provider->SetTransitionSeconds(TransitionSeconds);
 		}
 		// Il quadtree deve girare: senza selezione non c'e' niente da costruire.
 		if (Quadtree)
@@ -140,6 +141,11 @@ void UGeoTerrainSubsystem::Tick(float DeltaTime)
 	Super::Tick(DeltaTime);
 
 	if (bTerrainEnabled) { SynchroniseWithSelection(); }
+
+	// Le transizioni avanzano a ogni frame, anche da fermi: una tile comparsa
+	// un attimo prima di fermarsi deve finire di scivolare.
+	if (Provider.IsValid()) { Provider->TickTransitions(FPlatformTime::Seconds()); }
+
 	if (bShowDebugOverlay) { DrawDebugOverlay(); }
 	if (bDrawBounds) { DrawTileBounds(); }
 }
@@ -179,6 +185,28 @@ void UGeoTerrainSubsystem::SynchroniseWithSelection()
 	Visible.Reserve(Selected.Num());
 	for (const Quadtree::FSelectedTile& Tile : Selected) { Visible.Add(Tile.Key.Pack()); }
 
+	// Chi COMPARE adesso al posto di un antenato che era a schermo fino al
+	// frame prima: e' il raffinamento, il momento del lampo. Va guardato PRIMA
+	// di cambiare le visibilita', che sono proprio lo stato del frame prima.
+	// Il caso inverso (le figlie che tornano padre) non si sfuma: il padre non
+	// sa com'erano le figlie, e allontanandosi il cambio si nota molto meno.
+	TArray<TPair<FTileKey, FTileKey>> Refinements;
+	for (const TPair<uint64, FBuiltTile>& Pair : BuiltTiles)
+	{
+		if (Pair.Value.bVisible || !Visible.Contains(Pair.Key)) { continue; }
+		FTileKey Ancestor = Pair.Value.Key;
+		while (Ancestor.Level > 0)
+		{
+			Ancestor = Ancestor.GetParent();
+			const FBuiltTile* AncestorTile = BuiltTiles.Find(Ancestor.Pack());
+			if (AncestorTile && AncestorTile->bVisible)
+			{
+				Refinements.Emplace(Pair.Value.Key, Ancestor);
+				break;
+			}
+		}
+	}
+
 	for (TPair<uint64, FBuiltTile>& Pair : BuiltTiles)
 	{
 		const bool bShouldShow = Visible.Contains(Pair.Key);
@@ -189,6 +217,15 @@ void UGeoTerrainSubsystem::SynchroniseWithSelection()
 			Pair.Value.LastWantedSeconds = Now;
 		}
 	}
+
+	// Le figlie nascono con la forma, la luce e la foto del padre, e diventano
+	// se stesse in qualche decimo di secondo (geo.Terrain.Morph).
+	for (const TPair<FTileKey, FTileKey>& Refinement : Refinements)
+	{
+		Provider->BeginTransitionFromParent(Refinement.Key, Refinement.Value);
+	}
+	Stats.RaffinateQuestoFrame = Refinements.Num();
+	Stats.InTransizione = Provider->GetTransitionCount();
 
 	// Se il quadtree NON ha la readiness registrata (terreno appena acceso,
 	// o chi usa questo subsystem senza) la selezione puo' contenere tile senza
@@ -329,6 +366,12 @@ bool UGeoTerrainSubsystem::DispatchBuild(const FTileKey& Key, bool bUrgent)
 	GeoWorld::Tiles::FTileCache::FTilePtr TileData = Streaming->FindLoadedTile(Key);
 	if (!TileData || !Provider.IsValid() || !BuildQueue.IsValid()) { return false; }
 
+	// Le quote del PADRE, per il geomorphing: la tile nasce con la forma che
+	// il padre aveva a schermo. Di solito ci sono (il padre e' a schermo, le
+	// sue quote sono pinnate); se mancano, la tile compare senza scivolare.
+	GeoWorld::Tiles::FTileCache::FTilePtr ParentData =
+		(Key.Level > 0) ? Streaming->FindLoadedTile(Key.GetParent()) : nullptr;
+
 	// Tutto cio' che il lavoro usa viene COPIATO nella lambda: parametri,
 	// generazione, funzione di preparazione, coda. Niente "this": il lavoro
 	// non deve poter toccare il subsystem, che vive sul game thread.
@@ -346,7 +389,7 @@ bool UGeoTerrainSubsystem::DispatchBuild(const FTileKey& Key, bool bUrgent)
 	//  thread a chi prepara il frame (animazioni, fisica, rendering).
 	// ------------------------------------------------------------------
 	UE::Tasks::FTask Task = UE::Tasks::Launch(TEXT("GeoTerrainMeshBuild"),
-		[TileData, Parameters, Prepare, Generation, Key, Queue]()
+		[TileData, ParentData, Parameters, Prepare, Generation, Key, Queue]()
 		{
 			const double Started = FPlatformTime::Seconds();
 
@@ -356,6 +399,10 @@ bool UGeoTerrainSubsystem::DispatchBuild(const FTileKey& Key, bool bUrgent)
 
 			Mesh::FTileMeshData MeshData;
 			Mesh::BuildTileMesh(*TileData, Parameters, MeshData);
+			if (ParentData && MeshData.IsValid())
+			{
+				Mesh::ComputeMorphTargets(*TileData, *ParentData, Parameters.Step, MeshData);
+			}
 			if (MeshData.IsValid() && Prepare)
 			{
 				Result.Prepared = Prepare(MeshData);
@@ -634,6 +681,19 @@ void UGeoTerrainSubsystem::DrawDebugOverlay()
 		Stats.TempoCostruzioneMediaMs, Stats.InCostruzione));
 	Line(Stats.ConsegnaMsQuestoFrame > 4.0f ? FColor::Yellow : FColor::White,
 		FString::Printf(TEXT("Consegna      : %.2f ms questo frame, sul game thread"), Stats.ConsegnaMsQuestoFrame));
+
+	// Le transizioni: quante tile stanno scivolando dalla forma del padre.
+	// Rosso se il materiale non le sa fare (il lampo resta).
+	const FString TransitionProblem = Provider.IsValid() ? Provider->GetTransitionMaterialProblem() : FString();
+	if (!TransitionProblem.IsEmpty())
+	{
+		Line(FColor::Red, FString::Printf(TEXT("Transizioni   : %s"), *TransitionProblem));
+	}
+	else
+	{
+		Line(FColor::White, FString::Printf(TEXT("Transizioni   : %d in corso, %.2f s ciascuna (geo.Terrain.Morph)"),
+			Stats.InTransizione, TransitionSeconds));
+	}
 
 	Line(FColor::White, FString::Printf(TEXT("Gonne         : %s   ombre: %s   rebase gestiti: %d"),
 		IsSkirtEnabled() ? TEXT("on") : TEXT("OFF"),

@@ -54,6 +54,11 @@ namespace GeoWorld::Tiles
 	inline constexpr uint8_t RoadFlagTunnel = 1 << 1;
 	inline constexpr uint8_t RoadFlagUnpaved = 1 << 2;
 	inline constexpr uint8_t RoadFlagLink = 1 << 3;
+	/** Marciapiede a sinistra / a destra NEL VERSO DELLA LINEA (come il tag OSM). */
+	inline constexpr uint8_t RoadFlagSidewalkLeft = 1 << 4;
+	inline constexpr uint8_t RoadFlagSidewalkRight = 1 << 5;
+	/** Il tag dei marciapiedi c'era (anche "no"): senza, decide il default per classe. */
+	inline constexpr uint8_t RoadFlagSidewalkKnown = 1 << 6;
 
 	/** Il nome della pipeline (roadclasses.py), per i messaggi e i controlli. */
 	inline const char* RoadClassName(ERoadClass Class)

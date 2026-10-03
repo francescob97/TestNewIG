@@ -22,6 +22,10 @@ griglia geoidica non applica lo scostamento verticale, in silenzio. (3)
 **BC1 / DXT1** — compressione delle texture che la scheda video legge
 direttamente. Non usata oggi; il formato è pronto per aggiungerla. (7)
 
+**Banda di guardia** — pixel attorno a una striscia di un atlante che ripetono il suo bordo.
+Il filtro della scheda video legge anche i texel accanto a quello chiesto; senza banda, il
+bordo di una superficie prende il colore della vicina. (12)
+
 **Bounds** — il volume che contiene una primitiva. Il renderer lo usa per decidere
 se è visibile. (1, 6)
 
@@ -36,6 +40,10 @@ per fare prima. Fa scontrare le funzioni omonime nei namespace anonimi. (1)
 
 **CDO** (*Class Default Object*) — l'oggetto "prototipo" che Unreal crea per ogni
 classe `UCLASS`, con i valori di default. I file `.ini` vengono applicati a lui. (1)
+
+**Custom Primitive Data** — float che un componente di Unreal porta con sé nella GPU Scene,
+letti dal materiale come parametri. Si possono cambiare a ogni frame senza ricostruire
+l'istanza di materiale. Qui: Morph e Fade delle transizioni. (6)
 
 **Componente** (`UActorComponent`) — un pezzo di un attore che gli dà una capacità:
 disegnarsi, muoversi, stare a una coordinata geografica. (1)
@@ -87,6 +95,10 @@ che nessuno usa più. Vede solo i riferimenti che conosce. (1)
 `.osm.pbf`. Da lì scarica `fetch-osm`. (12)
 
 **Geoide** — la superficie del livello medio del mare, irregolare. (3)
+
+**Geomorphing** — far nascere una tile più fine con la forma e la luce della tile che
+sostituisce, e farla scivolare verso le proprie in qualche decimo di secondo. Toglie il lampo
+del raffinamento. (6)
 
 **Gonna** (*skirt*) — striscia verticale che scende dal bordo di una tile, per
 nascondere le crepe fra livelli diversi. (6)

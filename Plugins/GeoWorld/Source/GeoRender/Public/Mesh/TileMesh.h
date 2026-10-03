@@ -68,6 +68,18 @@ namespace GeoWorld::Mesh
 		std::vector<float> UVs;            // 2 per vertice, [0,1] sulla tile
 		std::vector<uint32_t> Indices;     // 3 per triangolo
 
+		/**
+		 * GEOMORPHING (facoltativo, vuoti se non calcolati). Per ogni vertice:
+		 *   MorphDeltas   quanto il vertice sta SOPRA la superficie del padre,
+		 *                 in metri, lungo l'alto locale;
+		 *   ParentNormals la normale della superficie del padre in quel punto
+		 *                 (3 per vertice, frame locale).
+		 * Il materiale li usa per far nascere la tile con la forma e la luce
+		 * del padre e farla scivolare verso le proprie: vedi ComputeMorphTargets.
+		 */
+		std::vector<float> MorphDeltas;
+		std::vector<float> ParentNormals;
+
 		uint32_t InteriorVertexCount = 0;
 		uint32_t SkirtVertexCount = 0;
 		uint32_t TriangleCount = 0;
@@ -418,5 +430,156 @@ namespace GeoWorld::Mesh
 		}
 
 		Out.TriangleCount = static_cast<uint32_t>(Out.Indices.size() / 3);
+	}
+
+	// =========================================================================
+	//  La superficie DISEGNATA, e il geomorphing
+	// =========================================================================
+
+	/**
+	 * La quota del terreno come la disegna la mesh di BuildTileMesh: stessa
+	 * griglia (un post ogni Step), stessa diagonale (nord-ovest / sud-est).
+	 *
+	 * Fuori dalla tile non si blocca al bordo: si prolunga il piano del
+	 * triangolo piu' vicino. Serve agli spigoli delle strade che sporgono oltre
+	 * il bordo, e ai punti del figlio che cadono proprio sul bordo del padre.
+	 */
+	class FSurfaceSampler
+	{
+	public:
+		FSurfaceSampler(const FHeightTile& InTile, int32_t Step)
+			: Tile(&InTile)
+		{
+			PostStep = (Step >= 1 && Tiles::TileCells % Step == 0) ? Step : 1;
+			Cells = Tiles::TileCells / PostStep;
+			Bounds = Tiles::GetTileBounds(InTile.Key.Level, InTile.Key.X, InTile.Key.Y);
+			SpanDeg = Tiles::TileSpanDeg(InTile.Key.Level);
+		}
+
+		bool IsValid() const { return Tile && Tile->IsValid(); }
+		int32_t GetCells() const { return Cells; }
+		const Tiles::FTileBounds& GetBounds() const { return Bounds; }
+		double GetCellDegrees() const { return SpanDeg / Cells; }
+
+		/** Quota ellissoidica in metri al punto dato (gradi). */
+		double HeightAt(double Lon, double Lat) const
+		{
+			const double X = (Lon - Bounds.West) / SpanDeg * Cells;
+			const double Y = (Bounds.North - Lat) / SpanDeg * Cells;
+			const int32_t I = std::min(Cells - 1, std::max(0, static_cast<int32_t>(std::floor(X))));
+			const int32_t J = std::min(Cells - 1, std::max(0, static_cast<int32_t>(std::floor(Y))));
+			const double Fx = X - I;
+			const double Fy = Y - J;
+
+			const double H00 = Tile->GetHeight(I * PostStep, J * PostStep);
+			const double H10 = Tile->GetHeight((I + 1) * PostStep, J * PostStep);
+			const double H01 = Tile->GetHeight(I * PostStep, (J + 1) * PostStep);
+			const double H11 = Tile->GetHeight((I + 1) * PostStep, (J + 1) * PostStep);
+
+			// I due triangoli di BuildTileMesh: (NO, NE, SE) sopra la diagonale,
+			// (NO, SE, SO) sotto. Dentro ognuno la quota e' un piano.
+			if (Fx >= Fy) { return H00 + Fx * (H10 - H00) + Fy * (H11 - H10); }
+			return H00 + Fy * (H01 - H00) + Fx * (H11 - H01);
+		}
+
+	private:
+		const FHeightTile* Tile = nullptr;
+		int32_t PostStep = 1;
+		int32_t Cells = Tiles::TileCells;
+		Tiles::FTileBounds Bounds;
+		double SpanDeg = 1.0;
+	};
+
+	/**
+	 * Calcola i bersagli del geomorphing: per ogni vertice della mesh di
+	 * `Tile`, quanto sta sopra la superficie disegnata del padre e la normale
+	 * del padre in quel punto.
+	 *
+	 * PERCHE'. Quando una tile si raffina, al suo posto compaiono le quattro
+	 * figlie: in un frame cambiano la forma del terreno (piu' dettaglio), le
+	 * normali (quindi quanto e' illuminato ogni pendio) e, di solito, la foto.
+	 * L'occhio lo vede come un lampo. Con questi dati il materiale fa nascere
+	 * le figlie ESATTAMENTE con la forma e la luce del padre (sposta ogni
+	 * vertice di -Delta e usa la normale del padre) e le fa scivolare verso le
+	 * proprie in mezzo secondo.
+	 *
+	 * Il padre si disegna con lo stesso passo del figlio, quindi la sua
+	 * superficie si campiona con lo stesso FSurfaceSampler: la forma di
+	 * partenza e' quella che c'era a schermo, al centimetro.
+	 */
+	inline void ComputeMorphTargets(const FHeightTile& Tile, const FHeightTile& Parent, int32_t Step,
+	                                FTileMeshData& InOut)
+	{
+		InOut.MorphDeltas.clear();
+		InOut.ParentNormals.clear();
+		if (!Tile.IsValid() || !Parent.IsValid() || InOut.InteriorVertexCount == 0) { return; }
+
+		const int32_t PostStep = (Step >= 1 && Tiles::TileCells % Step == 0) ? Step : 1;
+		const int32_t Cells = Tiles::TileCells / PostStep;
+		const int32_t Posts = Cells + 1;
+		if (InOut.InteriorVertexCount != static_cast<uint32_t>(Posts) * Posts) { return; }
+
+		const FSurfaceSampler ParentSurface(Parent, Step);
+		const Tiles::FTileBounds Bounds = Tiles::GetTileBounds(Tile.Key.Level, Tile.Key.X, Tile.Key.Y);
+		const double Spacing = Tiles::PostSpacingDeg(Tile.Key.Level) * PostStep;
+
+		// Il passo delle differenze finite per la normale del padre: una sua
+		// cella. Metri per grado alla latitudine della tile.
+		const double Probe = ParentSurface.GetCellDegrees();
+		constexpr double MetresPerDegreeLat = 111132.0;
+		constexpr double MetresPerDegreeLonAtEquator = 111320.0;
+		const double MetresLon = MetresPerDegreeLonAtEquator * std::cos(Bounds.CentreLat() * Core::DegToRad);
+
+		const size_t VertexCount = InOut.Positions.size() / 3;
+		InOut.MorphDeltas.assign(VertexCount, 0.0f);
+		InOut.ParentNormals.assign(VertexCount * 3, 0.0f);
+
+		for (int32_t J = 0; J < Posts; ++J)
+		{
+			const double Lat = Bounds.North - static_cast<double>(J) * Spacing;
+			for (int32_t I = 0; I < Posts; ++I)
+			{
+				const double Lon = Bounds.West + static_cast<double>(I) * Spacing;
+				const size_t Index = static_cast<size_t>(J) * Posts + I;
+
+				const double Own = Tile.GetHeight(I * PostStep, J * PostStep);
+				InOut.MorphDeltas[Index] = static_cast<float>(Own - ParentSurface.HeightAt(Lon, Lat));
+
+				const double DhDEast = (ParentSurface.HeightAt(Lon + Probe, Lat) - ParentSurface.HeightAt(Lon - Probe, Lat))
+				                     / (2.0 * Probe * MetresLon);
+				const double DhDNorth = (ParentSurface.HeightAt(Lon, Lat + Probe) - ParentSurface.HeightAt(Lon, Lat - Probe))
+				                      / (2.0 * Probe * MetresPerDegreeLat);
+				// Frame NEU: X nord, Y est, Z alto.
+				double Nx = -DhDNorth, Ny = -DhDEast, Nz = 1.0;
+				const double Length = std::sqrt(Nx * Nx + Ny * Ny + Nz * Nz);
+				Nx /= Length; Ny /= Length; Nz /= Length;
+				InOut.ParentNormals[Index * 3 + 0] = static_cast<float>(Nx);
+				InOut.ParentNormals[Index * 3 + 1] = static_cast<float>(Ny);
+				InOut.ParentNormals[Index * 3 + 2] = static_cast<float>(Nz);
+			}
+		}
+
+		// Le gonne scendono dai post di bordo: stesso spostamento e stessa
+		// normale (orizzontale come la loro). Sono in fondo, nell'ordine dei
+		// quattro bordi di BuildTileMesh.
+		if (InOut.SkirtVertexCount == static_cast<uint32_t>(4 * Posts))
+		{
+			struct FEdge { int32_t StartI, StartJ, StepI, StepJ; };
+			const FEdge Edges[4] = { { 0, 0, 1, 0 }, { Cells, 0, 0, 1 }, { Cells, Cells, -1, 0 }, { 0, Cells, 0, -1 } };
+			size_t Target = InOut.InteriorVertexCount;
+			for (const FEdge& Edge : Edges)
+			{
+				for (int32_t Walk = 0; Walk <= Cells; ++Walk, ++Target)
+				{
+					const size_t Source = static_cast<size_t>(Edge.StartJ + Edge.StepJ * Walk) * Posts
+					                    + static_cast<size_t>(Edge.StartI + Edge.StepI * Walk);
+					InOut.MorphDeltas[Target] = InOut.MorphDeltas[Source];
+					for (int Axis = 0; Axis < 3; ++Axis)
+					{
+						InOut.ParentNormals[Target * 3 + Axis] = InOut.Normals[Target * 3 + Axis];
+					}
+				}
+			}
+		}
 	}
 }

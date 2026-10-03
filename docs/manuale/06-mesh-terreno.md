@@ -529,18 +529,62 @@ attore (capitolo 1.8), e lì si usa `geo.ViewSpeed`.
 
 ---
 
+## 6.12 Il raffinamento senza lampi: geomorphing e dissolvenza
+
+Quando ti avvicini, il quadtree sostituisce una tile con le sue quattro figlie
+**in un frame**. In quel frame cambiano insieme la forma (più dettaglio), la
+luce (le normali nuove) e la foto (più nitida). L'occhio lo legge come un
+lampo: è il *popping* di ogni terreno a livelli di dettaglio, ed è il "flash
+quando ricalcola la geometria" della seconda prova delle strade.
+
+Il rimedio è far **nascere le figlie identiche al padre** e lasciarle diventare
+se stesse in 0,6 secondi:
+
+1. **Geomorphing.** Mentre costruisce la mesh di una figlia, il worker calcola
+   per ogni vertice quanto sta sopra la superficie *disegnata* del padre
+   (`ComputeMorphTargets`, in `TileMesh.h`) e la normale del padre in quel
+   punto. Il provider li mette in due canali UV in più (1 e 2). Il materiale
+   abbassa ogni vertice di `Delta × Morph` (World Position Offset) e mescola
+   le normali con lo stesso peso.
+2. **Dissolvenza.** La figlia riceve come foto "precedente" quella del padre,
+   ritagliata sul suo quarto, e il materiale mescola le due con `Fade`. Vale
+   anche per ogni tile a schermo che cambia foto.
+
+`Morph` e `Fade` scendono da 1 a 0 con una curva morbida. Sono **Custom
+Primitive Data**: float del componente, nella GPU Scene, che il materiale legge
+come parametri scalari. Cambiarli a ogni frame costa un piccolo aggiornamento,
+non la ricostruzione dell'istanza di materiale.
+
+> 💡 **Chi decide quando.** Il subsystem del terreno, prima di cambiare le
+> visibilità di un frame, guarda chi sta per comparire al posto di un antenato
+> che era a schermo fino al frame prima. A quelle tile, e solo a quelle, fa
+> partire la transizione. Una tile che compare dal nulla (dopo un
+> teletrasporto) non ha un "prima" e compare e basta.
+
+> ⚠️ **Trappola.** Il canale UV con la normale del padre si scrive **sempre**,
+> anche quando i dati del morphing mancano (con la normale propria e delta
+> zero). Un canale mancante Unreal lo rimpiazza con il canale 0, e il materiale
+> normalizzerebbe un vettore fatto di coordinate di texture: dove vale zero,
+> un NaN, e un NaN moltiplicato per un peso zero resta NaN. Pixel neri.
+
+Comando: `geo.Terrain.Morph <secondi>` (0 = di colpo, per confrontare);
+l'overlay `geo.Terrain.Debug 1` mostra le transizioni in corso. I dettagli e
+le prove sono in `docs/strade-3d.md`, sezione 2.
+
+---
+
 ## Dove sta nel codice
 
 | File | Cosa contiene |
 |---|---|
-| `GeoRender/Public/Mesh/TileMesh.h` | da quote a mesh: vertici, normali, UV, gonne |
+| `GeoRender/Public/Mesh/TileMesh.h` | da quote a mesh: vertici, normali, UV, gonne; superficie disegnata e geomorphing |
 | `GeoRender/Public/Terrain/GeoTerrainMeshProvider.h` | l'interfaccia, e `FGeoTerrainTileDiagnostic` |
 | `GeoRender/Public/Terrain/DynamicMeshTerrainProvider.h` + `.cpp` | l'implementazione con `UDynamicMeshComponent` |
 | `GeoRender/Public/Terrain/GeoTerrainSubsystem.h` + `.cpp` | budget, pin, rimozione, overlay, scatole |
 | `GeoRender/Public/GeoFlyPawn.h` + `.cpp` | la camera di volo |
 | `GeoCore/Public/Georeference/GeoPlaces.h` | i luoghi noti |
 | `GeoRender/Private/GeoRenderModule.cpp` | i comandi `geo.Terrain.*`, `geo.Fly*` |
-| `Tools/StandaloneTests/geomesh_main.cpp` | 28 test, giunzioni comprese |
+| `Tools/StandaloneTests/geomesh_main.cpp` | 41 test, giunzioni e geomorphing compresi |
 | `docs/fase5-design.md`, `docs/fase5-verifica.md` | i documenti originali |
 
 ### Comandi
@@ -553,6 +597,8 @@ geo.Terrain.Skirt <0|1>          gonne: spegnile per VEDERE le crepe
 geo.Terrain.FlipWinding <0|1>    orientamento delle facce
 geo.Terrain.Budget <N>           tile costruite per frame
 geo.Terrain.Stats                statistiche
+geo.Terrain.Debug <0|1>          overlay del terreno
+geo.Terrain.Morph <secondi>      durata delle transizioni (0 = di colpo)
 geo.Terrain.Diag                 i numeri del renderer
 geo.Terrain.Boxes <0|1>          bounds come linee di debug
 geo.Fly / geo.Fly.Speed <x>      camera di volo (nel Play)

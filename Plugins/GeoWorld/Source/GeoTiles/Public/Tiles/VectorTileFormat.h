@@ -64,6 +64,9 @@ namespace GeoWorld::Tiles
 		float GetWidthMetres() const { return static_cast<float>(WidthDecimetres) * 0.1f; }
 		bool IsBridge() const { return (Flags & RoadFlagBridge) != 0; }
 		bool IsUnpaved() const { return (Flags & RoadFlagUnpaved) != 0; }
+		bool IsSidewalkKnown() const { return (Flags & RoadFlagSidewalkKnown) != 0; }
+		bool HasSidewalkLeft() const { return (Flags & RoadFlagSidewalkLeft) != 0; }
+		bool HasSidewalkRight() const { return (Flags & RoadFlagSidewalkRight) != 0; }
 	};
 
 	struct FVectorTile

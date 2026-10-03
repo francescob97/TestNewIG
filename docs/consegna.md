@@ -1,7 +1,7 @@
 # GeoWorld — documento di consegna
 
 Tutto quello che serve per riprendere il lavoro da solo.
-Ultimo aggiornamento: 2026-10-02. Branch: `claude/charming-goodall-xd2r3g`.
+Ultimo aggiornamento: 2026-10-03. Branch: `claude/charming-goodall-xd2r3g`.
 
 ---
 
@@ -16,7 +16,8 @@ Ultimo aggiornamento: 2026-10-02. Branch: `claude/charming-goodall-xd2r3g`.
 | 5 | Mesh, gonne, terreno a schermo | **codice completo, mai compilato in UE** |
 | 6 | Ortofoto drappeggiate | **codice completo, mai compilato in UE** |
 | 7 | Entità e interoperabilità (CIGI, DIS, HLA, memoria condivisa) | **solo design** |
-| 8 | **Strade, ferrovie, piste** da OpenStreetMap: dipinte sul terreno, **3D da vicino** | dipinte provate dall'utente (si vedono); **strade 3D da compilare e provare** — `docs/fase8-design.md`, `docs/fase8-verifica.md`, `docs/strade-3d.md` |
+| 8 | **Strade, ferrovie, piste** da OpenStreetMap: dipinte sul terreno, **3D da vicino** | dipinte provate dall'utente (si vedono); strade 3D provate ("manca la tridimensionalita'"), **rifatte: carreggiata in piano, scarpate, marciapiedi, guardrail, ponti con parapetti e pile — da compilare e provare** — `docs/fase8-design.md`, `docs/fase8-verifica.md`, `docs/strade-3d.md` |
+| dopo | **Flash quando la geometria si affina**: le figlie sostituivano il padre in un frame | **geomorphing e dissolvenza, da compilare e provare** — `docs/strade-3d.md`, sezione 2 |
 | dopo | **Flash del rebase**: l'origine del mondo stava alla quota della camera, e a ogni rebase cielo e nebbia saltavano | **corretto, da riprovare** — `docs/strade-3d.md`, sezione 2 |
 | 9–12 | Acqua; edifici e monumenti; vegetazione; atmosfera, cielo, nuvole e luce | **da fare** — programma in `docs/fase8-design.md`, sezione 0 |
 | dopo | **Residenza**: selezione indipendente dalla vista, precarico da posizione e velocità, mesh nascoste | **codice completo, mai compilato in UE** — `docs/residenza-design.md` |
@@ -28,9 +29,9 @@ Ultimo aggiornamento: 2026-10-02. Branch: `claude/charming-goodall-xd2r3g`.
 compilata con Unreal Engine. L'ambiente in cui e' stato scritto e' Linux senza
 il motore. Quello che **e'** stato verificato:
 
-* tutta la matematica pura, con test numerici eseguiti: **292 test C++** in
-  totale (37 Fase 1 + 22 Fase 3 + 84 Fase 4 e residenza + 34 Fase 5 + 52
-  Fase 6 + 63 Fase 8), piu' 149 test Python;
+* tutta la matematica pura, con test numerici eseguiti: **316 test C++** in
+  totale (37 Fase 1 + 22 Fase 3 + 84 Fase 4 e residenza + 41 Fase 5 e
+  geomorphing + 52 Fase 6 + 80 Fase 8), piu' 150 test Python;
 * le convenzioni UE controllate staticamente (bilanciamento parentesi,
   posizione dei `.generated.h`, guardie `WITH_EDITOR`, macro di export);
 * il formato dei file, letto dal codice C++ vero contro un dataset vero.
@@ -67,7 +68,7 @@ python run.py check-env                              :: SEMPRE per primo
 python run.py fetch --area test -o dati/copernicus   :: DEM libero, 19 MB
 python run.py build -i "dati/copernicus/*.tif" -o dataset/test
 python run.py verify -o dataset/test
-python -m unittest discover -s tests                 :: 149 test
+python -m unittest discover -s tests                 :: 150 test
 
 :: Fase 8: strade su Torino (dettagli in docs/fase8-verifica.md)
 python run.py fetch-osm --area torino -o dati/osm
@@ -87,9 +88,9 @@ cmake --build build
 build\Debug\geocore_tests.exe                       :: 37 test
 build\Debug\geotiles_tests.exe dataset\test         :: 22 test
 build\Debug\geoquadtree_tests.exe                   :: 84 test
-build\Debug\geomesh_tests.exe                       :: 34 test
+build\Debug\geomesh_tests.exe                       :: 41 test
 build\Debug\geoimagery_tests.exe                    :: 52 test
-build\Debug\georoads_tests.exe                      :: 63 test (dalla radice del repository)
+build\Debug\georoads_tests.exe                      :: 80 test (dalla radice del repository)
 Plugins\GeoWorld\Tools\CheckSourceDiscipline.sh      :: serve bash (Git Bash)
 ```
 
@@ -165,6 +166,8 @@ geo.Roads.Budget <MB>          memoria video per le strade
 geo.Roads.Strength <0..1>      quanto si vedono sopra la foto
 geo.Roads.3D <0|1>             strade 3D vicino alla camera (default 1)
 geo.Roads.3DLevels <1..3>      su quanti livelli di terreno fini (portatile 1, workstation 2)
+geo.Terrain.Debug <0|1>        overlay del terreno (con la riga delle transizioni)
+geo.Terrain.Morph <secondi>    durata delle transizioni quando la geometria si affina (0.6; 0 = di colpo)
 geo.Roads.Debug <0|1>          overlay delle strade
 geo.Roads.Stats                statistiche delle strade
 ```

@@ -668,6 +668,12 @@ bool UGeoRoadsSubsystem::LaunchMeshJob(IGeoTerrainMeshProvider* Provider, const 
 	// per le spalle dei ponti che cadono fuori da questa tile.
 	const UGeoTileStreamingSubsystem::FTilePtr Wide = (VectorLevel < TerrainKey.Level)
 		? Heights->FindLoadedTile(Imagery::AncestorOf(TerrainKey, VectorLevel)) : nullptr;
+	// Facoltativa anche questa: le quote del PADRE, per il geomorphing. La
+	// tile nasce con la forma del padre e ci scivola via; la strada, con i
+	// dati del padre, scivola con lei invece di restare sospesa (o sepolta)
+	// per mezzo secondo.
+	const UGeoTileStreamingSubsystem::FTilePtr Parent = (TerrainKey.Level > 0)
+		? Heights->FindLoadedTile(TerrainKey.GetParent()) : nullptr;
 
 	const FGeoPrepareTileMeshFunction Prepare = Provider->GetPrepareFunction();
 	if (!Prepare) { return false; }
@@ -683,7 +689,7 @@ bool UGeoRoadsSubsystem::LaunchMeshJob(IGeoTerrainMeshProvider* Provider, const 
 	// Tutto per copia, niente "this": come il disegno delle strade dipinte e
 	// le mesh del terreno.
 	UE::Tasks::FTask Task = UE::Tasks::Launch(TEXT("GeoRoads3D"),
-		[Height, Wide, Vector, Window, StyleCopy, Parameters, Prepare, JobGeneration, TerrainKey, Queue]()
+		[Height, Wide, Parent, Vector, Window, StyleCopy, Parameters, Prepare, JobGeneration, TerrainKey, Queue]()
 		{
 			const double Started = FPlatformTime::Seconds();
 
@@ -694,10 +700,11 @@ bool UGeoRoadsSubsystem::LaunchMeshJob(IGeoTerrainMeshProvider* Provider, const 
 
 			const Roads::FSurfaceSampler Surface(*Height, Parameters.Step);
 			const Roads::FSurfaceSampler WideSurface(Wide ? *Wide : *Height, Wide ? 1 : Parameters.Step);
+			const Roads::FSurfaceSampler ParentSurface(Parent ? *Parent : *Height, Parameters.Step);
 
 			Mesh::FTileMeshData MeshData;
 			Roads::BuildRoadMesh(*Height, Surface, Wide ? &WideSurface : nullptr, *Vector, Window,
-				StyleCopy, Parameters, MeshData);
+				StyleCopy, Parameters, MeshData, nullptr, Parent ? &ParentSurface : nullptr);
 
 			if (MeshData.TriangleCount > 0) { Result.Prepared = Prepare(MeshData); }
 			Result.bEmpty = !Result.Prepared.IsValid();
@@ -908,6 +915,15 @@ void UGeoRoadsSubsystem::DrawDebugOverlay()
 		if (Provider && !Provider->GetRoadMaterialProblem().IsEmpty())
 		{
 			Line(FColor::Red, Provider->GetRoadMaterialProblem());
+		}
+		else if (Provider)
+		{
+			// Per la diagnosi di "le strade 3D sono grigie": il materiale c'e',
+			// e l'atlante delle superfici gli e' stato dato?
+			Line(Provider->HasRoadAtlas() ? FColor::White : FColor::Yellow,
+				Provider->HasRoadAtlas()
+					? FString(TEXT("Materiale 3D: M_GeoRoad con l'atlante delle superfici"))
+					: FString(TEXT("Materiale 3D: M_GeoRoad SENZA atlante (arriva al prossimo frame)")));
 		}
 		const int32 Triangles = Provider ? Provider->GetRoadTriangleCount() : 0;
 		Line(Stats.Tile3DInAttesa > 0 ? FColor::Yellow : FColor::Green, FString::Printf(

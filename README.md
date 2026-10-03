@@ -36,7 +36,7 @@ Il progetto `TestNewIG` e' un guscio vuoto: tutto il codice vive in
       *(solo design: `docs/fase7-design.md`)*
 - [x] **Fase 8** — strade, ferrovie e piste da OpenStreetMap, dipinte da lontano e
       **3D da vicino** *(`docs/fase8-design.md`, prova: `docs/fase8-verifica.md`,
-      strade 3D e flash del rebase: `docs/strade-3d.md`)*
+      strade 3D, transizioni morbide del terreno e flash: `docs/strade-3d.md`)*
 - [ ] Fase 9 — acqua: mare, laghi, fiumi
 - [ ] Fase 10 — edifici e monumenti
 - [ ] Fase 11 — vegetazione
@@ -77,9 +77,9 @@ cmake --build build
 ./build/geocore_tests        # 37 test  -- geodesia, rebasing
 ./build/geotiles_tests       # 22 test  -- formato tile, cache (piu' quelli su un dataset vero)
 ./build/geoquadtree_tests    # 84 test  -- LOD, culling, orizzonte, residenza
-./build/geomesh_tests        # 34 test  -- mesh, gonne, giunzioni, passo
+./build/geomesh_tests        # 41 test  -- mesh, gonne, giunzioni, passo, geomorphing
 ./build/geoimagery_tests     # 52 test  -- drappeggio, formato immagine, mipmap
-./build/georoads_tests       # 63 test  -- strade: formato .gvt, larghezze misurate, ritagli, strade 3D
+./build/georoads_tests       # 80 test  -- strade: formato .gvt, larghezze misurate, ritagli, strade 3D, marciapiedi e incroci
 
 ./Plugins/GeoWorld/Tools/CheckSourceDiscipline.sh
 python3 Plugins/GeoWorld/Tools/CheckShadowedParameters.py

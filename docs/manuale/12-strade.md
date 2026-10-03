@@ -58,7 +58,7 @@ highway=primary  lanes=2  bridge=yes  layer=1  surface=asphalt
 |---|---|---|
 | classe | `highway`, `railway`, `aeroway` | `primary` → 3 |
 | larghezza | `width`, poi `lanes` × 3,25 m, poi un valore tipico | 2 corsie → 7,0 m |
-| flag | ponte, galleria, sterrato, rampa | ponte |
+| flag | ponte, galleria, sterrato, rampa; marciapiede a sinistra / a destra (dalla classificazione 2) | ponte |
 | layer | `layer` | 1 |
 
 Alcune way si **scartano**: le gallerie (dal cielo non si vedono), i progetti e
@@ -196,20 +196,27 @@ terreno al livello più fine, cioè attorno alla camera quando si vola bassi.
 Salendo, il quadtree smette di scegliere quelle tile e le strade tornano
 dipinte da sole. Il racconto completo, con i numeri, è in `docs/strade-3d.md`.
 
-Il problema è **stare sul terreno**: non sul DEM, ma sulla mesh che si vede,
-con un post ogni due e le celle divise lungo la diagonale.
+Il primo problema è **stare sul terreno**: non sul DEM, ma sulla mesh che si
+vede, con un post ogni due e le celle divise lungo la diagonale.
 
 1. La quota si prende dallo **stesso triangolo** che il terreno disegna
    (`FSurfaceSampler`).
 2. La strada si **spezza** dove attraversa uno spigolo della mesh: fra due
-   tagli il terreno è un piano, e il nastro ci sta sopra.
-3. La si **solleva** di 20 cm, più 2 cm per gradino di importanza: agli
-   incroci la strada più importante sta sopra, e le due superfici non
-   lampeggiano l'una nell'altra (*z-fighting*).
+   tagli il terreno è un piano.
+3. La carreggiata sta al **punto più alto** del terreno sotto di lei, più 15
+   cm, più 2 cm per gradino di importanza: il terreno non la buca mai, e agli
+   incroci la strada più importante sta sopra.
+
+Il secondo è **sembrare 3D**. La prima versione era un nastro inclinato come
+il terreno: dall'alto identico a una strada dipinta. Ora ogni sezione ha un
+profilo: carreggiata **in piano di traverso**, **scarpate** fino al terreno,
+**cordolo e marciapiede** dove OSM li segna (e sulle residenziali), **guardrail**
+sulle autostrade, **parapetti e pile** sui ponti, la **massicciata** sotto i
+binari.
 
 > 💡 **Esempio.** I ponti non seguono il terreno: l'impalcato va dritto fra le
-> due spalle e ha fianchi e fondo. Su una valle di 60 m il test misura la
-> strada normale a 340 m e l'impalcato a 400 m.
+> due spalle. Su una valle di 60 m il test misura la strada normale a 340 m e
+> l'impalcato a 400 m, con sette pile fino al fondo.
 
 > ⚠️ **Trappola (presa dai test).** Nelle curve strette i due bordi interni di
 > due sezioni consecutive si incrociano e il quadrilatero diventa un
@@ -217,9 +224,21 @@ con un post ogni due e le celle divise lungo la diagonale.
 > verso una volta per quadrilatero ne lasciava uno su 1.740 rovesciato, cioè
 > invisibile dall'alto. Ora si decide triangolo per triangolo.
 
+> ⚠️ **Trappola (gli incroci).** Un marciapiede che prosegue dritto attraversa
+> la strada che incrocia: un gradino di 15 cm in mezzo all'asfalto. Prima di
+> costruire una tile si indicizzano tutte le carreggiate, e marciapiedi e
+> scarpate si interrompono dove cadono su un'altra strada. Le sezioni normali
+> sono ogni 5–10 m e una via larga 5 m può stare tutta fra due: attorno agli
+> incroci se ne aggiungono ogni metro e mezzo.
+
 La mesh della strada vive **nel provider, dentro la tile**: stessa
-trasformazione, stessa visibilità, stesso rebase. Non c'è un momento in cui il
-terreno è a schermo e la sua strada no, o il contrario.
+trasformazione, stessa visibilità, stesso rebase, e lo stesso **geomorphing**
+(capitolo 6.12): quando la tile si affina, la sua strada scivola con lei.
+
+Il materiale `M_GeoRoad` legge un **atlante** generato dal codice: 16 strisce
+(asfalto, binari, cordolo, scarpata, acciaio...), ognuna con 8 pixel di **banda
+di guardia** per lato, e la **ruvidità nel canale alfa** (l'asfalto è opaco, le
+rotaie luccicano).
 
 ---
 

@@ -88,6 +88,15 @@ public:
 	virtual bool HasRoadAtlas() const override { return RoadMaterialInstance.IsValid() || !RoadMaterial.IsValid(); }
 	virtual FString GetRoadMaterialProblem() const override { return RoadMaterialProblem; }
 
+	virtual void SetTileMorph(const GeoWorld::Tiles::FTileKey& Key, float Morph) override;
+	virtual void BeginTransitionFromParent(const GeoWorld::Tiles::FTileKey& Child,
+	                                       const GeoWorld::Tiles::FTileKey& Parent) override;
+	virtual void TickTransitions(double NowSeconds) override;
+	virtual void SetTransitionSeconds(float Seconds) override { TransitionSeconds = FMath::Max(0.0f, Seconds); }
+	virtual float GetTransitionSeconds() const override { return TransitionSeconds; }
+	virtual int32 GetTransitionCount() const override { return Transitioning.Num(); }
+	virtual FString GetTransitionMaterialProblem() const override { return TransitionMaterialProblem; }
+
 	virtual int32 GetRealizedTriangleCount() const override;
 	virtual void GetDiagnostics(TArray<FGeoTerrainTileDiagnostic>& Out,
 	                            int32 MaxEntries) const override;
@@ -120,7 +129,46 @@ private:
 		bool bOverlaid = false;
 		TWeakObjectPtr<UTexture2D> OverlayTexture;
 		GeoWorld::Imagery::FDrapeTransform OverlayTransform;
+
+		// --- Transizioni (vedi GeoTerrainMeshProvider.h) ---------------------
+		/** La mesh porta i dati del geomorphing (UV 1 e 2). */
+		bool bHasMorph = false;
+		/** Morphing in corso: 1 -> 0 da MorphStart. Negativo = fermo. */
+		double MorphStart = -1.0;
+		/** Dissolvenza in corso: peso della foto precedente 1 -> 0. Negativo = ferma. */
+		double FadeStart = -1.0;
+		/** Ultimo valore scritto nei Custom Primitive Data, per non riscriverlo. */
+		float MorphValue = 0.0f;
+		float FadeValue = 0.0f;
 	};
+
+	/** Lo stato di vestizione di una tile, come la vede il materiale. */
+	struct FDressState
+	{
+		TWeakObjectPtr<UTexture2D> Drape;
+		GeoWorld::Imagery::FDrapeTransform DrapeTransform;
+		TWeakObjectPtr<UTexture2D> Overlay;
+		GeoWorld::Imagery::FDrapeTransform OverlayTransform;
+	};
+
+	/** Cosa ha a schermo adesso la tile (per farla diventare la "precedente"). */
+	static FDressState CaptureDress(const FTileEntry& Entry);
+
+	/** Fa partire la dissolvenza da `Previous` verso lo stato attuale della tile. */
+	void StartFade(FTileEntry& Entry, const FDressState& Previous);
+
+	/** Scrive i Custom Primitive Data della tile (e della sua strada). */
+	static void WriteTransitionData(FTileEntry& Entry, float Morph, float Fade);
+
+	/** Chiude subito le transizioni della tile. */
+	void FinishTransitions(FTileEntry& Entry);
+
+	/** La foto "precedente" torna a puntare a quella attuale: libera la vecchia. */
+	void ReleasePrevious(FTileEntry& Entry) const;
+
+	/** Cerca i materiali che mancano e ricontrolla i parametri (vedi il .cpp). */
+	void CheckMaterials(bool bLog);
+	double LastMaterialCheckSeconds = 0.0;
 
 	/** L'istanza di materiale della tile, creata se manca. Nullptr senza M_GeoTerrain. */
 	UMaterialInstanceDynamic* EnsureDrapeInstance(FTileEntry& Entry, UDynamicMeshComponent* Component);
@@ -158,6 +206,14 @@ private:
 	TStrongObjectPtr<UMaterialInterface> RoadMaterial;
 	TStrongObjectPtr<UMaterialInstanceDynamic> RoadMaterialInstance;
 	FString RoadMaterialProblem;
+
+	/** Durata delle transizioni (geo.Terrain.Morph). */
+	float TransitionSeconds = 0.6f;
+	/** Le tile con una transizione in corso: TickTransitions guarda solo queste. */
+	TSet<uint64> Transitioning;
+	/** M_GeoTerrain ha i parametri della dissolvenza (BaseColorPrevious...)? */
+	bool bFadeSupported = false;
+	FString TransitionMaterialProblem;
 
 	/** Il materiale da dare a un componente di strada: l'istanza, o il ripiego. */
 	UMaterialInterface* GetRoadMaterialForComponent() const;

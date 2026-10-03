@@ -435,6 +435,94 @@ static void TestMeshStep()
 }
 
 // ===========================================================================
+
+// ===========================================================================
+//  9. Geomorphing: le figlie nascono con la forma e la luce del padre
+// ===========================================================================
+static void TestMorphTargets()
+{
+	Section("9. Geomorphing: bersagli verso la superficie del padre");
+
+	const FTileKey ParentKey{ 12, 2190, 547 };
+	const FTileKey ChildKey = ParentKey.GetChild(3);      // quarto sud-est
+	const FHeightTile Parent = MakeTile(ParentKey);
+	const FHeightTile Child = MakeTile(ChildKey);
+
+	FTileMeshParameters Parameters;
+	Parameters.Step = 2;
+	FTileMeshData Mesh;
+	BuildTileMesh(Child, Parameters, Mesh);
+	ComputeMorphTargets(Child, Parent, Parameters.Step, Mesh);
+
+	const size_t Vertices = Mesh.Positions.size() / 3;
+	Check(Mesh.MorphDeltas.size() == Vertices && Mesh.ParentNormals.size() == Vertices * 3,
+		"un delta e una normale del padre per ogni vertice, gonne comprese");
+
+	// Il vertice spostato di -delta lungo l'alto locale deve stare SULLA
+	// superficie disegnata del padre: e' la forma che c'era a schermo.
+	const FSurfaceSampler ParentSurface(Parent, Parameters.Step);
+	double Worst = 0.0, LargestDelta = 0.0;
+	for (size_t Vertex = 0; Vertex < Mesh.InteriorVertexCount; Vertex += 37)
+	{
+		const FEcef OriginEcef = Core::GeodeticToEcef(Mesh.Origin, WGS84);
+		const Core::FMat3 ToEcef = Core::MakeNeuBasis(Mesh.Origin.LatRad, Mesh.Origin.LonRad).Transposed();
+		const FEcef Morphed{ Mesh.Positions[Vertex * 3 + 0], Mesh.Positions[Vertex * 3 + 1],
+		                     Mesh.Positions[Vertex * 3 + 2] - Mesh.MorphDeltas[Vertex] };
+		const FGeodetic Point = Core::EcefToGeodetic(ToEcef.Transform(Morphed) + OriginEcef, WGS84);
+		const double Surface = ParentSurface.HeightAt(Point.LonRad / Core::DegToRad, Point.LatRad / Core::DegToRad);
+		Worst = std::max(Worst, std::fabs(Point.HeightM - Surface));
+		LargestDelta = std::max(LargestDelta, std::fabs(static_cast<double>(Mesh.MorphDeltas[Vertex])));
+	}
+	Check(Worst < 0.05, "il vertice spostato di -delta sta sulla superficie del padre",
+		Fmt("scarto massimo %.4f m", Worst));
+	Check(LargestDelta > 0.01, "su un terreno vero i delta non sono tutti zero", Fmt("delta massimo %.3f m", LargestDelta));
+
+	// Gonne: stesso delta del post di bordo da cui scendono (il primo
+	// vertice di gonna e' l'angolo nord-ovest).
+	Check(Mesh.MorphDeltas[Mesh.InteriorVertexCount] == Mesh.MorphDeltas[0],
+		"la gonna si sposta con il suo post di bordo");
+
+	// Su un terreno che E' la superficie del padre, nessuno spostamento e la
+	// stessa luce: il morphing non deve inventare niente.
+	FHeightTile Same = Child;
+	{
+		const auto Bounds = Tiles::GetTileBounds(ChildKey.Level, ChildKey.X, ChildKey.Y);
+		const double Spacing = Tiles::PostSpacingDeg(ChildKey.Level);
+		for (int32_t J = 0; J < Tiles::TilePosts; ++J)
+		{
+			for (int32_t I = 0; I < Tiles::TilePosts; ++I)
+			{
+				Same.Heights[static_cast<size_t>(J) * Tiles::TilePosts + I] =
+					static_cast<float>(ParentSurface.HeightAt(Bounds.West + I * Spacing, Bounds.North - J * Spacing));
+			}
+		}
+	}
+	FTileMeshData SameMesh;
+	BuildTileMesh(Same, Parameters, SameMesh);
+	ComputeMorphTargets(Same, Parent, Parameters.Step, SameMesh);
+	double SameWorst = 0.0, AngleSum = 0.0;
+	int Samples = 0;
+	for (size_t Vertex = 0; Vertex < SameMesh.InteriorVertexCount; Vertex += 13)
+	{
+		SameWorst = std::max(SameWorst, std::fabs(static_cast<double>(SameMesh.MorphDeltas[Vertex])));
+		const double Dot = SameMesh.Normals[Vertex * 3 + 0] * SameMesh.ParentNormals[Vertex * 3 + 0]
+		                 + SameMesh.Normals[Vertex * 3 + 1] * SameMesh.ParentNormals[Vertex * 3 + 1]
+		                 + SameMesh.Normals[Vertex * 3 + 2] * SameMesh.ParentNormals[Vertex * 3 + 2];
+		AngleSum += std::acos(std::min(1.0, Dot)) * 180.0 / 3.14159265358979;
+		++Samples;
+	}
+	Check(SameWorst < 0.01, "figlia uguale al padre: delta nulli", Fmt("%.4f m", SameWorst));
+	Check(AngleSum / Samples < 3.0, "figlia uguale al padre: stessa luce (normali entro pochi gradi)",
+		Fmt("%.2f gradi in media", AngleSum / Samples));
+
+	// Dati incoerenti (passo diverso da quello della mesh): niente morphing,
+	// non dati sbagliati.
+	FTileMeshData Wrong;
+	BuildTileMesh(Child, Parameters, Wrong);
+	ComputeMorphTargets(Child, Parent, 4, Wrong);
+	Check(Wrong.MorphDeltas.empty(), "passo incoerente: nessun bersaglio");
+}
+
 int main()
 {
 	std::printf("=====================================================\n");
@@ -449,6 +537,7 @@ int main()
 	TestWinding();
 	TestCost();
 	TestMeshStep();
+	TestMorphTargets();
 
 	std::printf("\n=====================================================\n");
 	std::printf(" RISULTATO: %d passati, %d falliti\n", GPassed, GFailed);

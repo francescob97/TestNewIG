@@ -76,42 +76,7 @@ void FDynamicMeshTerrainProvider::Initialize(UWorld* World)
 	DrapeMaterial.Reset(LoadObject<UMaterialInterface>(
 		nullptr, TEXT("/GeoWorld/Materials/M_GeoTerrain.M_GeoTerrain")));
 
-	// Il materiale c'e', ma e' quello giusto? La versione con il bug dell'offset
-	// V non ha il parametro DrapeUv (si chiamava UvOffsetScale). Si controlla
-	// qui, una volta, e lo si dice chiaramente: altrimenti il sintomo e' un
-	// mosaico di pezzi di immagine fuori posto, che non fa pensare al materiale.
-	if (UMaterialInterface* Drape = DrapeMaterial.Get())
-	{
-		FLinearColor Unused;
-		if (!Drape->GetVectorParameterValue(FHashedMaterialParameterInfo(TEXT("DrapeUv")), Unused))
-		{
-			MaterialProblem = TEXT("M_GeoTerrain e' la versione VECCHIA (bug dell'offset V): ")
-			                  TEXT("rifallo con geo.Imagery.CreateMaterial");
-			UE_LOG(LogGeoWorld, Warning, TEXT("[GeoTerrain] %s"), *MaterialProblem);
-		}
-
-		// Fase 8: le strade vogliono tre parametri in piu'. Un M_GeoTerrain fatto
-		// prima della Fase 8 non li ha, e le strade semplicemente non si
-		// vedrebbero, senza un errore: lo si dice qui.
-		UTexture* UnusedTexture = nullptr;
-		if (!Drape->GetTextureParameterValue(FHashedMaterialParameterInfo(TEXT("Overlay")), UnusedTexture))
-		{
-			OverlayMaterialProblem = TEXT("M_GeoTerrain non ha i parametri delle strade (Overlay): ")
-			                         TEXT("rifallo con geo.Imagery.CreateMaterial");
-			UE_LOG(LogGeoWorld, Warning, TEXT("[GeoTerrain] %s"), *OverlayMaterialProblem);
-		}
-	}
-
-	// Il materiale delle strade 3D: come M_GeoTerrain, nasce da
-	// geo.Imagery.CreateMaterial. Senza, le strade 3D usano il grigio di base.
-	RoadMaterial.Reset(LoadObject<UMaterialInterface>(
-		nullptr, TEXT("/GeoWorld/Materials/M_GeoRoad.M_GeoRoad")));
-	if (!RoadMaterial.IsValid())
-	{
-		RoadMaterialProblem = TEXT("manca M_GeoRoad: le strade 3D restano grigie. ")
-		                      TEXT("Crealo con geo.Imagery.CreateMaterial");
-		UE_LOG(LogGeoWorld, Warning, TEXT("[GeoTerrain] %s"), *RoadMaterialProblem);
-	}
+	CheckMaterials(/*bLog=*/true);
 
 	if (!DrapeMaterial.IsValid())
 	{
@@ -122,6 +87,96 @@ void FDynamicMeshTerrainProvider::Initialize(UWorld* World)
 	}
 
 	UE_LOG(LogGeoWorld, Log, TEXT("[GeoTerrain] Provider '%s' pronto."), *GetName());
+}
+
+// ---------------------------------------------------------------------------
+//  I materiali giusti? Controllato all'avvio e poi ogni due secondi.
+//
+//  PERCHE' ANCHE DOPO L'AVVIO. geo.Imagery.CreateMaterial si puo' lanciare
+//  con il Play gia' partito: il materiale nuovo esiste, ma il provider lo
+//  aveva cercato all'avvio, non l'aveva trovato e non lo cercava piu'. Le
+//  strade 3D restavano grigie fino al Play successivo, con l'overlay che
+//  continuava a dire "manca M_GeoRoad" anche se c'era. Ora lo si ricerca.
+// ---------------------------------------------------------------------------
+void FDynamicMeshTerrainProvider::CheckMaterials(bool bLog)
+{
+	if (!DrapeMaterial.IsValid())
+	{
+		DrapeMaterial.Reset(LoadObject<UMaterialInterface>(nullptr,
+			TEXT("/GeoWorld/Materials/M_GeoTerrain.M_GeoTerrain"), nullptr, LOAD_NoWarn | LOAD_Quiet));
+	}
+	if (!RoadMaterial.IsValid())
+	{
+		RoadMaterial.Reset(LoadObject<UMaterialInterface>(nullptr,
+			TEXT("/GeoWorld/Materials/M_GeoRoad.M_GeoRoad"), nullptr, LOAD_NoWarn | LOAD_Quiet));
+	}
+
+	FString NewMaterialProblem, NewOverlayProblem, NewTransitionProblem, NewRoadProblem;
+
+	// Il materiale c'e', ma e' quello giusto? La versione con il bug dell'offset
+	// V non ha il parametro DrapeUv (si chiamava UvOffsetScale). Lo si dice
+	// chiaramente: altrimenti il sintomo e' un mosaico di pezzi di immagine
+	// fuori posto, che non fa pensare al materiale.
+	if (UMaterialInterface* Drape = DrapeMaterial.Get())
+	{
+		FLinearColor UnusedColor;
+		UTexture* UnusedTexture = nullptr;
+		if (!Drape->GetVectorParameterValue(FHashedMaterialParameterInfo(TEXT("DrapeUv")), UnusedColor))
+		{
+			NewMaterialProblem = TEXT("M_GeoTerrain e' la versione VECCHIA (bug dell'offset V): ")
+			                     TEXT("rifallo con geo.Imagery.CreateMaterial");
+		}
+
+		// Fase 8: le strade vogliono tre parametri in piu'. Un M_GeoTerrain fatto
+		// prima della Fase 8 non li ha, e le strade semplicemente non si
+		// vedrebbero, senza un errore: lo si dice qui.
+		if (!Drape->GetTextureParameterValue(FHashedMaterialParameterInfo(TEXT("Overlay")), UnusedTexture))
+		{
+			NewOverlayProblem = TEXT("M_GeoTerrain non ha i parametri delle strade (Overlay): ")
+			                    TEXT("rifallo con geo.Imagery.CreateMaterial");
+		}
+
+		// Transizioni morbide: la foto precedente e il geomorphing. Senza, le
+		// tile cambiano di colpo come prima: niente di rotto, solo il lampo.
+		bFadeSupported = Drape->GetTextureParameterValue(
+			FHashedMaterialParameterInfo(TEXT("BaseColorPrevious")), UnusedTexture);
+		if (!bFadeSupported)
+		{
+			NewTransitionProblem = TEXT("M_GeoTerrain senza transizioni morbide (il lampo quando la ")
+			                       TEXT("geometria si affina): rifallo con geo.Imagery.CreateMaterial");
+		}
+	}
+
+	// Il materiale delle strade 3D: come M_GeoTerrain, nasce da
+	// geo.Imagery.CreateMaterial. Senza, le strade 3D usano il grigio di base.
+	if (!RoadMaterial.IsValid())
+	{
+		NewRoadProblem = TEXT("manca M_GeoRoad: le strade 3D restano grigie. ")
+		                 TEXT("Crealo con geo.Imagery.CreateMaterial");
+	}
+	else
+	{
+		UTexture* UnusedTexture = nullptr;
+		if (!RoadMaterial->GetTextureParameterValue(FHashedMaterialParameterInfo(TEXT("RoadAtlas")), UnusedTexture))
+		{
+			NewRoadProblem = TEXT("M_GeoRoad non ha il parametro RoadAtlas: le strade 3D restano senza ")
+			                 TEXT("texture. Rifallo con geo.Imagery.CreateMaterial");
+		}
+	}
+
+	// Si scrive nel log solo cio' che e' cambiato: ogni due secondi lo stesso
+	// avviso sommergerebbe tutto il resto.
+	const auto Update = [bLog](FString& Current, const FString& New)
+	{
+		if (Current == New) { return; }
+		Current = New;
+		if (!New.IsEmpty()) { UE_LOG(LogGeoWorld, Warning, TEXT("[GeoTerrain] %s"), *New); }
+		else if (!bLog) { UE_LOG(LogGeoWorld, Log, TEXT("[GeoTerrain] materiale ritrovato e a posto")); }
+	};
+	Update(MaterialProblem, NewMaterialProblem);
+	Update(OverlayMaterialProblem, NewOverlayProblem);
+	Update(TransitionMaterialProblem, NewTransitionProblem);
+	Update(RoadMaterialProblem, NewRoadProblem);
 }
 
 void FDynamicMeshTerrainProvider::Shutdown()
@@ -162,10 +217,27 @@ FGeoPreparedTileMeshPtr FDynamicMeshTerrainProvider::PrepareTileMesh(const Mesh:
 	FDynamicMesh3& Mesh = Prepared->Mesh;
 	Mesh.EnableAttributes();
 
+	// Tre canali UV: lo 0 per le texture; l'1 e il 2 per il GEOMORPHING
+	// (Mesh/TileMesh.h, ComputeMorphTargets): normale del padre (x, y | z) e
+	// quanto il vertice sta sopra la superficie del padre. Il materiale li
+	// legge con TexCoord[1] e TexCoord[2].
+	//
+	// Si scrivono SEMPRE, anche senza dati di morphing (normale propria,
+	// delta zero): un canale mancante il motore lo rimpiazza con il canale 0,
+	// e il materiale normalizzerebbe una "normale" fatta di UV. Con il
+	// morphing a zero non si vedrebbe, ma un vettore nullo normalizzato e' un
+	// NaN, e un NaN moltiplicato per zero resta NaN: pixel neri.
+	Mesh.Attributes()->SetNumUVLayers(3);
+
 	FDynamicMeshNormalOverlay* Normals = Mesh.Attributes()->PrimaryNormals();
 	FDynamicMeshUVOverlay* UVs = Mesh.Attributes()->PrimaryUV();
+	FDynamicMeshUVOverlay* ParentNormalXY = Mesh.Attributes()->GetUVLayer(1);
+	FDynamicMeshUVOverlay* ParentNormalZAndDelta = Mesh.Attributes()->GetUVLayer(2);
 
 	const int32 VertexCount = static_cast<int32>(MeshData.Positions.size() / 3);
+	const bool bHasMorph = MeshData.MorphDeltas.size() == static_cast<size_t>(VertexCount)
+	                    && MeshData.ParentNormals.size() == static_cast<size_t>(VertexCount) * 3;
+	Prepared->bHasMorph = bHasMorph;
 
 	for (int32 Index = 0; Index < VertexCount; ++Index)
 	{
@@ -183,6 +255,11 @@ FGeoPreparedTileMeshPtr FDynamicMeshTerrainProvider::PrepareTileMesh(const Mesh:
 
 		UVs->AppendElement(FVector2f(MeshData.UVs[Index * 2 + 0],
 		                             MeshData.UVs[Index * 2 + 1]));
+
+		const float* ParentNormal = bHasMorph ? &MeshData.ParentNormals[Index * 3] : &MeshData.Normals[Index * 3];
+		const float Delta = bHasMorph ? MeshData.MorphDeltas[Index] : 0.0f;
+		ParentNormalXY->AppendElement(FVector2f(ParentNormal[0], ParentNormal[1]));
+		ParentNormalZAndDelta->AppendElement(FVector2f(ParentNormal[2], Delta));
 	}
 
 	const int32 TriangleCount = static_cast<int32>(MeshData.Indices.size() / 3);
@@ -198,6 +275,8 @@ FGeoPreparedTileMeshPtr FDynamicMeshTerrainProvider::PrepareTileMesh(const Mesh:
 			// Normali e UV usano gli stessi indici dei vertici: ogni post ha
 			// una normale sola, quindi non servono elementi separati.
 			Normals->SetTriangle(TriangleId, FIndex3i(A, B, C));
+			ParentNormalXY->SetTriangle(TriangleId, FIndex3i(A, B, C));
+			ParentNormalZAndDelta->SetTriangle(TriangleId, FIndex3i(A, B, C));
 			UVs->SetTriangle(TriangleId, FIndex3i(A, B, C));
 		}
 	}
@@ -227,6 +306,7 @@ bool FDynamicMeshTerrainProvider::CommitPreparedTile(
 	FTileEntry& Entry = Tiles.FindOrAdd(Packed);
 	Entry.Origin = Ready.Origin;
 	Entry.Key = Key;
+	Entry.bHasMorph = Ready.bHasMorph;
 
 	UDynamicMeshComponent* Component = Entry.Component.Get();
 	if (!Component)
@@ -286,6 +366,7 @@ void FDynamicMeshTerrainProvider::SetCastShadows(bool bInCastShadows)
 void FDynamicMeshTerrainProvider::RemoveTile(const Tiles::FTileKey& Key)
 {
 	FTileEntry Entry;
+	Transitioning.Remove(Key.Pack());
 	if (Tiles.RemoveAndCopyValue(Key.Pack(), Entry))
 	{
 		if (UDynamicMeshComponent* Component = Entry.Component.Get())
@@ -302,9 +383,13 @@ void FDynamicMeshTerrainProvider::RemoveTile(const Tiles::FTileKey& Key)
 
 void FDynamicMeshTerrainProvider::SetTileVisible(const Tiles::FTileKey& Key, bool bVisible)
 {
-	const FTileEntry* Entry = Tiles.Find(Key.Pack());
+	FTileEntry* Entry = Tiles.Find(Key.Pack());
 	UDynamicMeshComponent* Component = Entry ? Entry->Component.Get() : nullptr;
 	if (!Component) { return; }
+
+	// Una tile che sparisce non ha piu' niente da cui sfumare: se torna, la
+	// sua transizione la decide chi la rimostra (BeginTransitionFromParent).
+	if (!bVisible) { FinishTransitions(*Entry); }
 
 	// La strada 3D segue la sua tile: si mostra e si nasconde nello stesso
 	// frame, altrimenti per un frame si vedrebbe una senza l'altra.
@@ -345,6 +430,7 @@ void FDynamicMeshTerrainProvider::RemoveAllTiles()
 		}
 	}
 	Tiles.Empty();
+	Transitioning.Empty();
 }
 
 void FDynamicMeshTerrainProvider::RefreshTransforms(const FGeoreferenceSnapshot& Snapshot)
@@ -499,6 +585,13 @@ void FDynamicMeshTerrainProvider::SetTileDrape(const Tiles::FTileKey& Key,
 	UMaterialInstanceDynamic* Instance = EnsureDrapeInstance(*Entry, Component);
 	if (!Instance) { return; }
 
+	// Una tile A SCHERMO che cambia foto (di solito: quella dell'antenato,
+	// sgranata, sostituita dalla propria) non cambia piu' di colpo: la foto
+	// di prima resta come "precedente" e sfuma via. Una tile nascosta cambia
+	// e basta: nessuno la sta guardando.
+	const bool bFade = Entry->bDraped && Component->GetVisibleFlag();
+	const FDressState Previous = bFade ? CaptureDress(*Entry) : FDressState();
+
 	Instance->SetTextureParameterValue(TEXT("BaseColor"), Texture);
 
 	// (offsetU, offsetV, scala, scala). Il materiale prende la scala dalla
@@ -515,6 +608,9 @@ void FDynamicMeshTerrainProvider::SetTileDrape(const Tiles::FTileKey& Key,
 	Entry->bDraped = true;
 	Entry->DrapedTexture = Texture;
 	Entry->DrapedTransform = Drape;
+
+	if (bFade) { StartFade(*Entry, Previous); }
+	else if (Entry->FadeStart < 0.0) { ReleasePrevious(*Entry); }
 }
 
 int32 FDynamicMeshTerrainProvider::GetDrapedTileCount() const
@@ -614,10 +710,17 @@ void FDynamicMeshTerrainProvider::SetTileOverlay(const Tiles::FTileKey& Key, UTe
 	UMaterialInstanceDynamic* Instance = EnsureDrapeInstance(*Entry, Component);
 	if (!Instance) { return; }     // manca M_GeoTerrain: gia' segnalato in Initialize
 
+	// Come per la foto: sulle tile a schermo le strade nuove (quelle proprie
+	// al posto di quelle dell'antenato) arrivano sfumando.
+	const bool bFade = Entry->bDraped && Component->GetVisibleFlag();
+	const FDressState Previous = bFade ? CaptureDress(*Entry) : FDressState();
+
 	Entry->bOverlaid = true;
 	Entry->OverlayTexture = Texture;
 	Entry->OverlayTransform = Window;
 	ApplyOverlayParameters(*Entry, Instance);
+
+	if (bFade) { StartFade(*Entry, Previous); }
 }
 
 int32 FDynamicMeshTerrainProvider::GetOverlaidTileCount() const
@@ -713,6 +816,9 @@ bool FDynamicMeshTerrainProvider::CommitRoadMesh(const Tiles::FTileKey& Key, FGe
 	// strada nasce gia' allineata e gia' nascosta se la tile e' nascosta.
 	Road->SetWorldTransform(Tile->GetComponentTransform());
 	Road->SetVisibility(Tile->GetVisibleFlag());
+	// E la stessa forma: se la tile sta ancora scivolando dalla forma del
+	// padre, la strada parte dallo stesso punto.
+	Road->SetCustomPrimitiveDataFloat(0, Entry->MorphValue);
 	return true;
 }
 
@@ -750,4 +856,234 @@ int32 FDynamicMeshTerrainProvider::GetRoadTriangleCount() const
 		}
 	}
 	return Total;
+}
+
+// ---------------------------------------------------------------------------
+//  Transizioni morbide: geomorphing e dissolvenza
+//
+//  Il lampo che restava: quando il quadtree raffina, le quattro figlie
+//  prendono il posto del padre nello stesso frame, e cambiano tutto insieme
+//  la forma (piu' dettaglio), la luce (le normali nuove) e la foto (di solito
+//  piu' nitida, a volte di un'altra data). Qui le figlie nascono IDENTICHE al
+//  padre e diventano se stesse in TransitionSeconds:
+//
+//    Custom Primitive Data 0  "Morph"  1 = forma e normali del padre, 0 = proprie
+//    Custom Primitive Data 1  "Fade"   1 = foto e strade del padre,   0 = proprie
+//
+//  NOTA UE: i Custom Primitive Data sono float che viaggiano con il
+//  COMPONENTE (nella GPU Scene), non con il materiale. Cambiarli a ogni frame
+//  costa l'aggiornamento di un piccolo buffer, mentre cambiare un parametro
+//  dell'istanza di materiale ne ricostruirebbe il proxy di rendering. E vanno
+//  bene anche per le strade 3D, che hanno un'istanza sola per tutte le tile.
+// ---------------------------------------------------------------------------
+
+namespace
+{
+	/** La finestra di un antenato, ristretta al pezzo che copre `Child`. */
+	GeoWorld::Imagery::FDrapeTransform ComposeWindow(const GeoWorld::Imagery::FDrapeTransform& AncestorWindow,
+	                                                 const GeoWorld::Imagery::FDrapeTransform& ChildInAncestor)
+	{
+		// uv_texture = A.Offset + A.Scale * uv_antenato
+		// uv_antenato = S.Offset + S.Scale * uv_figlia
+		GeoWorld::Imagery::FDrapeTransform Result;
+		Result.OffsetU = AncestorWindow.OffsetU + AncestorWindow.Scale * ChildInAncestor.OffsetU;
+		Result.OffsetV = AncestorWindow.OffsetV + AncestorWindow.Scale * ChildInAncestor.OffsetV;
+		Result.Scale = AncestorWindow.Scale * ChildInAncestor.Scale;
+		return Result;
+	}
+
+	/** Parte e arriva piano: l'occhio non vede l'inizio e la fine. */
+	float SmoothFraction(double Elapsed, float Seconds)
+	{
+		if (Seconds <= 0.0f) { return 1.0f; }
+		const float T = FMath::Clamp(static_cast<float>(Elapsed / Seconds), 0.0f, 1.0f);
+		return T * T * (3.0f - 2.0f * T);
+	}
+}
+
+FDynamicMeshTerrainProvider::FDressState FDynamicMeshTerrainProvider::CaptureDress(const FTileEntry& Entry)
+{
+	FDressState State;
+	if (Entry.bDraped)
+	{
+		State.Drape = Entry.DrapedTexture;
+		State.DrapeTransform = Entry.DrapedTransform;
+	}
+	if (Entry.bOverlaid)
+	{
+		State.Overlay = Entry.OverlayTexture;
+		State.OverlayTransform = Entry.OverlayTransform;
+	}
+	return State;
+}
+
+void FDynamicMeshTerrainProvider::WriteTransitionData(FTileEntry& Entry, float Morph, float Fade)
+{
+	UDynamicMeshComponent* Component = Entry.Component.Get();
+	if (!Component) { return; }
+
+	if (Entry.MorphValue != Morph)
+	{
+		Entry.MorphValue = Morph;
+		Component->SetCustomPrimitiveDataFloat(0, Morph);
+		// La strada 3D scivola con il suo terreno: stessa quota a ogni frame.
+		if (UDynamicMeshComponent* Road = Entry.RoadComponent.Get())
+		{
+			Road->SetCustomPrimitiveDataFloat(0, Morph);
+		}
+	}
+	if (Entry.FadeValue != Fade)
+	{
+		Entry.FadeValue = Fade;
+		Component->SetCustomPrimitiveDataFloat(1, Fade);
+	}
+}
+
+void FDynamicMeshTerrainProvider::ReleasePrevious(FTileEntry& Entry) const
+{
+	// La foto "precedente" e' un riferimento FORTE dell'istanza di materiale:
+	// finche' resta li', il garbage collector non puo' liberare quella
+	// texture, anche se la cache delle ortofoto l'ha gia' buttata. Finita la
+	// dissolvenza la si fa puntare alla foto attuale (che e' tenuta comunque).
+	UMaterialInstanceDynamic* Instance = Entry.Material.Get();
+	UTexture2D* Current = Entry.DrapedTexture.Get();
+	if (!bFadeSupported || !Instance || !Current) { return; }
+
+	Instance->SetTextureParameterValue(TEXT("BaseColorPrevious"), Current);
+	Instance->SetTextureParameterValue(TEXT("OverlayPrevious"),
+		Entry.OverlayTexture.IsValid() ? Entry.OverlayTexture.Get() : Current);
+	Instance->SetScalarParameterValue(TEXT("OverlayPreviousStrength"), 0.0f);
+}
+
+void FDynamicMeshTerrainProvider::StartFade(FTileEntry& Entry, const FDressState& Previous)
+{
+	if (!bFadeSupported || TransitionSeconds <= 0.0f) { return; }
+
+	// Gia' in dissolvenza: la "precedente" resta quella da cui si era partiti.
+	// Ricatturarla ora vorrebbe dire saltare dallo stato a meta' strada.
+	if (Entry.FadeStart >= 0.0) { return; }
+
+	UMaterialInstanceDynamic* Instance = Entry.Material.Get();
+	UTexture2D* PreviousDrape = Previous.Drape.Get();
+	if (!Instance || !PreviousDrape) { return; }
+
+	const GeoWorld::Imagery::FDrapeTransform& D = Previous.DrapeTransform;
+	Instance->SetTextureParameterValue(TEXT("BaseColorPrevious"), PreviousDrape);
+	Instance->SetVectorParameterValue(TEXT("DrapeUvPrevious"), FLinearColor(D.OffsetU, D.OffsetV, D.Scale, D.Scale));
+
+	if (UTexture2D* PreviousOverlay = Previous.Overlay.Get())
+	{
+		const GeoWorld::Imagery::FDrapeTransform& O = Previous.OverlayTransform;
+		Instance->SetTextureParameterValue(TEXT("OverlayPrevious"), PreviousOverlay);
+		Instance->SetVectorParameterValue(TEXT("OverlayUvPrevious"), FLinearColor(O.OffsetU, O.OffsetV, O.Scale, O.Scale));
+		Instance->SetScalarParameterValue(TEXT("OverlayPreviousStrength"), OverlayStrength);
+	}
+	else
+	{
+		Instance->SetTextureParameterValue(TEXT("OverlayPrevious"), PreviousDrape);
+		Instance->SetScalarParameterValue(TEXT("OverlayPreviousStrength"), 0.0f);
+	}
+
+	Entry.FadeStart = FPlatformTime::Seconds();
+	WriteTransitionData(Entry, Entry.MorphValue, 1.0f);
+	Transitioning.Add(Entry.Key.Pack());
+}
+
+void FDynamicMeshTerrainProvider::FinishTransitions(FTileEntry& Entry)
+{
+	const bool bWasFading = Entry.FadeStart >= 0.0 || Entry.FadeValue != 0.0f;
+	Entry.MorphStart = -1.0;
+	Entry.FadeStart = -1.0;
+	WriteTransitionData(Entry, 0.0f, 0.0f);
+	if (bWasFading) { ReleasePrevious(Entry); }
+	Transitioning.Remove(Entry.Key.Pack());
+}
+
+void FDynamicMeshTerrainProvider::SetTileMorph(const Tiles::FTileKey& Key, float Morph)
+{
+	FTileEntry* Entry = Tiles.Find(Key.Pack());
+	if (!Entry) { return; }
+	Entry->MorphStart = -1.0;
+	WriteTransitionData(*Entry, FMath::Clamp(Morph, 0.0f, 1.0f), Entry->FadeValue);
+	if (Entry->FadeStart < 0.0) { Transitioning.Remove(Key.Pack()); }
+}
+
+void FDynamicMeshTerrainProvider::BeginTransitionFromParent(const Tiles::FTileKey& Child,
+                                                            const Tiles::FTileKey& Parent)
+{
+	FTileEntry* Entry = Tiles.Find(Child.Pack());
+	const FTileEntry* ParentEntry = Tiles.Find(Parent.Pack());
+	if (!Entry || TransitionSeconds <= 0.0f || Child.Level <= Parent.Level) { return; }
+
+	// 1. La FORMA: la tile parte con la superficie e le normali del padre. Il
+	//    materiale le sottrae Delta * Morph (UV 2) e mescola le normali (UV 1 e
+	//    2). Serve l'M_GeoTerrain con le transizioni: con il grigio di base o
+	//    con un materiale vecchio Morph non lo legge nessuno, e si salta.
+	if (Entry->bHasMorph && bFadeSupported && Entry->Material.IsValid())
+	{
+		Entry->MorphStart = FPlatformTime::Seconds();
+		WriteTransitionData(*Entry, 1.0f, Entry->FadeValue);
+		Transitioning.Add(Child.Pack());
+	}
+
+	// 2. La FOTO e le strade dipinte: quelle del padre, ristrette al pezzo che
+	//    copre questa tile, diventano la "precedente" e sfumano via.
+	if (ParentEntry)
+	{
+		const GeoWorld::Imagery::FDrapeTransform ChildInParent =
+			GeoWorld::Imagery::MakeDrapeTransform(Child, Parent.Level);
+
+		FDressState Previous = CaptureDress(*ParentEntry);
+		Previous.DrapeTransform = ComposeWindow(Previous.DrapeTransform, ChildInParent);
+		Previous.OverlayTransform = ComposeWindow(Previous.OverlayTransform, ChildInParent);
+
+		// Se la foto e' la stessa e la finestra pure (figlia vestita con la
+		// texture del padre, in attesa della propria), non c'e' niente da sfumare.
+		const bool bSameDrape = Previous.Drape == Entry->DrapedTexture
+			&& FMath::IsNearlyEqual(Previous.DrapeTransform.OffsetU, Entry->DrapedTransform.OffsetU)
+			&& FMath::IsNearlyEqual(Previous.DrapeTransform.OffsetV, Entry->DrapedTransform.OffsetV)
+			&& FMath::IsNearlyEqual(Previous.DrapeTransform.Scale, Entry->DrapedTransform.Scale);
+		const bool bSameOverlay = Previous.Overlay == Entry->OverlayTexture;
+		if (!(bSameDrape && bSameOverlay))
+		{
+			StartFade(*Entry, Previous);
+		}
+	}
+}
+
+void FDynamicMeshTerrainProvider::TickTransitions(double NowSeconds)
+{
+	if (NowSeconds - LastMaterialCheckSeconds > 2.0)
+	{
+		LastMaterialCheckSeconds = NowSeconds;
+		CheckMaterials(/*bLog=*/false);
+	}
+
+	if (Transitioning.Num() == 0) { return; }
+
+	TArray<uint64> Keys = Transitioning.Array();
+	for (const uint64 Packed : Keys)
+	{
+		FTileEntry* Entry = Tiles.Find(Packed);
+		if (!Entry) { Transitioning.Remove(Packed); continue; }
+
+		float Morph = Entry->MorphValue;
+		if (Entry->MorphStart >= 0.0)
+		{
+			Morph = 1.0f - SmoothFraction(NowSeconds - Entry->MorphStart, TransitionSeconds);
+			if (Morph <= 0.0f) { Morph = 0.0f; Entry->MorphStart = -1.0; }
+		}
+
+		float Fade = Entry->FadeValue;
+		bool bFadeEnded = false;
+		if (Entry->FadeStart >= 0.0)
+		{
+			Fade = 1.0f - SmoothFraction(NowSeconds - Entry->FadeStart, TransitionSeconds);
+			if (Fade <= 0.0f) { Fade = 0.0f; Entry->FadeStart = -1.0; bFadeEnded = true; }
+		}
+
+		WriteTransitionData(*Entry, Morph, Fade);
+		if (bFadeEnded) { ReleasePrevious(*Entry); }
+		if (Entry->MorphStart < 0.0 && Entry->FadeStart < 0.0) { Transitioning.Remove(Packed); }
+	}
 }
