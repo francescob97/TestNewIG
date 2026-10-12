@@ -3,6 +3,7 @@
 //  Le soglie sono esplicite e volutamente strette: un test che passa sempre non
 //  serve a niente.
 // =============================================================================
+#include "Geo/GeoFormat.h"
 #include "Geo/Georeference.h"
 
 #include <algorithm>
@@ -523,6 +524,42 @@ static void TestLocalBasisIsProperRotation()
 }
 
 // ===========================================================================
+//  TEST 10 -- Le stampe della posizione (GeoFormat.h).
+// ===========================================================================
+static void TestFormat()
+{
+	Section("10. Coordinate e quote per le stampe a schermo (GeoFormat.h)");
+	namespace F = GeoWorld::Format;
+	const std::string Deg = F::Degree;
+
+	Check(F::Number(1234.5, 1) == "1.234,5", "migliaia col punto, decimali con la virgola", F::Number(1234.5, 1));
+	Check(F::Number(-0.04, 1) == "0,0", "niente \"-0\"", F::Number(-0.04, 1));
+	Check(F::Number(-12345678.0, 0) == "-12.345.678", "negativi e milioni", F::Number(-12345678.0, 0));
+	Check(F::Number(0.999, 2) == "1,00", "l'arrotondamento porta il riporto", F::Number(0.999, 2));
+
+	Check(F::DecimalDegrees(45.070312, true) == "45,07031" + Deg + " N", "latitudine in gradi decimali",
+		F::DecimalDegrees(45.070312, true));
+	Check(F::DecimalDegrees(-3.5, false) == "3,50000" + Deg + " O", "longitudine ovest: O, senza segno",
+		F::DecimalDegrees(-3.5, false));
+
+	// 45 gradi, 4 primi, 13,1 secondi.
+	const double Torino = 45.0 + 4.0 / 60.0 + 13.1 / 3600.0;
+	Check(F::DegreesMinutesSeconds(Torino, true) == "45" + Deg + "04'13,1\" N", "gradi, primi, secondi",
+		F::DegreesMinutesSeconds(Torino, true));
+	// 45°03'59,96": arrotondato ai decimi deve diventare 45°04'00,0", non 03'60,0".
+	const double AlmostFour = 45.0 + 3.0 / 60.0 + 59.96 / 3600.0;
+	Check(F::DegreesMinutesSeconds(AlmostFour, true) == "45" + Deg + "04'00,0\" N", "i secondi non arrivano mai a 60",
+		F::DegreesMinutesSeconds(AlmostFour, true));
+	Check(F::DegreesMinutesSeconds(-0.5, true) == "0" + Deg + "30'00,0\" S", "emisfero sud",
+		F::DegreesMinutesSeconds(-0.5, true));
+
+	Check(F::Metres(1234.4) == "1.234 m" && F::Metres(12.34) == "12,3 m" && F::Metres(-5.0) == "-5,0 m",
+		"metri: interi sopra i 100 m, un decimale sotto", F::Metres(1234.4) + " / " + F::Metres(12.34));
+	Check(F::Heading(-87.0) == "273" + Deg && F::Heading(359.7) == "000" + Deg && F::Heading(5.0) == "005" + Deg,
+		"rotta 000..359", F::Heading(-87.0) + " / " + F::Heading(359.7));
+}
+
+// ===========================================================================
 int main()
 {
 	std::printf("=====================================================\n");
@@ -538,6 +575,7 @@ int main()
 	TestRebasingInvariance();
 	TestFloatPrecisionRationale();
 	TestLocalBasisIsProperRotation();
+	TestFormat();
 
 	std::printf("\n=====================================================\n");
 	std::printf(" RISULTATO: %d passati, %d falliti\n", GNumPassed, GNumFailed);

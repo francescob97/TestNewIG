@@ -88,6 +88,20 @@ public:
 	virtual bool HasRoadAtlas() const override { return RoadMaterialInstance.IsValid() || !RoadMaterial.IsValid(); }
 	virtual FString GetRoadMaterialProblem() const override { return RoadMaterialProblem; }
 
+	virtual bool CommitWaterMesh(const GeoWorld::Tiles::FTileKey& Key, FGeoPreparedTileMesh& Prepared,
+	                             UTexture2D* Raster, float MetresPerPixel, float CellMetres) override;
+	virtual void RemoveWaterMesh(const GeoWorld::Tiles::FTileKey& Key) override;
+	virtual bool HasWaterMesh(const GeoWorld::Tiles::FTileKey& Key) const override
+	{
+		const FTileEntry* Entry = Tiles.Find(Key.Pack());
+		return Entry && Entry->WaterComponent.IsValid();
+	}
+	virtual int32 GetWaterMeshCount() const override;
+	virtual int32 GetWaterTriangleCount() const override;
+	virtual void SetWaterTextures(UTexture2D* DetailNormal, UTexture2D* Foam) override;
+	virtual bool HasWaterTextures() const override { return WaterNormal.IsValid() && WaterFoam.IsValid(); }
+	virtual FString GetWaterMaterialProblem() const override { return WaterMaterialProblem; }
+
 	virtual void SetTileMorph(const GeoWorld::Tiles::FTileKey& Key, float Morph) override;
 	virtual void BeginTransitionFromParent(const GeoWorld::Tiles::FTileKey& Child,
 	                                       const GeoWorld::Tiles::FTileKey& Parent) override;
@@ -124,6 +138,10 @@ private:
 
 		/** Strade 3D: un secondo componente, nello stesso frame locale della tile. */
 		TWeakObjectPtr<UDynamicMeshComponent> RoadComponent;
+
+		/** Acqua (Fase 9): un terzo componente, con la sua istanza di M_GeoWater. */
+		TWeakObjectPtr<UDynamicMeshComponent> WaterComponent;
+		TWeakObjectPtr<UMaterialInstanceDynamic> WaterMaterialInstance;
 
 		/** Strade (Fase 8): stesso schema del drappeggio, su parametri propri. */
 		bool bOverlaid = false;
@@ -215,6 +233,12 @@ private:
 	bool bFadeSupported = false;
 	FString TransitionMaterialProblem;
 
-	/** Il materiale da dare a un componente di strada: l'istanza, o il ripiego. */
+	/** Materiale dell'acqua, e le texture condivise da tutte le tile. */
+	TStrongObjectPtr<UMaterialInterface> WaterMaterial;
+	TStrongObjectPtr<UTexture2D> WaterNormal;
+	TStrongObjectPtr<UTexture2D> WaterFoam;
+	FString WaterMaterialProblem;
+
+		/** Il materiale da dare a un componente di strada: l'istanza, o il ripiego. */
 	UMaterialInterface* GetRoadMaterialForComponent() const;
 };

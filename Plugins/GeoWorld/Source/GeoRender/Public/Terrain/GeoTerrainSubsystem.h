@@ -17,6 +17,24 @@
 class UGeoQuadtreeSubsystem;
 class UGeoTileStreamingSubsystem;
 
+/**
+ * La risposta di chi vuole modificare le quote di una tile prima che diventi
+ * mesh (la Fase 9: l'acqua scava il terreno sotto di se').
+ */
+enum class EGeoHeightEdit : uint8
+{
+	None,       // niente da modificare: si costruisce come sempre
+	NotReady,   // c'e' da modificare, ma i dati non sono ancora in memoria: aspettare
+	Ready,      // la modifica e' pronta (FGeoHeightEdit)
+};
+
+/**
+ * La modifica: gira su un thread di lavoro, su una COPIA delle quote. Deve
+ * catturare solo dati immutabili e condivisi (shared_ptr): niente UObject.
+ */
+using FGeoHeightEdit = TFunction<void(GeoWorld::Tiles::FHeightTile&)>;
+using FGeoHeightEditor = TFunction<EGeoHeightEdit(const GeoWorld::Tiles::FTileKey&, FGeoHeightEdit&)>;
+
 USTRUCT()
 struct FGeoTerrainStats
 {
@@ -245,6 +263,24 @@ public:
 		return true;
 	}
 
+	/**
+	 * Chi modifica le quote prima della mesh (uno solo: l'acqua). Cambiarlo
+	 * NON ricostruisce niente: chi lo installa chiama RebuildAll().
+	 *
+	 * PERCHE' QUI E NON NELLE QUOTE IN CACHE. Le quote in cache sono quelle
+	 * del disco, condivise e immutabili: le leggono anche le strade 3D, le
+	 * stampe "dal suolo", il quadtree. La modifica si applica a una copia, nel
+	 * momento in cui serve, da chi costruisce la mesh (il terreno, le strade
+	 * 3D, il geomorphing): tutti vedono lo stesso terreno scavato.
+	 */
+	void SetHeightEditor(FGeoHeightEditor InEditor) { HeightEditor = MoveTemp(InEditor); }
+	void ClearHeightEditor() { HeightEditor = nullptr; }
+	EGeoHeightEdit QueryHeightEdit(const GeoWorld::Tiles::FTileKey& Key, FGeoHeightEdit& OutEdit) const
+	{
+		OutEdit = nullptr;
+		return HeightEditor ? HeightEditor(Key, OutEdit) : EGeoHeightEdit::None;
+	}
+
 	/** Il provider, per chi deve vestire le tile. Puo' essere nullo. */
 	IGeoTerrainMeshProvider* GetProvider() const { return Provider.Get(); }
 
@@ -303,6 +339,8 @@ private:
 	 */
 	/** I vestitori, per nome ("Ortofoto", "Strade"): vedi SetDressPredicate. */
 	TMap<FName, TFunction<bool(const GeoWorld::Tiles::FTileKey&)>> DressPredicates;
+
+	FGeoHeightEditor HeightEditor;
 
 	TSet<uint64> PlanMeshKeys;
 	int32 PlanGenerationSeen = -1;

@@ -156,3 +156,35 @@ def fetch(area: str, directory: str, dry_run: bool = False, timeout: float = 120
         with open(attribution, "w", encoding="utf-8") as handle:
             handle.write(ATTRIBUTION)
     return path
+
+
+# =============================================================================
+#  Il mare (Fase 9): i poligoni dell'acqua di osmdata.openstreetmap.de
+# =============================================================================
+#
+# In un estratto regionale la costa e' fatta di LINEE (natural=coastline),
+# aperte ai bordi dell'estratto: chiuderle in poligoni di mare e' il problema
+# classico, che osmdata risolve ogni giorno per il mondo intero. Il file e'
+# unico (~850 MB): la pipeline ne prende solo la parte nel bbox.
+
+WATER_POLYGONS_URL = "https://osmdata.openstreetmap.de/download/water-polygons-split-4326.zip"
+
+
+def fetch_water(directory: str, dry_run: bool = False, timeout: float = 120.0, report=print) -> str:
+    """Scarica i poligoni del mare. Ritorna il percorso dello zip."""
+    path = os.path.join(directory, os.path.basename(WATER_POLYGONS_URL))
+    report(f"Sorgente : {WATER_POLYGONS_URL}")
+    report("Contenuto: i poligoni del mare di tutto il mondo, dalla costa di OSM (licenza ODbL)")
+    if dry_run:
+        request = urllib.request.Request(WATER_POLYGONS_URL, method="HEAD")
+        with urllib.request.urlopen(request, timeout=timeout) as response:
+            size = response.headers.get("Content-Length")
+        report(f"Peso     : {int(size) / 1e6:.0f} MB" if size else "Peso     : sconosciuto")
+        return path
+    if os.path.exists(path):
+        report(f"Gia' scaricato: {path}")
+        return path
+    os.makedirs(directory, exist_ok=True)
+    download(WATER_POLYGONS_URL, path, timeout=timeout, report=report)
+    report(f"Fatto: {path}")
+    return path

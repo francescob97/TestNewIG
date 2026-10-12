@@ -36,6 +36,20 @@ GEORENDER_API UTexture2D* CreateGeoRuntimeTexture(int32 Width, int32 Height,
                                                   const std::vector<std::vector<uint8_t>>& Mips,
                                                   bool bWrapV = false);
 
+/**
+ * Come sopra, per le texture di DATI e quelle che si ripetono (Fase 9).
+ *
+ * `bSrgb` = false: i byte sono numeri (distanza dalla riva, una normale), e la
+ * scheda video non deve "linearizzarli" come farebbe con un colore. Con sRGB
+ * acceso una distanza di 0 (byte 128) arriverebbe al materiale come 0,22
+ * invece di 0,5: la riva si sposterebbe di 6 pixel.
+ * `bWrapU`, `bWrapV`: ripete la texture (la normale di dettaglio, la schiuma).
+ */
+GEORENDER_API UTexture2D* CreateGeoRuntimeDataTexture(int32 Width, int32 Height,
+                                                      const std::vector<uint8_t>& Pixels,
+                                                      const std::vector<std::vector<uint8_t>>& Mips,
+                                                      bool bSrgb, bool bWrapU, bool bWrapV);
+
 /** Byte occupati in memoria video da una texture BGRA quadrata con le mipmap. */
 inline double GeoRuntimeTextureBytes(int32 Side)
 {

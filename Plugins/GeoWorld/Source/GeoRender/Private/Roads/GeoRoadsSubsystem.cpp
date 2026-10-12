@@ -678,6 +678,15 @@ bool UGeoRoadsSubsystem::LaunchMeshJob(IGeoTerrainMeshProvider* Provider, const 
 	const FGeoPrepareTileMeshFunction Prepare = Provider->GetPrepareFunction();
 	if (!Prepare) { return false; }
 
+	// Il terreno sotto la strada e' quello SCAVATO dall'acqua (Fase 9), con la
+	// stessa modifica che usa la mesh del terreno: stesse quote, stessa
+	// origine del frame locale. Senza, la strada starebbe sul terreno di prima
+	// e la sua origine non coinciderebbe con quella della tile.
+	FGeoHeightEdit HeightEdit, WideEdit, ParentEdit;
+	if (Terrain->QueryHeightEdit(TerrainKey, HeightEdit) == EGeoHeightEdit::NotReady) { return false; }
+	if (Wide && Terrain->QueryHeightEdit(Wide->Key, WideEdit) == EGeoHeightEdit::NotReady) { WideEdit = nullptr; }
+	if (Parent && Terrain->QueryHeightEdit(Parent->Key, ParentEdit) == EGeoHeightEdit::NotReady) { ParentEdit = nullptr; }
+
 	Roads::FRoadMeshParameters Parameters = MeshParameters3D;
 	Parameters.Step = Step;
 	Parameters.bFlipWinding = Terrain->IsFlipWinding();
@@ -689,7 +698,8 @@ bool UGeoRoadsSubsystem::LaunchMeshJob(IGeoTerrainMeshProvider* Provider, const 
 	// Tutto per copia, niente "this": come il disegno delle strade dipinte e
 	// le mesh del terreno.
 	UE::Tasks::FTask Task = UE::Tasks::Launch(TEXT("GeoRoads3D"),
-		[Height, Wide, Parent, Vector, Window, StyleCopy, Parameters, Prepare, JobGeneration, TerrainKey, Queue]()
+		[Height, Wide, Parent, HeightEdit, WideEdit, ParentEdit, Vector, Window, StyleCopy, Parameters, Prepare,
+		 JobGeneration, TerrainKey, Queue]()
 		{
 			const double Started = FPlatformTime::Seconds();
 
@@ -698,12 +708,28 @@ bool UGeoRoadsSubsystem::LaunchMeshJob(IGeoTerrainMeshProvider* Provider, const 
 			Result.Generation = JobGeneration;
 			Result.Step = Parameters.Step;
 
-			const Roads::FSurfaceSampler Surface(*Height, Parameters.Step);
-			const Roads::FSurfaceSampler WideSurface(Wide ? *Wide : *Height, Wide ? 1 : Parameters.Step);
-			const Roads::FSurfaceSampler ParentSurface(Parent ? *Parent : *Height, Parameters.Step);
+			// Copie modificate solo dove serve (vedi sopra).
+			auto Edited = [](const Tiles::FHeightTile& Source, const FGeoHeightEdit& Edit, Tiles::FHeightTile& Copy)
+				-> const Tiles::FHeightTile&
+			{
+				if (!Edit) { return Source; }
+				Copy = Source;
+				Edit(Copy);
+				return Copy;
+			};
+			Tiles::FHeightTile HeightCopy, WideCopy, ParentCopy;
+			// NOTA: non "Heights", che fuori dalla lambda e' gia' il subsystem
+			// delle quote (Unreal compila lo shadowing come errore).
+			const Tiles::FHeightTile& TileHeights = Edited(*Height, HeightEdit, HeightCopy);
+			const Tiles::FHeightTile& WideHeights = Wide ? Edited(*Wide, WideEdit, WideCopy) : TileHeights;
+			const Tiles::FHeightTile& ParentHeights = Parent ? Edited(*Parent, ParentEdit, ParentCopy) : TileHeights;
+
+			const Roads::FSurfaceSampler Surface(TileHeights, Parameters.Step);
+			const Roads::FSurfaceSampler WideSurface(WideHeights, Wide ? 1 : Parameters.Step);
+			const Roads::FSurfaceSampler ParentSurface(ParentHeights, Parameters.Step);
 
 			Mesh::FTileMeshData MeshData;
-			Roads::BuildRoadMesh(*Height, Surface, Wide ? &WideSurface : nullptr, *Vector, Window,
+			Roads::BuildRoadMesh(TileHeights, Surface, Wide ? &WideSurface : nullptr, *Vector, Window,
 				StyleCopy, Parameters, MeshData, nullptr, Parent ? &ParentSurface : nullptr);
 
 			if (MeshData.TriangleCount > 0) { Result.Prepared = Prepare(MeshData); }

@@ -372,6 +372,17 @@ bool UGeoTerrainSubsystem::DispatchBuild(const FTileKey& Key, bool bUrgent)
 	GeoWorld::Tiles::FTileCache::FTilePtr ParentData =
 		(Key.Level > 0) ? Streaming->FindLoadedTile(Key.GetParent()) : nullptr;
 
+	// Le quote modificate (l'acqua scava il terreno): se la modifica c'e' ma
+	// i suoi dati non sono ancora arrivati, si aspetta, come per le quote.
+	// Per il padre no: senza la sua modifica si rinuncia solo al geomorphing
+	// (scivolare da un padre non scavato farebbe emergere il fondale).
+	FGeoHeightEdit Edit, ParentEdit;
+	if (QueryHeightEdit(Key, Edit) == EGeoHeightEdit::NotReady) { return false; }
+	if (ParentData && QueryHeightEdit(Key.GetParent(), ParentEdit) == EGeoHeightEdit::NotReady)
+	{
+		ParentData = nullptr;
+	}
+
 	// Tutto cio' che il lavoro usa viene COPIATO nella lambda: parametri,
 	// generazione, funzione di preparazione, coda. Niente "this": il lavoro
 	// non deve poter toccare il subsystem, che vive sul game thread.
@@ -389,7 +400,7 @@ bool UGeoTerrainSubsystem::DispatchBuild(const FTileKey& Key, bool bUrgent)
 	//  thread a chi prepara il frame (animazioni, fisica, rendering).
 	// ------------------------------------------------------------------
 	UE::Tasks::FTask Task = UE::Tasks::Launch(TEXT("GeoTerrainMeshBuild"),
-		[TileData, ParentData, Parameters, Prepare, Generation, Key, Queue]()
+		[TileData, ParentData, Edit, ParentEdit, Parameters, Prepare, Generation, Key, Queue]()
 		{
 			const double Started = FPlatformTime::Seconds();
 
@@ -397,11 +408,29 @@ bool UGeoTerrainSubsystem::DispatchBuild(const FTileKey& Key, bool bUrgent)
 			Result.Key = Key;
 			Result.Generation = Generation;
 
-			Mesh::FTileMeshData MeshData;
-			Mesh::BuildTileMesh(*TileData, Parameters, MeshData);
-			if (ParentData && MeshData.IsValid())
+			// Le copie modificate, solo se serve: senza modifiche si lavora
+			// direttamente sulle quote condivise (che non si toccano).
+			Tiles::FHeightTile Edited, ParentEdited;
+			const Tiles::FHeightTile* Heights = TileData.get();
+			const Tiles::FHeightTile* ParentHeights = ParentData.get();
+			if (Edit)
 			{
-				Mesh::ComputeMorphTargets(*TileData, *ParentData, Parameters.Step, MeshData);
+				Edited = *TileData;
+				Edit(Edited);
+				Heights = &Edited;
+			}
+			if (ParentEdit && ParentData)
+			{
+				ParentEdited = *ParentData;
+				ParentEdit(ParentEdited);
+				ParentHeights = &ParentEdited;
+			}
+
+			Mesh::FTileMeshData MeshData;
+			Mesh::BuildTileMesh(*Heights, Parameters, MeshData);
+			if (ParentHeights && MeshData.IsValid())
+			{
+				Mesh::ComputeMorphTargets(*Heights, *ParentHeights, Parameters.Step, MeshData);
 			}
 			if (MeshData.IsValid() && Prepare)
 			{

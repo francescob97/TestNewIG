@@ -150,9 +150,12 @@ namespace GeoWorld::Tiles
 	 * si riconverte. L'alfa invece e' lineare per definizione: media diretta.
 	 *
 	 * Costo: circa 87.000 pixel in tutto per una 256x256, sul worker.
+	 *
+	 * bSrgbColour = false per le texture di DATI (Fase 9: il raster
+	 * dell'acqua, la normale di dettaglio): li' la curva sRGB non c'e'.
 	 */
 	inline void BuildMipChain(const std::vector<uint8_t>& Level0, int32_t Width, int32_t Height,
-	                          std::vector<std::vector<uint8_t>>& OutMips)
+	                          std::vector<std::vector<uint8_t>>& OutMips, bool bSrgbColour = true)
 	{
 		OutMips.clear();
 		if (Width <= 0 || Height <= 0 ||
@@ -207,6 +210,14 @@ namespace GeoWorld::Tiles
 					uint8_t* Out = Mip.data() + (static_cast<size_t>(Row) * MipWidth + Column) * 4;
 					for (int Channel = 0; Channel < 3; ++Channel)
 					{
+						if (!bSrgbColour)
+						{
+							// DATI, non colori (la distanza dalla riva dell'acqua,
+							// una normale): la media e' quella dei numeri.
+							const int Raw = P[0][Channel] + P[1][Channel] + P[2][Channel] + P[3][Channel];
+							Out[Channel] = static_cast<uint8_t>((Raw + 2) / 4);
+							continue;
+						}
 						const float Sum = ToLinear[P[0][Channel]] + ToLinear[P[1][Channel]]
 						                + ToLinear[P[2][Channel]] + ToLinear[P[3][Channel]];
 						Out[Channel] = Detail::LinearToSrgb(Sum * 0.25f);

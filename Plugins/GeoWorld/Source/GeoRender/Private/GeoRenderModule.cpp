@@ -5,6 +5,7 @@
 #include "Modules/ModuleManager.h"
 
 #include "GeoFlyPawn.h"
+#include "GeoPositionHudSubsystem.h"
 #include "GeoMarkerActor.h"
 #include "Georeference/GeoTransformComponent.h"
 #include "Imagery/GeoImagerySubsystem.h"
@@ -13,6 +14,9 @@
 #include "Terrain/GeoTerrainSubsystem.h"
 #include "Streaming/GeoImageryStreamingSubsystem.h"
 #include "Streaming/GeoVectorStreamingSubsystem.h"
+#include "Streaming/GeoWaterStreamingSubsystem.h"
+#include "Water/GeoWaterSubsystem.h"
+#include "Weather/GeoWeatherSubsystem.h"
 #include "Streaming/GeoTileStreamingSubsystem.h"
 #include "Georeference/GeoreferenceSubsystem.h"
 #include "Georeference/GeoPlaces.h"
@@ -1671,4 +1675,205 @@ static FAutoConsoleCommandWithWorldAndArgs GeoRoadsDemoCommand(
 		GeoTerrainConsole::Report(TEXT("Le strade 3D compaiono scendendo sotto i 1.000-1.500 m dal suolo (geo.Roads.3D)."));
 		GeoTerrainConsole::Report(TEXT("Per controllare l'allineamento: geo.Roads.Style mappa"));
 		GeoTerrainConsole::Report(TEXT("Se non si vedono: geo.Imagery.CreateMaterial (serve il materiale con le strade)"));
+	}));
+
+// ============================================================================
+//  geo.Hud -- la posizione sulla destra dello schermo
+// ============================================================================
+static FAutoConsoleCommandWithWorldAndArgs GeoHudCommand(
+	TEXT("geo.Hud"),
+	TEXT("geo.Hud <0|1> - latitudine, longitudine, quota e rotta sulla destra dello schermo (default 1)."),
+	FConsoleCommandWithWorldAndArgsDelegate::CreateStatic(
+		[](const TArray<FString>& Args, UWorld* World)
+	{
+		UGeoPositionHudSubsystem* Hud = World ? World->GetSubsystem<UGeoPositionHudSubsystem>() : nullptr;
+		if (!Hud) { return; }
+		const bool bValue = (Args.Num() >= 1) ? (FCString::Atoi(*Args[0]) != 0) : !Hud->IsEnabled();
+		Hud->SetEnabled(bValue);
+		if (bValue) { GeoTerrainConsole::Report(TEXT("Posizione a schermo: ON")); }
+		else { GeoTerrainConsole::Report(TEXT("Posizione a schermo: OFF")); }
+	}));
+
+// ============================================================================
+//  geo.Water.* -- l'acqua (Fase 9) -- e geo.Weather.* -- il meteo
+// ============================================================================
+
+namespace GeoWaterConsole
+{
+	static UGeoWaterSubsystem* Get(UWorld* World)
+	{
+		return World ? World->GetSubsystem<UGeoWaterSubsystem>() : nullptr;
+	}
+
+	static UGeoWaterStreamingSubsystem* GetStreaming(UWorld* World)
+	{
+		return World ? World->GetSubsystem<UGeoWaterStreamingSubsystem>() : nullptr;
+	}
+
+	/** Apre il dataset e dice cosa c'e' dentro. Usato da Open e da Demo. */
+	static bool Open(UWorld* World, const FString& Directory)
+	{
+		UGeoWaterStreamingSubsystem* Streaming = GetStreaming(World);
+		UGeoWaterSubsystem* Water = Get(World);
+		if (!Streaming || !Water) { return false; }
+
+		FString Error;
+		if (!Streaming->OpenDataset(Directory, Error))
+		{
+			GeoTerrainConsole::Report(FString::Printf(TEXT("Acqua: %s"), *Error), FColor::Red);
+			return false;
+		}
+		// Il terreno si rifa' scavato sotto l'acqua nuova.
+		Water->OnDatasetChanged();
+
+		const FGeoWaterDataset& Dataset = Streaming->GetDataset();
+		double West, South, East, North;
+		Dataset.GetBoundingBox(West, South, East, North);
+		GeoTerrainConsole::Report(FString::Printf(TEXT("Acqua '%s': livelli %d..%d, %lld tile"),
+			*Dataset.GetDatasetName(), Dataset.GetMinLevel(), Dataset.GetMaxLevel(),
+			static_cast<long long>(Dataset.GetIndexedTileCount())));
+		GeoTerrainConsole::Report(FString::Printf(TEXT("Area: ovest %.4f  sud %.4f  est %.4f  nord %.4f"), West, South, East, North));
+		const FString Problem = Water->GetMaterialProblem();
+		if (!Problem.IsEmpty()) { GeoTerrainConsole::Report(Problem, FColor::Red); }
+		return true;
+	}
+}
+
+static FAutoConsoleCommandWithWorldAndArgs GeoWaterOpenCommand(
+	TEXT("geo.Water.Open"),
+	TEXT("geo.Water.Open <cartella> - apre un dataset d'acqua (python run.py build-water) e rifa' il terreno scavato."),
+	FConsoleCommandWithWorldAndArgsDelegate::CreateStatic(
+		[](const TArray<FString>& Args, UWorld* World)
+	{
+		if (Args.Num() < 1)
+		{
+			GeoTerrainConsole::Report(TEXT("Uso: geo.Water.Open <cartella del dataset d'acqua>"), FColor::Red);
+			return;
+		}
+		GeoWaterConsole::Open(World, Args[0]);
+	}));
+
+static FAutoConsoleCommandWithWorldAndArgs GeoWaterEnableCommand(
+	TEXT("geo.Water.Enable"),
+	TEXT("geo.Water.Enable <0|1> - acqua e scavo del terreno (spegnendola il terreno torna quello del DEM)."),
+	FConsoleCommandWithWorldAndArgsDelegate::CreateStatic(
+		[](const TArray<FString>& Args, UWorld* World)
+	{
+		UGeoWaterSubsystem* Water = GeoWaterConsole::Get(World);
+		if (!Water) { return; }
+		const bool bValue = (Args.Num() >= 1) ? (FCString::Atoi(*Args[0]) != 0) : !Water->IsEnabled();
+		Water->SetEnabled(bValue);
+		if (bValue) { GeoTerrainConsole::Report(TEXT("Acqua: ON (il terreno si ricostruisce scavato)")); }
+		else { GeoTerrainConsole::Report(TEXT("Acqua: OFF (il terreno torna quello del DEM)")); }
+	}));
+
+static FAutoConsoleCommandWithWorldAndArgs GeoWaterDebugCommand(
+	TEXT("geo.Water.Debug"),
+	TEXT("geo.Water.Debug <0|1> - overlay dell'acqua: superfici, attese, vento, mare."),
+	FConsoleCommandWithWorldAndArgsDelegate::CreateStatic(
+		[](const TArray<FString>& Args, UWorld* World)
+	{
+		UGeoWaterSubsystem* Water = GeoWaterConsole::Get(World);
+		if (!Water) { return; }
+		const bool bValue = (Args.Num() >= 1) ? (FCString::Atoi(*Args[0]) != 0) : !Water->IsDebugOverlayEnabled();
+		Water->SetDebugOverlayEnabled(bValue);
+		if (!bValue && GEngine) { GEngine->ClearOnScreenDebugMessages(); }
+	}));
+
+static FAutoConsoleCommandWithWorld GeoWaterStatsCommand(
+	TEXT("geo.Water.Stats"),
+	TEXT("Statistiche dell'acqua."),
+	FConsoleCommandWithWorldDelegate::CreateStatic([](UWorld* World)
+	{
+		UGeoWaterSubsystem* Water = GeoWaterConsole::Get(World);
+		if (!Water) { return; }
+		const FGeoWaterStats Stats = Water->GetStats();
+		GeoTerrainConsole::Report(FString::Printf(TEXT("Superfici: %d tile, %d solo scavo, %d in attesa, %d triangoli"),
+			Stats.TileConAcqua, Stats.TileVuote, Stats.TileInAttesa, Stats.Triangoli));
+		const GeoWorld::Weather::FWind Wind = Water->GetWaveField().GetWind();
+		GeoTerrainConsole::Report(FString::Printf(TEXT("Mare: vento %.1f m/s da %.0f gradi, Hs %.2f m"),
+			Wind.SpeedMs, Wind.FromDegrees, GeoWorld::Water::SignificantWaveHeight(Wind.SpeedMs)));
+		const FString Problem = Water->GetMaterialProblem();
+		if (!Problem.IsEmpty()) { GeoTerrainConsole::Report(Problem, FColor::Red); }
+	}));
+
+static FAutoConsoleCommandWithWorldAndArgs GeoWeatherWindCommand(
+	TEXT("geo.Weather.Wind"),
+	TEXT("geo.Weather.Wind <m/s> [gradi da cui soffia] [raffiche 0..1] - il vento (onde dell'acqua). Senza argomenti dice quello attuale."),
+	FConsoleCommandWithWorldAndArgsDelegate::CreateStatic(
+		[](const TArray<FString>& Args, UWorld* World)
+	{
+		UGeoWeatherSubsystem* Weather = World ? World->GetSubsystem<UGeoWeatherSubsystem>() : nullptr;
+		if (!Weather) { return; }
+		if (Args.Num() >= 1)
+		{
+			const GeoWorld::Weather::FWind Mean = Weather->GetMeanWind();
+			Weather->SetWind(FCString::Atod(*Args[0]), Args.Num() >= 2 ? FCString::Atod(*Args[1]) : Mean.FromDegrees);
+			if (Args.Num() >= 3) { Weather->SetGustiness(FCString::Atod(*Args[2])); }
+		}
+		const GeoWorld::Weather::FWind Mean = Weather->GetMeanWind();
+		GeoTerrainConsole::Report(FString::Printf(
+			TEXT("Vento: %.1f m/s (%.0f km/h) da %.0f gradi, raffiche %.0f%%   -> mare completamente sviluppato: Hs %.2f m, onda di picco %.0f m"),
+			Mean.SpeedMs, Mean.SpeedMs * 3.6, Mean.FromDegrees, Weather->GetGustiness() * 100.0,   /* percentuale, non-unita */
+			GeoWorld::Water::SignificantWaveHeight(Mean.SpeedMs), GeoWorld::Water::PeakWavelength(FMath::Max(Mean.SpeedMs, 0.5))));
+		GeoTerrainConsole::Report(TEXT("  Il mare ci arriva in qualche secondo, senza scatti."), FColor::White);
+	}));
+
+static FAutoConsoleCommandWithWorldAndArgs GeoWaterDemoCommand(
+	TEXT("geo.Water.Demo"),
+	TEXT("geo.Water.Demo <terreno> <ortofoto|-> <acqua> [strade|-] - apre tutto, accende e si mette sopra l'acqua."),
+	FConsoleCommandWithWorldAndArgsDelegate::CreateStatic(
+		[](const TArray<FString>& Args, UWorld* World)
+	{
+		UGeoTerrainSubsystem* Terrain = GeoTerrainConsole::Get(World);
+		UGeoImagerySubsystem* Imagery = World ? World->GetSubsystem<UGeoImagerySubsystem>() : nullptr;
+		UGeoImageryStreamingSubsystem* ImageStreaming = World ? World->GetSubsystem<UGeoImageryStreamingSubsystem>() : nullptr;
+		UGeoTileStreamingSubsystem* Heights = World ? World->GetSubsystem<UGeoTileStreamingSubsystem>() : nullptr;
+		UGeoQuadtreeSubsystem* Quadtree = World ? World->GetSubsystem<UGeoQuadtreeSubsystem>() : nullptr;
+		UGeoreferenceSubsystem* Georeference = World ? World->GetSubsystem<UGeoreferenceSubsystem>() : nullptr;
+		UGeoWaterSubsystem* Water = GeoWaterConsole::Get(World);
+		UGeoWaterStreamingSubsystem* WaterStreaming = GeoWaterConsole::GetStreaming(World);
+		if (!Terrain || !Imagery || !ImageStreaming || !Heights || !Quadtree || !Georeference || !Water || !WaterStreaming)
+		{
+			return;
+		}
+		if (Args.Num() < 3)
+		{
+			GeoTerrainConsole::Report(TEXT("Uso: geo.Water.Demo <terreno> <ortofoto, o -> <acqua> [strade, o -]"), FColor::Red);
+			return;
+		}
+
+		FString Error;
+		if (!Heights->OpenDataset(Args[0], Error))
+		{
+			GeoTerrainConsole::Report(FString::Printf(TEXT("Terreno: %s"), *Error), FColor::Red);
+			return;
+		}
+		const bool bWithImagery = (Args[1] != TEXT("-"));
+		if (bWithImagery && !ImageStreaming->OpenDataset(Args[1], Error))
+		{
+			GeoTerrainConsole::Report(FString::Printf(TEXT("Ortofoto: %s"), *Error), FColor::Red);
+			return;
+		}
+		if (!GeoWaterConsole::Open(World, Args[2])) { return; }
+		const bool bWithRoads = Args.Num() >= 4 && Args[3] != TEXT("-");
+		if (bWithRoads && !GeoRoadsConsole::Open(World, Args[3])) { return; }
+
+		// Sopra il centro dell'ACQUA, a 1,5 km: abbastanza bassi per vedere le
+		// onde, abbastanza alti per vedere la riva.
+		double West, South, East, North;
+		WaterStreaming->GetDataset().GetBoundingBox(West, South, East, North);
+		Georeference->TeleportViewTo(GeoWorld::Core::FGeodetic::FromDegrees((South + North) * 0.5, (West + East) * 0.5, 1500.0));
+
+		Quadtree->SetEnabled(true);
+		Terrain->SetEnabled(true);
+		Terrain->SetWireframe(false);
+		Imagery->SetEnabled(bWithImagery);
+		if (UGeoRoadsSubsystem* Roads = GeoRoadsConsole::Get(World)) { Roads->SetEnabled(bWithRoads); }
+		Water->SetEnabled(true);
+		Water->SetDebugOverlayEnabled(true);
+
+		GeoTerrainConsole::Report(TEXT("Acqua accesa. Quota 1,5 km sopra il centro del dataset d'acqua."));
+		GeoTerrainConsole::Report(TEXT("Il vento: geo.Weather.Wind 12 270 (12 m/s da ovest). Le stampe della posizione: a destra."));
+		GeoTerrainConsole::Report(TEXT("Se l'acqua non si vede: geo.Imagery.CreateMaterial (crea M_GeoWater e MPC_GeoWater)"));
 	}));

@@ -8,6 +8,14 @@ UTexture2D* CreateGeoRuntimeTexture(int32 Width, int32 Height,
                                     const std::vector<std::vector<uint8_t>>& Mips,
                                     bool bWrapV)
 {
+	return CreateGeoRuntimeDataTexture(Width, Height, Pixels, Mips, /*bSrgb=*/true, /*bWrapU=*/false, bWrapV);
+}
+
+UTexture2D* CreateGeoRuntimeDataTexture(int32 Width, int32 Height,
+                                        const std::vector<uint8_t>& Pixels,
+                                        const std::vector<std::vector<uint8_t>>& Mips,
+                                        bool bSrgb, bool bWrapU, bool bWrapV)
+{
 	if (Width <= 0 || Height <= 0 ||
 	    Pixels.size() != static_cast<size_t>(Width) * static_cast<size_t>(Height) * 4)
 	{
@@ -38,8 +46,8 @@ UTexture2D* CreateGeoRuntimeTexture(int32 Width, int32 Height,
 	UTexture2D* Texture = UTexture2D::CreateTransient(Width, Height, PF_B8G8R8A8);
 	if (!Texture) { return nullptr; }
 
-	Texture->SRGB = true;
-	Texture->AddressX = TextureAddress::TA_Clamp;
+	Texture->SRGB = bSrgb;
+	Texture->AddressX = bWrapU ? TextureAddress::TA_Wrap : TextureAddress::TA_Clamp;
 	Texture->AddressY = bWrapV ? TextureAddress::TA_Wrap : TextureAddress::TA_Clamp;
 	Texture->NeverStream = true;
 

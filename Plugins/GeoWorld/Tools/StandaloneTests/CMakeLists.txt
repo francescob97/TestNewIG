@@ -100,6 +100,21 @@ else()
 	target_compile_options(georoads_tests PRIVATE -Wall -Wextra -O2)
 endif()
 
+# --- Acqua (Fase 9): formato .gwa, scavo, mesh, onde, texture ----------------
+# La zlib serve solo qui, per decomprimere il file di prova: in Unreal lo fa
+# FCompression, e lo strato puro riceve il payload gia' decompresso.
+find_package(ZLIB REQUIRED)
+add_executable(geowater_tests geowater_main.cpp)
+target_include_directories(geowater_tests PRIVATE
+	${GEORENDER_DIR}/Public ${GEOTILES_DIR}/Public ${GEOCORE_DIR}/Public)
+target_link_libraries(geowater_tests PRIVATE ZLIB::ZLIB)
+
+if (MSVC)
+	target_compile_options(geowater_tests PRIVATE /W4)
+else()
+	target_compile_options(geowater_tests PRIVATE -Wall -Wextra -O2)
+endif()
+
 enable_testing()
 add_test(NAME geocore COMMAND geocore_tests)
 add_test(NAME geotiles COMMAND geotiles_tests)
@@ -108,3 +123,5 @@ add_test(NAME geomesh COMMAND geomesh_tests)
 add_test(NAME geoimagery COMMAND geoimagery_tests)
 add_test(NAME georoads COMMAND georoads_tests
 	${CMAKE_CURRENT_SOURCE_DIR}/../../Source/GeoTiles/TestData/vector_fixture.gvt)
+add_test(NAME geowater COMMAND geowater_tests
+	${CMAKE_CURRENT_SOURCE_DIR}/../../Source/GeoTiles/TestData/water_fixture.gwa)

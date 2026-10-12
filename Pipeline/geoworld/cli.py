@@ -39,6 +39,7 @@ from . import (fetchimagery, imagecut, imageformat, imagerybuild,
 # Fase 8: le linee (strade, ferrovie, piste). Moduli che importano GDAL e
 # numpy solo dentro le funzioni, come gli altri.
 from . import fetchosm, roadclasses, vectorbuild, vectorformat
+from . import waterbuild, waterclasses, waterformat
 from .raster import (LevelGrid, level_grid_for_bbox, build_source_vrt, source_bounds_wgs84,
                      source_ground_resolution, check_level_is_feasible,
                      warp_and_convert_heights, reduce_level,
@@ -760,6 +761,81 @@ def command_inspect_roads(args: argparse.Namespace) -> int:
 
 
 
+# =============================================================================
+#  ACQUA (Fase 9): mare, lagune, laghi, fiumi
+# =============================================================================
+
+def command_fetch_water(args: argparse.Namespace) -> int:
+    try:
+        path = fetchosm.fetch_water(args.output, dry_run=args.dry_run, report=log)
+    except (RuntimeError, ValueError, OSError) as error:
+        log(f"ERRORE: {error}")
+        return 1
+    if not args.dry_run:
+        log("")
+        log("Da dare in pasto alla pipeline (con il terreno e l'estratto OSM delle strade):")
+        log(f"  python run.py build-water --osm <estratto.osm.pbf> --sea {path} "
+            f"--terrain dataset/terreno -o dataset/acqua")
+    return 0
+
+
+def command_build_water(args: argparse.Namespace) -> int:
+    bbox = tuple(args.bbox) if args.bbox else None
+    osm = []
+    for pattern in args.osm or []:
+        matches = sorted(glob.glob(pattern))
+        osm.extend(matches if matches else [pattern])
+    if not osm and not args.sea:
+        log("ERRORE: servono --osm (laghi e fiumi) e/o --sea (il mare)")
+        return 1
+    try:
+        waterbuild.build(osm=osm, sea=args.sea, terrain_root=args.terrain, output=args.output,
+                         name=args.name, bbox=bbox, bathymetry=args.bathymetry,
+                         min_level=args.min_level, max_level=args.max_level, jobs=args.jobs,
+                         work=args.work, report=log)
+    except (FileNotFoundError, RuntimeError, ValueError) as error:
+        log(f"ERRORE: {error}")
+        return 1
+    return 0
+
+
+def command_verify_water(args: argparse.Namespace) -> int:
+    try:
+        problems = waterbuild.verify(args.output, report=log)
+    except FileNotFoundError as error:
+        log(f"ERRORE: {error}")
+        return 1
+    return 0 if problems == 0 else 1
+
+
+def command_inspect_water(args: argparse.Namespace) -> int:
+    import numpy as np
+    tile = waterformat.read_tile(args.tile)
+    bounds = tiling.tile_bounds(tile.level, tile.x, tile.y)
+    log(f"tile      : livello {tile.level}, x={tile.x}, y={tile.y}")
+    log(f"bbox      : ovest {bounds.west:.6f}  sud {bounds.south:.6f}  "
+        f"est {bounds.east:.6f}  nord {bounds.north:.6f}")
+    kinds = [name for flag, name in ((waterclasses.TILE_SEA, "mare"), (waterclasses.TILE_LAKE, "lago"),
+                                     (waterclasses.TILE_RIVER, "fiume"), (waterclasses.TILE_FLOW, "corrente"),
+                                     (waterclasses.TILE_ALL_WATER, "tutta acqua")) if tile.flags & flag]
+    log(f"contenuto : {', '.join(kinds) or '-'}")
+    sdf = waterformat.bytes_to_sdf(tile.sdf)
+    log(f"acqua     : {100.0 * (sdf > 0).mean():.1f}% dei pixel, "
+        f"{waterformat.metres_per_pixel(tile.level, tile.y):.2f} m per pixel")
+    surface = tile.surface[np.isfinite(tile.surface)]
+    if surface.size:
+        log(f"superficie: da {surface.min():.1f} a {surface.max():.1f} m (ellissoidica), "
+            f"{surface.size} post")
+    depth = (tile.surface - tile.bed)[np.isfinite(tile.bed)]
+    if depth.size:
+        log(f"fondale   : {depth.size} post scavati, profondita' da {depth.min():.1f} a {depth.max():.1f} m")
+    log(f"onde      : esposizione massima {tile.wave.max() / 255.0:.2f}")
+    if tile.flow_u is not None:
+        speed = np.hypot(tile.flow_u.astype(float), tile.flow_v.astype(float)) / waterbuild.FLOW_SCALE
+        log(f"corrente  : fino a {speed.max():.2f} m/s")
+    return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="geoworld-pipeline",
@@ -952,6 +1028,38 @@ def build_parser() -> argparse.ArgumentParser:
         "inspect-roads", help="stampa il contenuto di una tile vettoriale")
     inspect_roads.add_argument("tile")
     inspect_roads.set_defaults(func=command_inspect_roads)
+
+    # --- Fase 9: acqua -----------------------------------------------------
+    fetch_water = subparsers.add_parser(
+        "fetch-water", help="scarica i poligoni del mare (osmdata.openstreetmap.de, ~850 MB)")
+    fetch_water.add_argument("-o", "--output", required=True, help="cartella di destinazione")
+    fetch_water.add_argument("--dry-run", action="store_true", help="dice solo quanto pesa")
+    fetch_water.set_defaults(func=command_fetch_water)
+
+    build_water = subparsers.add_parser(
+        "build-water", help="da OSM, poligoni del mare e terreno a tile d'acqua")
+    build_water.add_argument("--osm", nargs="+", help="estratti .osm.pbf o .osm (laghi, fiumi, canali)")
+    build_water.add_argument("--sea", help="poligoni del mare: lo zip di fetch-water, o .shp/.gpkg")
+    build_water.add_argument("--terrain", required=True,
+                             help="dataset del TERRENO: quote dei laghi, profilo dei fiumi, tile da coprire")
+    build_water.add_argument("-o", "--output", required=True, help="cartella radice del dataset d'acqua")
+    build_water.add_argument("--work", help="cartella degli intermedi (default: <output>/_work)")
+    build_water.add_argument("--name", default="acqua")
+    build_water.add_argument("--bbox", nargs=4, type=float, metavar=("OVEST", "SUD", "EST", "NORD"),
+                             help="solo quest'area")
+    build_water.add_argument("--bathymetry", help="batimetria (EMODnet, GEBCO) in GeoTIFF: il fondale vero del mare")
+    build_water.add_argument("--min-level", type=int, help="primo livello (default: quello del terreno)")
+    build_water.add_argument("--max-level", type=int, help="ultimo livello (default: quello del terreno)")
+    build_water.add_argument("--jobs", type=int, default=max(1, (os.cpu_count() or 2) // 2))
+    build_water.set_defaults(func=command_build_water)
+
+    verify_water = subparsers.add_parser("verify-water", help="controlla un dataset d'acqua")
+    verify_water.add_argument("-o", "--output", required=True)
+    verify_water.set_defaults(func=command_verify_water)
+
+    inspect_water = subparsers.add_parser("inspect-water", help="stampa il contenuto di una tile d'acqua")
+    inspect_water.add_argument("tile")
+    inspect_water.set_defaults(func=command_inspect_water)
 
     return parser
 

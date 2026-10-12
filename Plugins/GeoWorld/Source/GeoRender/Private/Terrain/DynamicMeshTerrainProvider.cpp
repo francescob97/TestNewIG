@@ -110,8 +110,13 @@ void FDynamicMeshTerrainProvider::CheckMaterials(bool bLog)
 		RoadMaterial.Reset(LoadObject<UMaterialInterface>(nullptr,
 			TEXT("/GeoWorld/Materials/M_GeoRoad.M_GeoRoad"), nullptr, LOAD_NoWarn | LOAD_Quiet));
 	}
+	if (!WaterMaterial.IsValid())
+	{
+		WaterMaterial.Reset(LoadObject<UMaterialInterface>(nullptr,
+			TEXT("/GeoWorld/Materials/M_GeoWater.M_GeoWater"), nullptr, LOAD_NoWarn | LOAD_Quiet));
+	}
 
-	FString NewMaterialProblem, NewOverlayProblem, NewTransitionProblem, NewRoadProblem;
+	FString NewMaterialProblem, NewOverlayProblem, NewTransitionProblem, NewRoadProblem, NewWaterProblem;
 
 	// Il materiale c'e', ma e' quello giusto? La versione con il bug dell'offset
 	// V non ha il parametro DrapeUv (si chiamava UvOffsetScale). Lo si dice
@@ -164,6 +169,21 @@ void FDynamicMeshTerrainProvider::CheckMaterials(bool bLog)
 		}
 	}
 
+	// L'acqua (Fase 9): senza il suo materiale non si disegna, e il terreno
+	// non si scava (lo decide il subsystem dell'acqua leggendo questo).
+	if (!WaterMaterial.IsValid())
+	{
+		NewWaterProblem = TEXT("manca M_GeoWater: l'acqua non si disegna. Crealo con geo.Imagery.CreateMaterial");
+	}
+	else
+	{
+		UTexture* UnusedTexture = nullptr;
+		if (!WaterMaterial->GetTextureParameterValue(FHashedMaterialParameterInfo(TEXT("WaterRaster")), UnusedTexture))
+		{
+			NewWaterProblem = TEXT("M_GeoWater non ha il parametro WaterRaster: rifallo con geo.Imagery.CreateMaterial");
+		}
+	}
+
 	// Si scrive nel log solo cio' che e' cambiato: ogni due secondi lo stesso
 	// avviso sommergerebbe tutto il resto.
 	const auto Update = [bLog](FString& Current, const FString& New)
@@ -177,6 +197,7 @@ void FDynamicMeshTerrainProvider::CheckMaterials(bool bLog)
 	Update(OverlayMaterialProblem, NewOverlayProblem);
 	Update(TransitionMaterialProblem, NewTransitionProblem);
 	Update(RoadMaterialProblem, NewRoadProblem);
+	Update(WaterMaterialProblem, NewWaterProblem);
 }
 
 void FDynamicMeshTerrainProvider::Shutdown()
@@ -373,10 +394,14 @@ void FDynamicMeshTerrainProvider::RemoveTile(const Tiles::FTileKey& Key)
 		{
 			Component->DestroyComponent();
 		}
-		// La strada sparisce con la sua tile, nello stesso istante.
+		// La strada e l'acqua spariscono con la loro tile, nello stesso istante.
 		if (UDynamicMeshComponent* Road = Entry.RoadComponent.Get())
 		{
 			Road->DestroyComponent();
+		}
+		if (UDynamicMeshComponent* Water = Entry.WaterComponent.Get())
+		{
+			Water->DestroyComponent();
 		}
 	}
 }
@@ -396,6 +421,10 @@ void FDynamicMeshTerrainProvider::SetTileVisible(const Tiles::FTileKey& Key, boo
 	if (UDynamicMeshComponent* Road = Entry->RoadComponent.Get())
 	{
 		if (Road->GetVisibleFlag() != bVisible) { Road->SetVisibility(bVisible); }
+	}
+	if (UDynamicMeshComponent* Water = Entry->WaterComponent.Get())
+	{
+		if (Water->GetVisibleFlag() != bVisible) { Water->SetVisibility(bVisible); }
 	}
 	if (Component->GetVisibleFlag() == bVisible) { return; }
 
@@ -428,6 +457,10 @@ void FDynamicMeshTerrainProvider::RemoveAllTiles()
 		{
 			Road->DestroyComponent();
 		}
+		if (UDynamicMeshComponent* Water = Pair.Value.WaterComponent.Get())
+		{
+			Water->DestroyComponent();
+		}
 	}
 	Tiles.Empty();
 	Transitioning.Empty();
@@ -452,6 +485,10 @@ void FDynamicMeshTerrainProvider::RefreshTransforms(const FGeoreferenceSnapshot&
 		if (UDynamicMeshComponent* Road = Pair.Value.RoadComponent.Get())
 		{
 			Road->SetWorldTransform(Transform);
+		}
+		if (UDynamicMeshComponent* Water = Pair.Value.WaterComponent.Get())
+		{
+			Water->SetWorldTransform(Transform);
 		}
 	}
 }
@@ -1086,4 +1123,116 @@ void FDynamicMeshTerrainProvider::TickTransitions(double NowSeconds)
 		if (bFadeEnded) { ReleasePrevious(*Entry); }
 		if (Entry->MorphStart < 0.0 && Entry->FadeStart < 0.0) { Transitioning.Remove(Packed); }
 	}
+}
+
+// ---------------------------------------------------------------------------
+//  Acqua (Fase 9)
+// ---------------------------------------------------------------------------
+
+void FDynamicMeshTerrainProvider::SetWaterTextures(UTexture2D* DetailNormal, UTexture2D* Foam)
+{
+	WaterNormal.Reset(DetailNormal);
+	WaterFoam.Reset(Foam);
+	for (TPair<uint64, FTileEntry>& Pair : Tiles)
+	{
+		if (UMaterialInstanceDynamic* Instance = Pair.Value.WaterMaterialInstance.Get())
+		{
+			if (DetailNormal) { Instance->SetTextureParameterValue(TEXT("WaterNormal"), DetailNormal); }
+			if (Foam) { Instance->SetTextureParameterValue(TEXT("WaterFoam"), Foam); }
+		}
+	}
+}
+
+bool FDynamicMeshTerrainProvider::CommitWaterMesh(const Tiles::FTileKey& Key, FGeoPreparedTileMesh& Prepared,
+                                                  UTexture2D* Raster, float MetresPerPixel, float CellMetres)
+{
+	AActor* Actor = Container.Get();
+	FTileEntry* Entry = Tiles.Find(Key.Pack());
+	UMaterialInterface* Parent = WaterMaterial.Get();
+	if (!Actor || !Entry || !Parent || !Raster) { return false; }
+
+	UDynamicMeshComponent* Tile = Entry->Component.Get();
+	if (!Tile) { return false; }
+
+	FDynamicMeshPrepared& Ready = static_cast<FDynamicMeshPrepared&>(Prepared);
+
+	UDynamicMeshComponent* Water = Entry->WaterComponent.Get();
+	if (!Water)
+	{
+		Water = NewObject<UDynamicMeshComponent>(Actor);
+		Water->SetupAttachment(Actor->GetRootComponent());
+		Water->SetMobility(EComponentMobility::Movable);
+		Water->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+		// L'acqua non fa ombra sul fondale: con Single Layer Water la luce
+		// che attraversa l'acqua la calcola il materiale.
+		Water->SetCastShadow(false);
+		Water->SetEnableRaytracing(false);
+		ApplyWireframe(Water, bWireframe);
+		Water->RegisterComponent();
+		Entry->WaterComponent = Water;
+	}
+
+	// Un'istanza per tile: il raster e' suo. L'outer e' il componente, cosi'
+	// istanza e texture se ne vanno con lui.
+	UMaterialInstanceDynamic* Instance = Entry->WaterMaterialInstance.Get();
+	if (!Instance)
+	{
+		Instance = UMaterialInstanceDynamic::Create(Parent, Water);
+		Entry->WaterMaterialInstance = Instance;
+		Water->SetMaterial(0, Instance);
+	}
+	if (Instance)
+	{
+		Instance->SetTextureParameterValue(TEXT("WaterRaster"), Raster);
+		Instance->SetVectorParameterValue(TEXT("WaterUv"), FLinearColor(0.0f, 0.0f, 1.0f, 1.0f));
+		Instance->SetScalarParameterValue(TEXT("WaterMetresPerPixel"), MetresPerPixel);
+		Instance->SetScalarParameterValue(TEXT("WaterCellMetres"), CellMetres);
+		if (UTexture2D* Normal = WaterNormal.Get()) { Instance->SetTextureParameterValue(TEXT("WaterNormal"), Normal); }
+		if (UTexture2D* Foam = WaterFoam.Get()) { Instance->SetTextureParameterValue(TEXT("WaterFoam"), Foam); }
+	}
+
+	Water->SetMesh(MoveTemp(Ready.Mesh));
+	Water->NotifyMeshUpdated();
+	// Trasformazione e visibilita' della tile, adesso: nasce allineata e, se
+	// la tile e' nascosta, nascosta.
+	Water->SetWorldTransform(Tile->GetComponentTransform());
+	Water->SetVisibility(Tile->GetVisibleFlag());
+	return true;
+}
+
+void FDynamicMeshTerrainProvider::RemoveWaterMesh(const Tiles::FTileKey& Key)
+{
+	FTileEntry* Entry = Tiles.Find(Key.Pack());
+	if (!Entry) { return; }
+	if (UDynamicMeshComponent* Water = Entry->WaterComponent.Get())
+	{
+		Water->DestroyComponent();
+	}
+	Entry->WaterComponent.Reset();
+	Entry->WaterMaterialInstance.Reset();
+}
+
+int32 FDynamicMeshTerrainProvider::GetWaterMeshCount() const
+{
+	int32 Count = 0;
+	for (const TPair<uint64, FTileEntry>& Pair : Tiles)
+	{
+		if (Pair.Value.WaterComponent.IsValid()) { ++Count; }
+	}
+	return Count;
+}
+
+int32 FDynamicMeshTerrainProvider::GetWaterTriangleCount() const
+{
+	int32 Total = 0;
+	for (const TPair<uint64, FTileEntry>& Pair : Tiles)
+	{
+		const UDynamicMeshComponent* Water = Pair.Value.WaterComponent.Get();
+		if (!Water) { continue; }
+		if (const UE::Geometry::FDynamicMesh3* WaterMesh = Water->GetMesh())
+		{
+			Total += WaterMesh->TriangleCount();
+		}
+	}
+	return Total;
 }

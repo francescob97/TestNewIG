@@ -281,6 +281,34 @@ public:
 	/** Vuota se il materiale delle strade 3D (M_GeoRoad) c'e'. */
 	virtual FString GetRoadMaterialProblem() const { return FString(); }
 
+	// --- Acqua (Fase 9) -----------------------------------------------------
+	//
+	// Un terzo componente per tile, come le strade 3D: la superficie
+	// dell'acqua (Water/WaterMesh.h), nello stesso frame locale della tile,
+	// con la stessa trasformazione, visibilita' e rebase. Ogni tile ha la sua
+	// istanza di M_GeoWater, perche' ha il suo raster (distanza dalla riva,
+	// onde, corrente); la normale di dettaglio e la schiuma sono condivise.
+
+	/**
+	 * Consegna l'acqua di una tile ESISTENTE. `Raster` e' la texture 256x256 di
+	 * dati della tile; `MetresPerPixel` il lato di un suo pixel; `CellMetres`
+	 * il lato di una cella della mesh (le onde piu' corte di 4 celle non
+	 * entrano nella geometria).
+	 */
+	virtual bool CommitWaterMesh(const GeoWorld::Tiles::FTileKey& Key, FGeoPreparedTileMesh& Prepared,
+	                             UTexture2D* Raster, float MetresPerPixel, float CellMetres) = 0;
+	virtual void RemoveWaterMesh(const GeoWorld::Tiles::FTileKey& Key) = 0;
+	virtual bool HasWaterMesh(const GeoWorld::Tiles::FTileKey& Key) const = 0;
+	virtual int32 GetWaterMeshCount() const = 0;
+	virtual int32 GetWaterTriangleCount() const = 0;
+
+	/** La normale di dettaglio e la schiuma, una per tutte le tile. */
+	virtual void SetWaterTextures(UTexture2D* DetailNormal, UTexture2D* Foam) = 0;
+	virtual bool HasWaterTextures() const = 0;
+
+	/** Vuota se il materiale dell'acqua (M_GeoWater) c'e' ed e' quello giusto. */
+	virtual FString GetWaterMaterialProblem() const { return FString(); }
+
 	/**
 	 * Un problema noto del materiale del drappeggio, da mostrare a schermo, o
 	 * stringa vuota. Esiste perche' un materiale sbagliato non da' errori: da'
