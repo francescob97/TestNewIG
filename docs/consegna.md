@@ -19,7 +19,8 @@ Ultimo aggiornamento: 2026-10-03. Branch: `claude/charming-goodall-xd2r3g`.
 | 8 | **Strade, ferrovie, piste** da OpenStreetMap: dipinte sul terreno, **3D da vicino** | dipinte provate dall'utente (si vedono); strade 3D provate ("manca la tridimensionalita'"), **rifatte: carreggiata in piano, scarpate, marciapiedi, guardrail, ponti con parapetti e pile — da compilare e provare** — `docs/fase8-design.md`, `docs/fase8-verifica.md`, `docs/strade-3d.md` |
 | dopo | **Flash quando la geometria si affina**: le figlie sostituivano il padre in un frame | **geomorphing e dissolvenza, da compilare e provare** — `docs/strade-3d.md`, sezione 2 |
 | dopo | **Flash del rebase**: l'origine del mondo stava alla quota della camera, e a ogni rebase cielo e nebbia saltavano | **corretto, da riprovare** — `docs/strade-3d.md`, sezione 2 |
-| 9–12 | Acqua; edifici e monumenti; vegetazione; atmosfera, cielo, nuvole e luce | **da fare** — programma in `docs/fase8-design.md`, sezione 0 |
+| 9 | **Acqua**: mare, laghi, fiumi scavati nel terreno, Single Layer Water, onde di Gerstner dal vento (meteo minimo: vento medio + raffiche); **stampe della posizione** a destra (lat, lon, quota, s.l.m., dal suolo, rotta) | **codice completo, da compilare e provare** — `docs/fase9-design.md`, `docs/fase9-verifica.md`, `docs/manuale/13-acqua.md` |
+| 10–12 | Edifici e monumenti; vegetazione; atmosfera, cielo, nuvole e luce (allargando il meteo nato con la Fase 9) | **da fare** — programma in `docs/fase8-design.md`, sezione 0 |
 | dopo | **Residenza**: selezione indipendente dalla vista, precarico da posizione e velocità, mesh nascoste | **codice completo, mai compilato in UE** — `docs/residenza-design.md` |
 | dopo | **Terza prova**: niente flash grigi (tile mostrate solo vestite), isteresi sul LOD, nuvole tolte con la maschera SCL | **codice completo, da riprovare** — `docs/prova-torino-3.md` |
 | dopo | **Seconda prova**: soglia 8 px, mesh a passo 2, meno dettaglio fuori vista, wireframe spento: da 18 a 2,5 milioni di triangoli | **codice completo, da riprovare** — `docs/prova-torino-2.md` |
@@ -51,6 +52,7 @@ gia' incontrati e corretti, per riconoscerli se tornano:
 | `unresolved external symbol` su una funzione dello strato puro | in Unreal ogni modulo e' una DLL: un simbolo definito in un `.cpp` non e' visibile fuori se non esportato. **Lo strato puro e' header-only**, appunto per non doverlo esportare. Lo intercetta `Tools/CheckModuleExports.py` |
 | `C2664: ... cannot convert argument 1 from 'const wchar_t *' to '...TCheckedFormatStringPrivate...'` su un `FString::Printf` | da UE 5.5 il formato di `Printf` si controlla in compilazione e deve essere un letterale `TEXT("...")`: niente `bCond ? TEXT("a") : TEXT("b")` come formato. Successo con `M_GeoRoad`. Lo intercetta la regola 6 di `CheckSourceDiscipline.sh` |
 | `LNK2005: ... already defined` su una funzione dello strato puro | funzione DEFINITA in un header senza `inline`: ogni `.cpp` che lo include ne fa una copia. Mai successo, ma `Detail::PriorityFromError` era cosi' fino alla residenza. Lo intercetta la regola 3 di `Tools/CheckModuleExports.py` |
+| `C4456: declaration of 'X' hides previous local declaration` dentro una lambda | una variabile della lambda con lo stesso nome di una della funzione che la contiene (anche se la lambda non la cattura). Mai arrivato su Windows: trovato rileggendo le strade 3D della Fase 9 (`Heights` era sia il subsystem delle quote sia le quote scavate). **Nessuno script lo intercetta ancora**: rileggere i nomi nelle lambda dei lavori |
 
 Dopo aver aggiunto file o cartelle: tasto destro sul `.uproject` ->
 **Generate Visual Studio project files**. IntelliSense non li vede finche' non
@@ -68,12 +70,17 @@ python run.py check-env                              :: SEMPRE per primo
 python run.py fetch --area test -o dati/copernicus   :: DEM libero, 19 MB
 python run.py build -i "dati/copernicus/*.tif" -o dataset/test
 python run.py verify -o dataset/test
-python -m unittest discover -s tests                 :: 150 test
+python -m unittest discover -s tests                 :: 173 test
 
 :: Fase 8: strade su Torino (dettagli in docs/fase8-verifica.md)
 python run.py fetch-osm --area torino -o dati/osm
 python run.py build-roads -i dati/osm/nord-ovest-latest.osm.pbf -o dataset/strade_torino --bbox 7.55 45.00 7.80 45.15
 python run.py verify-roads -o dataset/strade_torino
+
+:: Fase 9: acqua (dettagli in docs/fase9-verifica.md)
+python run.py fetch-water -o dati/acqua
+python run.py build-water --osm dati/osm/nord-ovest-latest.osm.pbf --sea dati/acqua/water-polygons-split-4326.zip --terrain dataset/terreno -o dataset/acqua_torino --bbox 7.55 45.00 7.80 45.15
+python run.py verify-water -o dataset/acqua_torino
 ```
 
 `check-env` e' l'unico comando che sta fra te e un dataset sbagliato di 48
@@ -85,12 +92,13 @@ sta vincendo.
 ```bat
 cmake -S Plugins/GeoWorld/Tools/StandaloneTests -B build
 cmake --build build
-build\Debug\geocore_tests.exe                       :: 37 test
+build\Debug\geocore_tests.exe                       :: 48 test
 build\Debug\geotiles_tests.exe dataset\test         :: 22 test
 build\Debug\geoquadtree_tests.exe                   :: 84 test
 build\Debug\geomesh_tests.exe                       :: 41 test
 build\Debug\geoimagery_tests.exe                    :: 52 test
 build\Debug\georoads_tests.exe                      :: 80 test (dalla radice del repository)
+build\Debug\geowater_tests.exe Plugins\GeoWorld\Source\GeoTiles\TestData\water_fixture.gwa   :: 54 test
 Plugins\GeoWorld\Tools\CheckSourceDiscipline.sh      :: serve bash (Git Bash)
 ```
 
@@ -155,7 +163,7 @@ geo.Imagery.Enable <0|1>       drappeggio
 geo.Imagery.Checker <0|1>      scacchiera: e' cosi' che si verificano le UV
 geo.Imagery.Budget <N>         texture create per frame
 geo.Imagery.Stats              statistiche del drappeggio
-geo.Imagery.CreateMaterial     costruisce M_GeoTerrain e M_GeoRoad (solo editor) -- RIFALLO dopo ogni aggiornamento delle strade
+geo.Imagery.CreateMaterial     costruisce M_GeoTerrain, M_GeoRoad, M_GeoWater e MPC_GeoWater (solo editor) -- RIFALLO dopo ogni aggiornamento
 
 geo.Roads.Demo <q> <o|-> <s>   terreno, ortofoto (o "-") e strade, in un colpo
 geo.Roads.Open <cartella>      apre un dataset di strade (python run.py build-roads)
@@ -170,6 +178,14 @@ geo.Terrain.Debug <0|1>        overlay del terreno (con la riga delle transizion
 geo.Terrain.Morph <secondi>    durata delle transizioni quando la geometria si affina (0.6; 0 = di colpo)
 geo.Roads.Debug <0|1>          overlay delle strade
 geo.Roads.Stats                statistiche delle strade
+
+geo.Hud <0|1>                  stampe della posizione a destra (lat, lon, quota, s.l.m., dal suolo, rotta)
+geo.Water.Demo <q> <o|-> <a> [s|-]  terreno, ortofoto, acqua (e strade), in un colpo, sopra l'acqua
+geo.Water.Open <cartella>      apre un dataset d'acqua (python run.py build-water); il terreno si rifa' scavato
+geo.Water.Enable <0|1>         acqua e scavo (spenta: il terreno torna quello del DEM)
+geo.Water.Debug <0|1>          overlay dell'acqua: superfici, attese, vento, mare
+geo.Water.Stats                statistiche dell'acqua
+geo.Weather.Wind <m/s> [gradi] [raffiche]  il vento (gradi DA CUI soffia); senza argomenti dice quello attuale
 ```
 
 Se hai un dataset e vuoi vedere subito qualcosa, il comando e'
@@ -339,7 +355,11 @@ Plugins/GeoWorld/Source/
     Public/Mesh/      C++ PURO: TileMesh.h, da 129x129 quote a vertici e gonne
     Public/Lod/       UGeoQuadtreeSubsystem, overlay e disegno della selezione
     Public/Terrain/   IGeoTerrainMeshProvider, provider DynamicMesh, subsystem
-  GeoWorldEditor/ strumenti di editor                           [vuoto]
+    Public/Roads/     strade: rasterizzatore e strade 3D (puri) + subsystem [Fase 8]
+    Public/Water/     acqua: scavo, mesh, onde, texture (puri) + subsystem [Fase 9]
+    Public/Weather/   il vento (puro) + UGeoWeatherSubsystem              [Fase 9]
+    GeoPositionHudSubsystem   le stampe della posizione                   [Fase 9]
+  GeoWorldEditor/ i materiali costruiti da codice (geo.Imagery.CreateMaterial)
 
   Tools/StandaloneTests/   test C++ senza Unreal (CMake)
   Tools/CheckSourceDiscipline.sh     5 regole di disciplina
@@ -507,6 +527,8 @@ Limitazioni note, lasciate aperte di proposito:
 | Verifica Fase 6, con la demo visiva | `docs/fase6-verifica.md` |
 | Design Fase 7 (entità, protocolli) | `docs/fase7-design.md` |
 | Design e motivazioni Fase 6 | `docs/fase6-design.md` |
+| Design e verifica Fase 8 (strade) | `docs/fase8-design.md`, `docs/fase8-verifica.md`, `docs/strade-3d.md` |
+| Design e verifica Fase 9 (acqua, vento, stampe della posizione) | `docs/fase9-design.md`, `docs/fase9-verifica.md` |
 | Issue aperte | `docs/issues-aperte.md` |
 | Uso della pipeline, installazione Windows | `Pipeline/README.md` |
 
@@ -525,3 +547,5 @@ Numeri utili da tenere a mente:
 | Una tile di ortofoto | 256x256, 15-25 KB su disco, 256 KB in memoria video |
 | Livello nativo Sentinel-2 (10 m) | 13 (le immagini sono il doppio piu' fini del terreno) |
 | Profondita' della gonna al livello 13 | 152.6 m (raddoppia per livello) |
+| Una tile d'acqua `.gwa` | 129x129 superficie e fondale + raster 256x256 (4 piani); 1-60 KB su disco, ~0,4 MB in memoria |
+| Mare completamente sviluppato | Hs = 0,21 U²/g: 8 m/s -> 1,4 m, 15 m/s -> 4,8 m; onda di picco 53 m a 8 m/s |

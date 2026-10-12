@@ -13,6 +13,8 @@ bordi si scurirebbero. Le strade sono così. (12)
 **Antenato** — la tile di un livello più grossolano che contiene una tile data.
 L'antenato di livello `La` di `(L, X, Y)` è `(La, X >> d, Y >> d)` con `d = L − La`. (7)
 
+**Assorbimento e diffusione** — i due coefficienti, per metro e per canale di colore, con cui Single Layer Water colora l'acqua: quanta luce si perde e quanta rimbalza nell'acqua. Il mare assorbe il rosso molto più del blu: per questo l'acqua profonda è blu. (13)
+
 **Attore** (`AActor`) — un oggetto che esiste nella scena di Unreal, con una
 posizione. È fatto di componenti. (1)
 
@@ -76,7 +78,11 @@ terreno vero. Qui approssimato con il passo fra i post. (5)
 **Errore su schermo** (SSE) — l'errore geometrico proiettato in pixel. La manopola
 del LOD. Soglia di default: 8 pixel (era 4: vedi `docs/prova-torino-2.md`). (5)
 
+**Esposizione (alle onde)** — quanto un punto d'acqua sente le onde del vento: 1 il mare aperto, 0,35 una laguna, da 0,12 a 0,8 un lago secondo la grandezza (il *fetch*, la distanza su cui il vento spinge), quasi 0 fiumi e canali. Sta nel canale G del raster. (13)
+
 **Fascia** (del piano di residenza) — un gruppo di tile del piano con la stessa urgenza: 0 = adesso, 1..3 = posizioni previste, l'ultima = anello di sicurezza. (11)
+
+**Flow map** — far scorrere una texture lungo una corrente con due fasi sfalsate di mezzo ciclo, ognuna che ricomincia quando ha peso zero: un flusso continuo senza che la texture si stiri. (13)
 
 **Frame locale** — un sistema di assi appoggiato sulla superficie in un punto.
 Nel progetto è sempre NEU. (2, 6)
@@ -100,6 +106,8 @@ che nessuno usa più. Vede solo i riferimenti che conosce. (1)
 sostituisce, e farla scivolare verso le proprie in qualche decimo di secondo. Toglie il lampo
 del raffinamento. (6)
 
+**Gerstner (onda di)** — un'onda in cui i punti della superficie girano in piccoli cerchi invece di andare solo su e giù: creste strette, cavi larghi. La somma di sei fa il mare del progetto. (13)
+
 **Gonna** (*skirt*) — striscia verticale che scende dal bordo di una tile, per
 nascondere le crepe fra livelli diversi. (6)
 
@@ -122,13 +130,16 @@ quota minima e massima (quote) o copertura (immagini). (3)
 **LRU** (*Least Recently Used*) — cache che butta per primo ciò che non si usa da
 più tempo. (4)
 
-**Large World Coordinates** (LWC) — in Unreal 5, `FVector` in `double`. Non
-arriva fino alla scheda video. (1, 2)
+**Large World Coordinates** (LWC) — in Unreal 5, `FVector` in `double`. Nei
+materiali la posizione nel mondo è LWC (due float): un nodo Custom la vuole come
+float normale, e per questo passa da un nodo `TruncateLWC`. (1, 2, 13)
 
 **Manifest** — il file `manifest.json` che descrive un dataset. (3)
 
 **MarkRenderStateDirty** — dire a Unreal che una proprietà di disegno è cambiata e
 il proxy di scena va rifatto. (6)
+
+**Material Parameter Collection** (MPC) — un insieme di parametri globali condiviso da tutti i materiali che lo usano. Le onde stanno in `MPC_GeoWater`: una scrittura per frame per tutto il mondo. (13)
 
 **MGRS** — il sistema di quadrati da 100 km usato per organizzare le scene
 Sentinel-2. (7)
@@ -144,6 +155,8 @@ aggiungono e uno solo toglie. (4)
 **NEU** (*North-East-Up*) — l'ordine degli assi scelto per il progetto: Nord → X,
 Est → Y, Alto → Z. (2)
 
+**Nodo Custom** — un nodo di un materiale di Unreal che contiene codice HLSL scritto a mano. Le onde e la normale dell'acqua sono due nodi Custom. (13)
+
 **Normale geodetica** — la perpendicolare all'ellissoide. Non punta al centro
 della Terra. (2)
 
@@ -157,6 +170,8 @@ edifici, boschi, acqua. Licenza ODbL, da citare. Fonte della Fase 8 e delle succ
 sua coordinata. (7)
 
 **Piano di residenza** — la lista, in ordine di urgenza, delle tile da tenere pronte: qui, dove si sarà fra qualche secondo, e un anello di sicurezza. Rifatto ogni 0,25 s. (11)
+
+**Pierson-Moskowitz** — lo spettro di un mare "completamente sviluppato" (1964): dal vento U dà l'altezza significativa Hs = 0,21·U²/g e la lunghezza d'onda di picco. Da lì si scelgono le onde. (13)
 
 **Pin** — marcare una tile della cache come "non sfrattabile". (4)
 
@@ -181,6 +196,8 @@ sul thread di rendering. (1)
 **Quota ellissoidica / ortometrica** — sopra l'ellissoide / sopra il livello del
 mare. Il motore usa solo la prima. (3)
 
+**Raffica** — la variazione lenta del vento attorno alla media. Muove l'increspatura e la schiuma, non le onde lunghe, che seguono il vento medio. (13)
+
 **Rebasing** — spostare l'origine di Unreal vicino alla camera, per tenere piccoli
 i numeri. (2)
 
@@ -191,7 +208,13 @@ quote) o un'area (i pixel). Decide se il bordo è condiviso. (3, 7)
 
 **Riscaldamento** — dopo un salto, qualche decimo di secondo in cui si costruiscono più mesh per frame (24 invece di 4): il frame rallenta, il terreno arriva tutto insieme. (11)
 
+**Scavo** — abbassare le quote del terreno sotto l'acqua fino al fondale prima di costruirne la mesh, così l'acqua ha una profondità vera. Lo fa il terreno, con la funzione che gli consegna l'acqua (`SetHeightEditor`). (13)
+
 **SCL** (*Scene Classification Layer*) — il file di Sentinel-2 L2A che classifica ogni pixel da 20 m: nuvole, ombre di nuvole, cirri, neve, acqua... Serve a togliere le nuvole dalle ortofoto. (7)
+
+**SDF** (*signed distance field*) — un'immagine in cui ogni pixel dice quanto si è lontani da un bordo, con il segno (positivo in acqua, negativo a terra). Filtrata, dà un bordo nitido a ogni ingrandimento. È la riva dell'acqua. (13)
+
+**Single Layer Water** — il modello d'ombreggiatura di Unreal per l'acqua: il colore viene da assorbimento e diffusione nello spessore d'acqua letto dal depth buffer, non da un BaseColor. (13)
 
 **Spazio scalato** — le coordinate ECEF divise per i semiassi (x/a, y/a, z/b): l'ellissoide diventa la sfera unitaria e il test d'orizzonte diventa esatto. (5, 11)
 
@@ -200,6 +223,8 @@ marcata sRGB. (7)
 
 **Snapshot** — la copia della georeferenziazione che i thread ricevono, invece di
 toccare il subsystem. (2)
+
+**Stampe della posizione** — il riquadro a destra con latitudine, longitudine, quota (ellissoide, livello del mare, dal suolo) e rotta. Disegnato con `UDebugDrawService`, anche nell'editor. (13)
 
 **Strato puro / ponte Unreal** — la divisione di ogni modulo in C++ standard
 testabile e codice che usa il motore. (0)
@@ -262,6 +287,7 @@ il primo comando da provare quando non si vede niente. (6)
 | `Public/Geo/Ellipsoid.h` | WGS84, conversioni, basi ENU/NEU |
 | `Public/Geo/EnuFrame.h` | frame locale ENU |
 | `Public/Geo/GeoUnits.h` | `MetersToUu`: l'unico posto del numero 100 |
+| `Public/Geo/GeoFormat.h` | numeri, gradi e metri all'italiana, per le stampe |
 | `Public/Geo/Georeference.h` | `P_unreal = M·(P − O)·100` |
 | `Public/Georeference/GeoreferenceSnapshot.h` | la copia per i thread |
 | `Public/Georeference/GeoreferenceSubsystem.h` | il subsystem del rebasing |
@@ -290,6 +316,9 @@ il primo comando da provare quando non si vede niente. (6)
 | `Public/Streaming/GeoLoaderPool.h` | pool di thread per l'I/O |
 | `Public/Streaming/GeoTileStreamingSubsystem.h` | streaming delle quote |
 | `Public/Streaming/GeoImageryStreamingSubsystem.h` | streaming e decodifica delle immagini |
+| `Public/Tiles/WaterTileFormat.h` | formato `.gwa`, indice e geoide dell'acqua |
+| `Public/Streaming/GeoWaterDataset.h`, `GeoWaterStreamingSubsystem.h` | dataset e streaming dell'acqua |
+| `TestData/water_fixture.gwa` | una tile d'acqua scritta dalla pipeline, per i test |
 | `Private/GeoTilesModule.cpp` | comandi `geo.Tiles.*` |
 | `Private/Streaming/*.cpp` | le implementazioni dei cinque header sopra |
 | `TestData/tiling_vectors.txt` | vettori di prova generati dalla pipeline |
@@ -312,7 +341,11 @@ il primo comando da provare quando non si vede niente. (6)
 | `Public/Imagery/GeoImagerySubsystem.h` | il subsystem del drappeggio |
 | `Public/GeoMarkerActor.h` | il cubo di verifica |
 | `Public/GeoFlyPawn.h` | la camera di volo |
-| `Private/GeoRenderModule.cpp` | comandi `geo.Lod.*`, `geo.Terrain.*`, `geo.Imagery.*`, `geo.Fly*` |
+| `Public/Water/WaterMesh.h`, `WaveSpectrum.h`, `WaterTextures.h` | acqua: scavo, mesh, onde, texture (puri) |
+| `Public/Water/GeoWaterSubsystem.h` | il subsystem dell'acqua |
+| `Public/Weather/Wind.h`, `GeoWeatherSubsystem.h` | il vento |
+| `Public/GeoPositionHudSubsystem.h` | le stampe della posizione |
+| `Private/GeoRenderModule.cpp` | comandi `geo.Lod.*`, `geo.Terrain.*`, `geo.Imagery.*`, `geo.Roads.*`, `geo.Water.*`, `geo.Weather.*`, `geo.Hud`, `geo.Fly*` |
 | `Private/**/*.cpp` | le implementazioni |
 
 ### GeoWorldEditor — solo nell'editor
@@ -321,7 +354,7 @@ il primo comando da provare quando non si vede niente. (6)
 |---|---|
 | `GeoWorldEditor.Build.cs` | `MaterialEditor`, `AssetTools` |
 | `Private/GeoWorldEditorModule.cpp` | il modulo |
-| `Private/GeoTerrainMaterialFactory.cpp` | `geo.Imagery.CreateMaterial` |
+| `Private/GeoTerrainMaterialFactory.cpp` | `geo.Imagery.CreateMaterial`: `M_GeoTerrain`, `M_GeoRoad`, `M_GeoWater`, `MPC_GeoWater` |
 
 ### Strumenti
 
@@ -353,6 +386,7 @@ il primo comando da provare quando non si vede niente. (6)
 | `geoworld/imageformat.py`, `imagerymanifest.py` | formato e indice delle immagini |
 | `geoworld/imagecut.py`, `imagerybuild.py` | la pipeline delle immagini |
 | `geoworld/fetchimagery.py`, `mgrs.py` | download di Sentinel-2 |
+| `geoworld/waterclasses.py`, `waterformat.py`, `waterbuild.py` | la pipeline dell'acqua |
 | `tests/*.py` | 77 test |
 
 ### Documenti
@@ -370,6 +404,8 @@ il primo comando da provare quando non si vede niente. (6)
 | `docs/fase8-design.md` | strade, ferrovie, piste; il programma delle fasi 8–12 |
 | `docs/fase8-verifica.md` | come provare le strade |
 | `docs/strade-3d.md` | strade 3D da vicino, e il flash del rebase |
+| `docs/fase9-design.md` | acqua, vento, stampe della posizione |
+| `docs/fase9-verifica.md` | come provare l'acqua |
 | `docs/residenza-design.md` | cosa tenere pronto: posizione, velocità, mesh nascoste |
 | `docs/residenza-verifica.md` | come verificare la residenza |
 | `docs/prova-torino.md` | la prima prova vera: cause del mosaico, prestazioni, tutta Italia |

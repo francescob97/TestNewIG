@@ -13,8 +13,8 @@ Il progetto `TestNewIG` e' un guscio vuoto: tutto il codice vive in
 |---|---|---|
 | `GeoCore` | Runtime | Geodesia, georeferenziazione, origin rebasing |
 | `GeoTiles` | Runtime | Formato tile, loader asincrono, cache LRU, ortofoto *(Fasi 2/3/6)* |
-| `GeoRender` | Runtime | Quadtree, LOD, mesh, terreno, drappeggio *(Fasi 4/5/6)* |
-| `GeoWorldEditor` | Editor | Strumenti di editor *(piu' avanti)* |
+| `GeoRender` | Runtime | Quadtree, LOD, mesh, terreno, drappeggio, strade, acqua, vento *(Fasi 4/5/6/8/9)* |
+| `GeoWorldEditor` | Editor | I materiali costruiti da codice (`geo.Imagery.CreateMaterial`) |
 
 `GeoCore` e' diviso in due strati fisicamente separati:
 
@@ -37,7 +37,9 @@ Il progetto `TestNewIG` e' un guscio vuoto: tutto il codice vive in
 - [x] **Fase 8** — strade, ferrovie e piste da OpenStreetMap, dipinte da lontano e
       **3D da vicino** *(`docs/fase8-design.md`, prova: `docs/fase8-verifica.md`,
       strade 3D, transizioni morbide del terreno e flash: `docs/strade-3d.md`)*
-- [ ] Fase 9 — acqua: mare, laghi, fiumi
+- [x] **Fase 9** — acqua: mare, laghi, fiumi, con le onde dal vento; stampe della
+      posizione a destra *(`docs/fase9-design.md`, prova: `docs/fase9-verifica.md`,
+      per chi impara: `docs/manuale/13-acqua.md`)*
 - [ ] Fase 10 — edifici e monumenti
 - [ ] Fase 11 — vegetazione
 - [ ] Fase 12 — atmosfera, cielo, nuvole e luce
@@ -55,6 +57,7 @@ Il progetto `TestNewIG` e' un guscio vuoto: tutto il codice vive in
 | Quote | **ellissoidiche** WGS84 (ortometriche del sorgente + ondulazione del geoide) |
 | Ortofoto | piramide **separata**, stesso tiling; 256x256 pixel registrati sulle AREE (nessuna sovrapposizione), payload JPEG |
 | Strade | tile **vettoriali** `.gvt`, stesso tiling, livelli 10..13; linee in int16 locali (extent 16384, buffer 1/8), disegnate a runtime |
+| Acqua | tile `.gwa`, una per tile di terreno: superficie e fondale sui 129x129 post, raster 256x256 (distanza dalla riva, onde, corrente), zlib; piu' il geoide |
 
 Dettagli e motivazioni in `docs/fase2-design.md`.
 
@@ -74,12 +77,14 @@ Dettagli e motivazioni in `docs/fase2-design.md`.
 ```bash
 cmake -S Plugins/GeoWorld/Tools/StandaloneTests -B build
 cmake --build build
-./build/geocore_tests        # 37 test  -- geodesia, rebasing
+./build/geocore_tests        # 48 test  -- geodesia, rebasing, formato delle stampe (lat, lon, quota)
 ./build/geotiles_tests       # 22 test  -- formato tile, cache (piu' quelli su un dataset vero)
 ./build/geoquadtree_tests    # 84 test  -- LOD, culling, orizzonte, residenza
 ./build/geomesh_tests        # 41 test  -- mesh, gonne, giunzioni, passo, geomorphing
 ./build/geoimagery_tests     # 52 test  -- drappeggio, formato immagine, mipmap
 ./build/georoads_tests       # 80 test  -- strade: formato .gvt, larghezze misurate, ritagli, strade 3D, marciapiedi e incroci
+./build/geowater_tests Plugins/GeoWorld/Source/GeoTiles/TestData/water_fixture.gwa
+                             # 54 test  -- acqua: formato .gwa, scavo, mesh, onde dal vento, texture
 
 ./Plugins/GeoWorld/Tools/CheckSourceDiscipline.sh
 python3 Plugins/GeoWorld/Tools/CheckShadowedParameters.py
@@ -93,7 +98,7 @@ le classi di errore di compilazione gia' incontrate su Windows -- shadowing,
 simboli non esportati fra moduli, tipi di comando console inesistenti,
 collisioni da build unity, metodi inesistenti chiamati sulle nostre classi.
 
-292 test C++ in totale, piu' 149 test Python della pipeline.
+381 test C++ in totale, piu' 173 test Python della pipeline.
 
 **Dopo la prima prova su Torino** (materiale, scene Sentinel, prestazioni): `docs/prova-torino.md`.
 **Dopo la seconda** (troppi triangoli, RAM): `docs/prova-torino-2.md`.
@@ -116,7 +121,12 @@ python run.py verify-imagery -o dataset/ortofoto
 python run.py fetch --area italia -o dati/copernicus_italia
 python run.py fetch-imagery --area italia -o dati/sentinel_italia --dry-run
 
-python -m unittest discover -s tests               :: 149 test, sorgente sintetico
+:: acqua (Fase 9): i poligoni del mare una volta, poi OSM + terreno
+python run.py fetch-water -o dati/acqua
+python run.py build-water --osm dati/osm/nord-ovest-latest.osm.pbf --sea dati/acqua/water-polygons-split-4326.zip --terrain dataset/terreno -o dataset/acqua
+python run.py verify-water -o dataset/acqua
+
+python -m unittest discover -s tests               :: 173 test, sorgente sintetico
 ```
 
 Su Windows serve conda: vedi `Pipeline/README.md`.
@@ -128,8 +138,9 @@ Quadro d'insieme delle sei fasi: `docs/programma.md`.
 ## Verifica in Unreal
 
 Vedi `docs/fase1-verifica.md`, `docs/fase2-verifica.md`, `docs/fase3-verifica.md`,
-`docs/fase4-verifica.md`, `docs/fase5-verifica.md`, `docs/fase6-verifica.md` e
-`docs/fase8-verifica.md`.
+`docs/fase4-verifica.md`, `docs/fase5-verifica.md`, `docs/fase6-verifica.md`,
+`docs/fase8-verifica.md` e `docs/fase9-verifica.md`.
 
 Scorciatoie: `geo.Terrain.Demo <quote>` per il terreno,
-`geo.Imagery.Demo <quote> <ortofoto>` per il terreno vestito.
+`geo.Imagery.Demo <quote> <ortofoto>` per il terreno vestito,
+`geo.Water.Demo <quote> <ortofoto> <acqua>` per l'acqua.

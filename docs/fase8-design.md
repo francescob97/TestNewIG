@@ -16,10 +16,10 @@ La tua proposta era: 8 OpenStreetMap, 9 case e monumenti, 10 foreste,
 | Fase | Cosa | Perché in questo punto |
 |---|---|---|
 | **8** | **Strade, ferrovie, piste** (questa) | Costruisce la catena dei **dati vettoriali** (OSM → tile → runtime) che le tre fasi successive riusano |
-| **9** | **Acqua**: mare, laghi, fiumi | Usa la stessa catena, con i poligoni al posto delle linee. Da quota si vede ovunque: l'Italia ha 8.000 km di costa, e oggi il mare è terreno a quota zero con la foto sopra |
+| **9** | **Acqua**: mare, laghi, fiumi *(fatta: `docs/fase9-design.md`; con lei è nato il vento, primo pezzo del meteo)* | Usa la stessa catena, con i poligoni al posto delle linee. Da quota si vede ovunque: l'Italia ha 8.000 km di costa, e oggi il mare è terreno a quota zero con la foto sopra |
 | **10** | **Edifici e monumenti** | Impronte e altezze da OSM, estruse; i monumenti come modelli veri (glTF, o i `.flt` del tuo database). È la fase più pesante per il rendering: decine di milioni di edifici in Italia |
 | **11** | **Vegetazione** | Boschi da OSM e dalla copertura arborea Copernicus; alberi istanziati, con impostor da lontano. Stesso problema di numeri degli edifici, risolto una volta sola |
-| **12** | **Atmosfera, cielo, nuvole e luce** | In Unreal sono **un sistema solo**: lo stesso sole illumina cielo, nuvole e terreno, e la foschia dipende dall'atmosfera. Separarli voleva dire fare due volte metà del lavoro |
+| **12** | **Atmosfera, cielo, nuvole e luce**, e il **meteo** | In Unreal sono **un sistema solo**: lo stesso sole illumina cielo, nuvole e terreno, e la foschia dipende dall'atmosfera. Separarli voleva dire fare due volte metà del lavoro. Il meteo (nuvole, pioggia, nebbia) allargherà `UGeoWeatherSubsystem`, che dalla Fase 9 tiene il vento |
 
 Due note sull'ordine.
 

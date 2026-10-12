@@ -212,7 +212,18 @@ da lì, dato il terreno scavato sotto.
 | Normale | le stesse onde, analitiche, + due campionamenti scorrevoli di una normale di dettaglio |
 | Corrente | nei fiumi la normale di dettaglio scorre lungo la corrente (*flow map*, due fasi sfalsate) |
 | Schiuma | sulla riva (dalla distanza) e sulle creste quando il vento supera ~6 m/s |
-| Assorbimento, diffusione | mare limpido, laghi più verdi, fiumi torbidi (dall'esposizione e dalla corrente) |
+| Assorbimento, diffusione | mare limpido, acque interne più verdi e torbide: si sceglie con l'esposizione alle onde del raster (1 il mare, 0,8 un lago grande, ~0 un canale) |
+
+Le onde e la normale si calcolano in due nodi **Custom** (HLSL scritto a mano,
+nel factory dell'editor): è lo stesso conto di `WaveSpectrum.h`, che si prova
+nei test. Due dettagli che contano:
+
+- la posizione nel mondo arriva ai nodi Custom attraverso un nodo
+  **TruncateLWC** (da *Large World Coordinates* a float normale): il rebase
+  tiene il mondo entro ~10 km dall'origine, dove il float sbaglia di millimetri;
+- le onde troppo piccole per lo schermo (meno di ~6 pixel) si spengono nella
+  normale, stimando quanti metri copre un pixel da profondità e angolo di vista
+  (non con `ddx`, che non esiste in tutti gli shader che il motore compila).
 
 ### 6.4 Le texture, generate dal codice
 
@@ -232,7 +243,12 @@ Come l'atlante delle strade: niente file binari da mantenere.
 `UGeoWeatherSubsystem` tiene un **vento**: velocità (m/s), direzione **da cui
 soffia** (gradi, come nei bollettini), raffiche. Cambia con dolcezza (costante
 di tempo di qualche secondo: un cambio di vento è un cambio di mare, non uno
-scatto). `geo.Weather.Wind 8 270` = 8 m/s da ovest. È il seme della fase del
+scatto). `geo.Weather.Wind 8 270` = 8 m/s da ovest.
+
+**Le onde seguono il vento medio, le raffiche no.** Un'onda di 50 m ci mette
+ore a formarsi: non segue un soffio di dieci secondi. Le raffiche muovono
+l'increspatura (le normali di dettaglio, che scorrono più in fretta e si
+fanno più marcate) e la schiuma sulle creste. È il seme della fase del
 meteo: nuvole, pioggia, nebbia si aggiungeranno qui.
 
 ### 7.2 Dallo spettro alle onde
@@ -247,14 +263,23 @@ attorno a quella **verso cui** soffia il vento, ampiezze che si dividono
 l'energia di Hs, ripidità tale che la somma non si ripieghi su se stessa (le
 creste a cappio di Gerstner). Velocità dalle acque profonde: ω = √(g·k).
 
-Le onde più corte di ~4 celle della mesh non si mettono nella geometria (si
-vedrebbero a scalini): vanno nella normale.
+Le onde più corte di 8 celle della mesh si spengono nella geometria (da 8 a
+4 celle sfumano, sotto le 4 non ci sono): si vedrebbero a scalini. Restano
+nella normale, che le disegna comunque.
 
 ### 7.3 Niente salti
 
-- **Le fasi si integrano**, non si calcolano come ω·t: quando il vento cambia
-  e ω cambia, la fase prosegue da dove era. Con ω·t un cambio di vento farebbe
-  saltare tutte le creste in un frame.
+- **Le fasi si integrano** (fase −= ω·dt, in double), non si calcolano come ω·t.
+- **Un'onda non cambia mai lunghezza né direzione mentre c'è.** Ogni onda è
+  sin(k·D·X + fase): se k cambia anche dell'1%, a 5 km dall'origine la fase
+  cambia di decine di radianti, e il mare lontano "scorre" a velocità assurde.
+  Quando il vento cambia, ogni onda confronta se stessa con quella che il
+  vento nuovo vorrebbe: se è quasi la stessa (lunghezza entro il 3%, direzione
+  entro 2°) cambia solo l'ampiezza, con dolcezza; altrimenti **sfuma a zero in
+  2 s, e solo a zero** viene sostituita dalla nuova, che cresce da zero. Due
+  onde alla volta: il mare non si spiana mai, e un cambio grosso (8 → 14 m/s)
+  si completa in una decina di secondi. Il test lo misura in un punto vicino e
+  in uno a 7 km: nessun salto oltre i 3 cm per frame.
 - **Il rebase.** Le onde dipendono dalla posizione nel mondo, e un rebase la
   sposta di 10 km: senza correzione, il mare intero salterebbe. A ogni rebase
   si somma alla fase di ogni onda k·(D·Δ), dove Δ è lo spostamento dell'origine;
