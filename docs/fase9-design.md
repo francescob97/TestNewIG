@@ -77,7 +77,7 @@ Sud sono la maggioranza dei "fiumi" in OSM), `tunnel=*`, `covered=yes`,
 | **Mare** | geoide | 0,5 m + 5% della distanza dalla riva, fino a 60 m | 1 (piene) | no |
 | **Laguna** (`water=lagoon`) | geoide | 0,3 m + 5%, fino a 2 m | 0,35 | no |
 | **Lago**, bacino | 20° percentile del terreno dentro il poligono | 0,5 m + 12%, fino a 5 + 6·√km² m (max 120) | da 0,12 a 0,8 secondo la superficie (*fetch*) | no |
-| **Fiume** (linea, area) | profilo lungo l'asse, sempre in discesa nel verso della linea | 0,3 m + 25%, fino a larghezza/15 (1–5 m) | 0,06 | 1 m/s nel verso della linea |
+| **Fiume** (linea, area) | profilo lungo l'asse, sempre in discesa nel verso della linea; le **aree** fluviali prendono la quota dagli assi che le attraversano | 0,3 m + 25%, fino a larghezza/15 (1–5 m) | 0,06 | 1 m/s nel verso della linea |
 | **Canale** | come il fiume | 0,3 m + 50%, fino a 2,5 m | 0,03 | 0,35 m/s |
 
 Tre note.
@@ -88,7 +88,12 @@ Tre note.
 - **Il profilo di un fiume scende sempre.** Le linee dei fiumi in OSM sono
   orientate a valle (è una regola del tag `waterway`). Si campiona il terreno
   lungo l'asse ogni 20 m e si prende il **minimo progressivo**: dove il DEM
-  risale (un ponte, un argine, rumore) l'acqua non risale con lui.
+  risale (un ponte, un argine, rumore) l'acqua non risale con lui. Prima del
+  minimo il terreno si **pulisce** (sezione 12): solo campioni con dati veri,
+  mediana su 180 m, via i crolli più bassi di 15 m della mediana del km. Le
+  way dello stesso fiume si **cuciono**: una way comincia al massimo dalla quota
+  a cui finiscono quelle che entrano nel suo primo punto (mai più di 5 m sotto
+  il suo terreno). Una way che sale di molto nel suo verso si gira.
 - **Onde e corrente vanno nel raster**, pixel per pixel: un fiume che entra in
   un lago passa da "scorre, niente onde" a "fermo, onde da lago" esattamente
   sulla riva del lago.
@@ -181,6 +186,10 @@ qualcosa da scavare qui?". Tre risposte:
   quote;
 - **sì**: ogni post diventa `min(terreno, fondale)`, poi la mesh.
 
+Il "fondale" del file è anche un **tetto** per il terreno appena fuori
+dall'acqua (la sponda, sezione 12): lì sta sopra la superficie, e il `min`
+abbassa solo un terreno più alto.
+
 Lo scavo vale anche per le quote che usano le **strade 3D** (stesso terreno
 sotto, stessa origine della mesh) e per il **padre** nel geomorphing.
 
@@ -193,6 +202,11 @@ Una griglia alla quota della superficie, con lo stesso passo del terreno,
 tile (contro le fessure fra livelli diversi, come per il terreno). La riva
 vera la disegna il materiale con la distanza dal raster: la cella può
 sporgere, il pixel no.
+
+Dove il file **non porta la superficie** (un'acqua troppo stretta per la mesh
+a quel livello, sezione 12) il vertice si **appoggia** sul terreno scavato,
+0,3 m sopra: stessi vertici e stessa diagonale del terreno, quindi l'acqua sta
+sopra il terreno di 0,3 m in ogni punto della cella.
 
 È un quarto componente della tile nel provider (terreno, strade 3D, acqua):
 stessa trasformazione, stessa visibilità, stesso rebase.
@@ -300,10 +314,15 @@ nella normale, che le disegna comunque.
   la schiuma le racconta.
 - **Sotto l'acqua** con la camera: nessun effetto di immersione.
 - **Torrenti stretti** (< 4 m): restano la foto.
-- **I fiumi spezzati in più linee** non sono ricuciti: il profilo scende dentro
-  ogni linea, e fra una linea e l'altra può esserci un gradino di qualche
-  decimetro.
-- **Le cascate e le dighe** come oggetti: una diga è un salto nel profilo.
+- **Gli affluenti** si cuciono al fiume in cui sboccano solo se la loro way
+  finisce in un estremo di una way del fiume; se sboccano a metà di una way, il
+  loro profilo è indipendente (al massimo un gradino di qualche decimetro alla
+  foce).
+- **Le cascate e le dighe** come oggetti: una diga è un salto nel profilo,
+  smussato dalla mediana su un centinaio di metri (la traversa del Michelotti a
+  Torino è una rampa di ~3 m).
+- **Gli argini alti a ridosso dell'acqua** si abbassano per una cella e mezza
+  della mesh (sezione 12): è il prezzo di una riva pulita a passo 2.
 
 ---
 
@@ -347,3 +366,65 @@ a 60) è nello strato puro e provata nei test (`Geo/GeoFormat.h`).
 | `GeoRender/.../Water/GeoWaterSubsystem.*` | il runtime |
 | `GeoRender/.../Weather/GeoWeatherSubsystem.*` | il vento |
 | `GeoWorldEditor/Private/GeoTerrainMaterialFactory.cpp` | `M_GeoWater` e `MPC_GeoWater` |
+
+---
+
+## 12. La prima prova sul Po, e cosa è cambiato
+
+> "Il fiume è particolarmente brutto. Ha tipo scavato il buco ma solo alcuni
+> vertici sono in alto, altri sono in basso." — la prima prova, su Torino.
+
+Riprodotto con dati veri (Copernicus DEM a 30 m sull'area di Torino, l'acqua di
+OSM attraverso Overture) e un simulatore del runtime: scavo, mesh a passo 2,
+maschera della riva. Tre cause, in ordine di gravità.
+
+**1. Quote finte fuori dal DEM: il buco di 200 m.** Il campionatore del
+terreno leggeva le tile dei livelli bassi anche fuori dall'area del DEM, e i
+post riempiti col livello del mare (`tilecut.py` scrive il geoide dove il
+sorgente non ha dato). Il Po entra a Torino da sud, fuori dal DEM: il "minimo
+progressivo" partiva da ~47 m e restava lì per tutto il fiume, e l'area del Po
+(26 km², un'unica multipolygon) aveva per quota il 20° percentile di campioni in
+gran parte finti: 44,8 m. Il fiume era scavato fino a ~45 m, tranne una striscia
+attorno all'asse con la quota giusta: i "vertici in alto e in basso".
+Ora `TerrainSampler.heights` legge solo il livello nativo, dentro il riquadro
+del sorgente, e scarta i post che valgono il geoide; il profilo usa solo i
+campioni validi (e non quelli a ridosso di un buco, che mescolano dato e
+riempimento).
+
+**2. Gradini fra un pezzo e l'altro.** Profili calcolati way per way, aree
+fluviali con una quota sola per tutto il poligono, l'asse che riempiva l'area
+solo per ~8 pixel, un canale vicino che "prestava" la sua quota al Po. Ora: way
+cucite, aree che prendono la quota in tutta la larghezza dai soli assi che le
+attraversano, aree sopra le linee nell'ordine di rasterizzazione (il Po è
+un'area larga 128 m con dentro la sua linea "larga 12 m": la linea sopra dava
+al centro del fiume le regole di un fosso).
+
+**3. La mesh è più grossa del fiume.** A passo 2 una cella del livello 13 è
+larga 38 m, e il Po ~130 m: fra un vertice in acqua e uno a terra c'è un
+triangolo, e l'acqua si vede solo dove il triangolo sta sotto la superficie.
+Con lo scavo di prima (0,3 m sulla riva, una rampa dolce) il vertice a terra,
+alto, tirava su il triangolo: il terreno copriva il 20% dell'acqua del Po,
+lungo tutte le rive, e dentro il fiume la profondità a zig-zag diventava uno
+zig-zag di colore. Ora, due regimi:
+
+- **acqua "risolta"** (larga almeno 4 post al livello della tile, il passo
+  nominale del livello): scavata, con una sponda a **V continua**: la stessa
+  funzione della distanza dalla riva fa la profondità dentro e il tetto del
+  terreno fuori, zero sulla riva. Lungo un lato di un triangolo il terreno è
+  allora lineare nella distanza, e incrocia l'acqua sulla riva. Fuori, il tetto
+  segue la V per un post e mezzo e poi sale a 45°: un argine alto resta alto;
+- **acqua troppo stretta**: niente scavo e niente superficie nel file; il
+  runtime la appoggia sul terreno (sezione 6.2).
+
+| Il Po a Torino, livello 13, passo 2 | prima | dopo |
+|---|---|---|
+| post d'acqua sotto il DEM di oltre 10 m | sì (fino a 242 m) | nessuno |
+| acqua coperta dal terreno (pixel dentro la riva) | 19–23% | 2,2% |
+| idem, livello 12 (Po "appoggiato") | 33% | 0% |
+| idem, livello 13 a passo 1 | 2,8% | 0,3% |
+| gradino medio della superficie fra post vicini | 27 m | 2 cm |
+
+Il test `geowater_tests`, sezione 8, rifà queste misure **con il codice del
+runtime** su due coppie di tile vere (`TestData/po_torino_*`), e fallisce sui
+dati di prima.
+

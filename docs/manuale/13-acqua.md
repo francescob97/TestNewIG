@@ -47,6 +47,9 @@ con numeri diversi per tipo d'acqua (mare 0,5 m + 5%, fino a 60 m; fiume
 > = 1,7 m; a 50 m sarebbe 6,5 m, ma il massimo per un lago di 1 km² è
 > 5 + 6 × √1 = 11 m, quindi ci arriva a ~88 m dalla riva.
 
+Il "fondale" del file fa anche da **tetto** per il terreno appena fuori
+dall'acqua, per una cella della mesh: è la sponda a V della sezione 13.12.
+
 Lo scavo vive nel **terreno**, non nella pipeline del terreno: il subsystem
 dell'acqua consegna al terreno una funzione ("dato questo blocco di quote,
 modificalo") con `SetHeightEditor`. Così cambiare l'acqua non obbliga a rifare
@@ -104,7 +107,7 @@ piscine, i bacini dei depuratori.
 |---|---|
 | Mare, laguna | il **geoide**: le quote del progetto sono ellissoidiche (capitolo 2), e in Italia il mare sta 40–50 m sopra l'ellissoide |
 | Lago | il 20° percentile del terreno dentro il lago: il DEM ha il lago piatto, ma ai bordi pesca un po' di sponda; il percentile basso la ignora |
-| Fiume | un **profilo** lungo la linea: si campiona il terreno ogni 20 m e si prende il **minimo progressivo** nel verso della corrente, così l'acqua non risale mai |
+| Fiume | un **profilo** lungo la linea: si campiona il terreno ogni 20 m, lo si pulisce (solo dati veri, mediana) e si prende il **minimo progressivo** nel verso della corrente, così l'acqua non risale mai. Le way dello stesso fiume si **cuciono**; le **aree** fluviali prendono la quota dagli assi che le attraversano |
 
 > ⚠️ **Trappola (presa dai test).** Tagliare il poligono del mare sul riquadro
 > di lavoro crea una "costa" finta sul bordo del riquadro: la distanza dalla
@@ -257,6 +260,57 @@ che arrotondati non arrivano mai a 60) sta nello strato puro, in
 > scritto 45° 5' 0,0". Si arrotonda **prima** il numero totale di decimi di
 > secondo, poi lo si spezza in gradi, primi e secondi.
 
+## 13.12 La prima prova: il fiume "a vertici alti e bassi"
+
+La prima prova sul Po ha mostrato un fiume scavato in una fossa, con alcuni
+vertici in alto e altri in basso. Riprodurla con dati veri (il DEM di
+Copernicus, l'acqua di OSM) e un simulatore del runtime ha trovato tre cause,
+ognuna con una lezione.
+
+**"Non lo so" non è un numero.** Le tile dei livelli bassi del terreno coprono
+ben oltre l'area del DEM, e dove il sorgente non ha dati la pipeline del
+terreno scrive il livello del mare. Per chi le legge sono numeri validi, e
+sbagliati di centinaia di metri. Il Po entra a Torino da sud, fuori dal DEM:
+il minimo progressivo partiva dal livello del mare e se lo portava dietro per
+tutto il fiume. Ora il campionatore restituisce NaN fuori dal livello nativo e
+sui post riempiti, e ogni calcolo usa solo i campioni validi.
+
+> 💡 **Esempio.** Il primo campione valido del Po, sul bordo del DEM, valeva
+> 194,6 m: un post a metà fra dato vero (262 m) e riempimento. Esteso a tutta la
+> parte scoperta della linea, bastava lui a rovinare il fiume. Per questo si
+> scartano anche i campioni **a ridosso** di un buco.
+
+**Un numero solo per un poligono grande è sbagliato quasi ovunque.** L'area del
+Po è una multipolygon di 26 km² che scende per chilometri: un solo percentile
+non può andare bene dappertutto. La quota delle aree fluviali viene dall'asse che
+le attraversa, punto per punto.
+
+**La mesh decide cosa si può disegnare.** A passo 2, al livello 13, una cella è
+larga 38 m. Fra un vertice nell'acqua e uno sulla riva c'è un triangolo: se il
+vertice sulla riva è alto, il triangolo sale e copre l'acqua per mezza cella.
+Due rimedi, secondo quanto l'acqua è larga rispetto alla mesh:
+
+- **larga** (almeno 4 post): si scava con una **sponda a V**. La stessa
+  funzione della distanza fa la profondità dentro e il "tetto" del terreno
+  fuori, zero sulla riva. Lungo un lato del triangolo il terreno è allora
+  lineare nella distanza dalla riva, e attraversa l'acqua proprio sulla riva;
+- **stretta**: non si scava (sarebbe un pettine di buchi, uno per vertice che
+  cade nel fiume). La superficie si **appoggia** sul terreno, 0,3 m sopra, con gli
+  stessi vertici: l'acqua sta sopra il terreno in ogni punto, e la forma la
+  disegna la maschera della riva.
+
+> ⚠️ **Trappola (presa dai test).** La prima V aveva un piccolo salto sulla
+> riva: 0,3 m di profondità subito dentro, 0,3 m di argine subito fuori. Sembrava
+> innocuo: un vertice che cade proprio sulla riva prendeva +0,3 o −0,3 a seconda
+> del lato, e questi 60 cm bastavano a far spuntare il terreno. La V giusta è
+> **continua**: zero sulla riva.
+
+E una lezione di metodo: il simulatore riproduce il runtime (scavo, mesh,
+diagonale, maschera) e conta i pixel d'acqua coperti dal terreno. Ogni
+correzione si misurava in pochi secondi, invece di un giro di compilazione su
+Windows. Lo stesso conto, fatto con il codice C++ del runtime su due tile vere
+del Po, ora è un test (`geowater_tests`, sezione 8).
+
 ---
 
 ## Nota Unreal
@@ -331,3 +385,6 @@ ciò che cambia per tile (il raster) resta nelle istanze di materiale.
   solo ad ampiezza zero, e il mare non salta né scorre.
 - Le raffiche muovono l'**increspatura**, il vento medio le **onde**.
 - Dopo l'aggiornamento: `geo.Imagery.CreateMaterial`.
+- "Non lo so" non è un numero: fuori dal DEM il campionatore dice NaN, non il
+  livello del mare. E la mesh decide cosa si può disegnare: l'acqua larga si
+  scava con una sponda a V continua, quella stretta si appoggia sul terreno.

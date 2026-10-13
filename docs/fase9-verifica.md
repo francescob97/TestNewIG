@@ -8,13 +8,15 @@
 **Cosa è già provato qui, senza Unreal:**
 
 - la pipeline intera su dati sintetici (terreno a tre livelli, un lago, un
-  fiume largo 20 m con la sua corrente, un mare, un fiume intermittente e una
-  piscina che devono sparire): 23 test Python, 173 in tutto;
+  fiume largo 60 m con la sua corrente, un fiume ad area con la sua linea come
+  il Po, un mare, un fiume intermittente e una piscina che devono sparire),
+  le quote fuori dal DEM, i profili e la sponda: 29 test Python, 179 in tutto;
 - il lettore C++ su una tile scritta dalla pipeline vera, lo scavo, la mesh
   della superficie, il raster, le onde dal vento (energia dello spettro, niente
   creste ripiegate, **niente salti né "mare che scorre" quando il vento
-  cambia**, rebase) e le texture generate: 54 test standalone
-  (`geowater_tests`); la formattazione delle stampe (virgola, gradi-primi-secondi):
+  cambia**, rebase) e le texture generate; e, su due tile **vere** del Po a
+  Torino, quanta acqua copre il terreno con il codice del runtime: 60 test
+  standalone (`geowater_tests`); la formattazione delle stampe (virgola, gradi-primi-secondi):
   11 test nuovi in `geocore_tests`;
 - i controlli statici (shadowing, simboli fra moduli, build unity, metodi
   inesistenti, formato di `Printf`, conversioni di unità).
@@ -22,6 +24,38 @@
 **Cosa non ho potuto provare:** la compilazione in Unreal, il **materiale**
 (il codice HLSL dei due nodi Custom si compila solo dentro il motore) e un
 estratto OSM vero. Il punto più delicato è il materiale: sezione 2, passo 2.
+
+---
+
+## 0. Dopo la prima prova (il fiume "a vertici alti e bassi")
+
+Le cause e i numeri sono in `docs/fase9-design.md`, sezione 12. Per riprovare:
+
+1. `git pull`, poi **ricompila** (è cambiato `Water/WaterMesh.h`). Il materiale
+   non è cambiato: `geo.Imagery.CreateMaterial` non serve.
+2. **Rifai l'acqua** con lo stesso comando della prima volta (sezione 1). Le
+   regole hanno cambiato versione: la pipeline rifà da sola estrazione e taglio.
+   Nel riassunto dell'estrazione può comparire "girate (salivano)": way di fiumi
+   disegnate al contrario in OSM, girate.
+3. In Unreal, `geo.Water.Open <cartella dell'acqua>` (o di nuovo
+   `geo.Water.Demo ...`): il terreno si rifà scavato con i dati nuovi.
+
+Cosa deve cambiare, sul Po:
+
+- **niente più fossa**: l'acqua sta alla quota del fiume, scavata di qualche
+  metro (fino a 5 per un fiume largo), non di centinaia;
+- **la riva pulita**: il terreno non copre più l'acqua lungo le sponde a
+  strisce; da vicino resta qualche triangolino sulle sponde ripide (2% dell'acqua
+  del Po al livello 13, il dato di Copernicus a 30 m);
+- **da lontano** (livelli bassi) e per i fiumi stretti (la Dora, la Stura):
+  l'acqua è **appoggiata** sul terreno, 0,3 m sopra, senza scavo. Avvicinandosi,
+  quando il fiume diventa largo almeno 4 post del livello, si scava; nel
+  passaggio (mezzo secondo, con il geomorphing) si può vedere il letto
+  scendere;
+- **gli argini alti** a ridosso dell'acqua (i Murazzi) si abbassano per una
+  cella e mezza della mesh: è il prezzo della riva pulita;
+- un **salto** di 3 m vicino al ponte Vittorio Emanuele è vero: è la traversa
+  del Michelotti, smussata in una rampa di un centinaio di metri.
 
 ---
 
@@ -173,6 +207,8 @@ turchese dove il fondale è vicino, blu scuro al largo.
 | L'acqua è piatta e immobile, riga rossa "manca MPC_GeoWater" | collezione dei parametri mancante | come sopra |
 | Il terreno non è scavato ma l'acqua c'è | dataset d'acqua di un altro terreno | rifai `build-water` con `--terrain` uguale al terreno aperto |
 | Acqua sopra le sponde, o sponde sopra l'acqua | livello del lago o profilo del fiume | screenshot + `inspect-water` della tile: la quota della superficie viene dal 20° percentile del terreno nel lago, e dal minimo progressivo lungo il fiume |
+| Un fiume in una fossa profonda, a vertici alti e bassi | dati d'acqua fatti con la pipeline di prima (quote finte fuori dal DEM) | rifai `build-water` (sezione 0) |
+| Il fiume da lontano sembra "dipinto" sul terreno, senza profondità | è troppo stretto per la mesh a quel livello: acqua appoggiata | normale; avvicinandosi si scava |
 | La corrente va verso monte | linea OSM al contrario, o segno sbagliato | dimmi quale fiume |
 | Le onde "corrono" o saltano quando cambi vento | non dovrebbe (sezione 3.3) | dimmi a che distanza e con quale vento |
 | Manca la riga "s.l.m." | nessun dataset d'acqua aperto: il geoide arriva con lui | normale; con `geo.Water.Open` compare |

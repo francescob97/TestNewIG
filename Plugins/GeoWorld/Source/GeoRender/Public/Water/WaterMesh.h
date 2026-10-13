@@ -172,6 +172,12 @@ namespace GeoWorld::Water
 		double SkirtDepthMetres = 2.0;
 		/** Una cella si disegna se l'acqua e' a meno di cosi' (pixel della tile). */
 		float NearShorePixels = 3.0f;
+		/**
+		 * L'acqua "appoggiata": dove il file non porta la superficie (un'acqua
+		 * troppo stretta per scavarla a questo livello, vedi sotto) la
+		 * superficie sta sul terreno, cosi' tanti metri sopra.
+		 */
+		double DrapeLiftMetres = 0.3;
 	};
 
 	/**
@@ -184,6 +190,19 @@ namespace GeoWorld::Water
 	 *
 	 * Normali: l'alto dell'ellissoide nel punto. Le onde (Gerstner) e il
 	 * dettaglio le aggiunge il materiale.
+	 *
+	 * DUE MODI, VERTICE PER VERTICE
+	 *  - Il file porta la SUPERFICIE: il vertice sta li', in piano. E' l'acqua
+	 *    abbastanza larga da essere scavata a questo livello (la pipeline la
+	 *    allarga di qualche post oltre la riva, cosi' le celle a cavallo della
+	 *    riva la hanno in tutti gli angoli).
+	 *  - Non la porta: e' un'acqua piu' stretta di qualche cella della mesh (un
+	 *    torrente, o il Po visto da 20 km). Scavarla farebbe un pettine di buchi:
+	 *    il vertice si APPOGGIA sul terreno scavato, DrapeLiftMetres sopra. Le
+	 *    due mesh hanno gli stessi vertici e la stessa diagonale, quindi l'acqua
+	 *    sta sopra il terreno di DrapeLiftMetres in ogni punto della cella, e la
+	 *    forma la disegna la distanza dalla riva nel materiale.
+	 * Una cella si disegna se l'acqua e' vicina (NearShorePixels).
 	 */
 	inline void BuildWaterMesh(const FHeightTile& CarvedTerrain, const FWaterView& View,
 	                           const FWaterMeshParameters& Parameters, FTileMeshData& Out,
@@ -205,31 +224,28 @@ namespace GeoWorld::Water
 		const FEcef OriginEcef = Core::GeodeticToEcef(Out.Origin, Ellipsoid);
 		const FMat3 EcefToLocal = Mesh::Detail::MakeLocalNeu(Out.Origin);
 
-		// Le quote dei post della mesh.
+		// Le quote dei post della mesh: la superficie, o il terreno + il
+		// sollevamento dove la superficie non c'e' (vedi sopra).
 		std::vector<float> Surface(static_cast<size_t>(Posts) * Posts);
 		for (int32_t J = 0; J < Posts; ++J)
 		{
 			for (int32_t I = 0; I < Posts; ++I)
 			{
-				Surface[static_cast<size_t>(J) * Posts + I] = View.SurfaceAtPost(I * Step, J * Step);
+				const float Level = View.SurfaceAtPost(I * Step, J * Step);
+				Surface[static_cast<size_t>(J) * Posts + I] = std::isfinite(Level) ? Level
+					: CarvedTerrain.GetHeight(I * Step, J * Step) + static_cast<float>(Parameters.DrapeLiftMetres);
 			}
 		}
 
-		// Le celle da disegnare: quattro angoli con la quota, e acqua vicina
-		// (la distanza dalla riva negli angoli e al centro). La riva vera la
-		// taglia il materiale: la cella puo' sporgere sulla terra, il pixel no.
+		// Le celle da disegnare: quelle con l'acqua vicina (la distanza dalla
+		// riva negli angoli e al centro). La riva vera la taglia il materiale:
+		// la cella puo' sporgere sulla terra, il pixel no.
 		const double CellUv = 1.0 / Cells;
 		std::vector<uint8_t> Drawn(static_cast<size_t>(Cells) * Cells, 0);
 		for (int32_t J = 0; J < Cells; ++J)
 		{
 			for (int32_t I = 0; I < Cells; ++I)
 			{
-				const float Corners[4] = { Surface[static_cast<size_t>(J) * Posts + I], Surface[static_cast<size_t>(J) * Posts + I + 1],
-				                           Surface[static_cast<size_t>(J + 1) * Posts + I], Surface[static_cast<size_t>(J + 1) * Posts + I + 1] };
-				if (!std::isfinite(Corners[0]) || !std::isfinite(Corners[1]) || !std::isfinite(Corners[2]) || !std::isfinite(Corners[3]))
-				{
-					continue;
-				}
 				float Nearest = -1.0e9f;
 				for (const double Du : { 0.0, 0.5, 1.0 })
 				{

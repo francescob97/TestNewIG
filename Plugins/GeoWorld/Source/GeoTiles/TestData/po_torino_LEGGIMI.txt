@@ -1,0 +1,20 @@
+po_torino_<livello>_<x>_<y>.ght / .gwa -- il Po a Torino, dati veri, per i test
+==============================================================================
+
+Due coppie (tile di terreno + tile d'acqua) attorno a 45,05 N 7,69 E, usate da
+geowater_tests (sezione "Il Po a Torino") per misurare, con il codice del
+runtime, quanta acqua resta coperta dal terreno: il difetto della prima prova
+(il fiume "a vertici alti e bassi").
+
+  livello 13: il Po (largo ~130 m) e' "risolto": scavato, superficie piana;
+  livello 12: e' troppo stretto per la mesh: non scavato, acqua appoggiata.
+
+Rigenerarle: python run.py build (terreno) e build-water (acqua) sull'area
+7,50-7,90 E, 45,00-45,20 N; poi copiare le due tile di ogni livello.
+
+Fonti e licenze
+  Terreno: Copernicus DEM GLO-30 (c) DLR e.V. 2010-2014 e (c) Airbus Defence
+           and Space GmbH 2014-2018, distribuito da Unione Europea ed ESA
+           nell'ambito del programma Copernicus. Uso libero con attribuzione.
+  Acqua:   (c) contributori OpenStreetMap, licenza ODbL, tramite Overture Maps
+           (tema base/water, rilascio 2026-09-23.1).

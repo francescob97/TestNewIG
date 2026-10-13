@@ -139,7 +139,7 @@ class Format(unittest.TestCase):
         self.assertEqual((decoded.level, decoded.x, decoded.y), waterformat.FIXTURE_KEY)
         self.assertTrue(decoded.flags & waterclasses.TILE_FLOW)
         np.testing.assert_allclose(decoded.surface[:, :65], 230.4, atol=0.05)
-        self.assertTrue(np.isnan(decoded.surface[:, 65:]).all())
+        self.assertTrue(np.isnan(decoded.surface[:, 71:]).all())
         np.testing.assert_array_equal(decoded.sdf, tile.sdf)
         np.testing.assert_array_equal(decoded.flow_u, tile.flow_u)
 
@@ -184,6 +184,12 @@ BBOX = (7.600, 44.990, 7.720, 45.100)
 LAKE = (7.640, 45.060, 7.662, 45.076)     # dove il terreno e' piano a 230 m
 LAKE_POLYGON = (7.642, 45.062, 7.660, 45.074)
 RIVER_LAT = 45.040
+#: Largo 60 m: "risolto" (scavato) al livello 14 (post da 9,5 m: servono 38 m),
+#: troppo stretto al 13 (post da 19 m: servono 76 m), dove si appoggia.
+RIVER_WIDTH = 60
+#: Un fiume fatto come il Po a Torino: un'AREA larga ~110 m, con dentro la sua
+#: linea senza larghezza (12 m per difetto), verso est.
+AREA_RIVER = (7.610, 45.0835, 7.700, 45.0845)
 SEA_NORTH = 45.012
 GEOID = 47.0
 
@@ -241,7 +247,13 @@ def write_osm(path):
     w, s, e, n = LAKE_POLYGON
     way(1, [(w, s), (e, s), (e, n), (w, n)], closed=True, natural="water", name="Lago di prova")
     # Il fiume scorre verso EST (il verso della way), dove il terreno scende.
-    way(2, [(7.605 + 0.01 * i, RIVER_LAT) for i in range(11)], waterway="river", width="20")
+    way(2, [(7.605 + 0.01 * i, RIVER_LAT) for i in range(11)], waterway="river", width=str(RIVER_WIDTH))
+    w, s, e, n = AREA_RIVER
+    way(5, [(w, s), (e, s), (e, n), (w, n)], closed=True, natural="water", water="river")
+    # La linea del fiume ad area e' spezzata in due way, come in OSM.
+    middle = 0.5 * (s + n)
+    way(6, [(w - 0.005, middle), (0.5 * (w + e), middle)], waterway="river")
+    way(7, [(0.5 * (w + e), middle), (e + 0.005, middle)], waterway="river")
     way(3, [(7.61, 45.09), (7.70, 45.09)], waterway="river", intermittent="yes")
     way(4, [(7.700, 45.080), (7.7003, 45.080), (7.7003, 45.0802), (7.700, 45.0802)], closed=True,
         leisure="swimming_pool", natural="water")
@@ -264,6 +276,60 @@ def write_sea(path):
         f"POLYGON((7.5 44.9,7.8 44.9,7.8 {SEA_NORTH},7.5 {SEA_NORTH},7.5 44.9))"))
     layer.CreateFeature(feature)
     datasource = None
+
+
+@unittest.skipUnless(HAS_GDAL, "serve GDAL")
+class TerrainAndProfiles(unittest.TestCase):
+    """Le quote dei fiumi: il caso del Po a Torino, che il primo taglio scavava di 200 m."""
+
+    @classmethod
+    def setUpClass(cls):
+        from geoworld import waterbuild
+        cls.waterbuild = waterbuild
+        cls.directory = tempfile.TemporaryDirectory()
+        cls.terrain = os.path.join(cls.directory.name, "terreno")
+        write_terrain(cls.terrain, levels=(12, 13))
+
+    @classmethod
+    def tearDownClass(cls):
+        cls.directory.cleanup()
+
+    def test_sampler_knows_where_it_does_not_know(self):
+        sampler = self.waterbuild.TerrainSampler(self.terrain)
+        sampler.sea_level = self.waterbuild.GeoidSampler(constant=GEOID)
+        inside = sampler.heights([7.66], [RIVER_LAT + 0.01])
+        self.assertTrue(np.isfinite(inside).all())
+        # Fuori dal riquadro del sorgente: le tile dei livelli bassi ci sono, i dati no.
+        self.assertTrue(np.isnan(sampler.heights([7.80], [45.05])).all(), "fuori dal DEM")
+        # I post che valgono il geoide sono riempimenti (qui il "mare" del
+        # terreno sintetico): non sono terreno.
+        self.assertTrue(np.isnan(sampler.heights([7.66], [SEA_NORTH - 0.005])).all(), "post riempiti")
+
+    def test_profile_ignores_holes_and_unknown_stretches(self):
+        wb = self.waterbuild
+        raw = np.linspace(260.0, 250.0, 200)
+        raw[:40] = np.nan                       # fuori dal DEM
+        raw[40] = 194.6                         # il post di bordo, mescolato col riempimento
+        raw[100:112] = 40.0                     # un buco lungo del DEM (240 m)
+        heights = wb._smooth_heights(raw)
+        profile = wb._profile(heights)
+        self.assertGreater(float(profile.min()), 249.0, f"niente buchi: minimo {profile.min():.1f}")
+        self.assertTrue((np.diff(profile) <= 1e-9).all(), "non risale mai")
+        self.assertAlmostEqual(float(profile[0]), float(profile[45]), delta=0.5,
+                               msg="il tratto scoperto prende la quota del tratto valido vicino")
+
+    def test_stitching_carries_the_level_downstream(self):
+        wb = self.waterbuild
+        def line(lon0, lon1, heights):
+            dense = np.column_stack([np.linspace(lon0, lon1, len(heights)), np.full(len(heights), 45.0)])
+            return wb.RiverLine(waterclasses.KIND_RIVER, 20.0, dense, np.asarray(heights, dtype=float))
+        upstream = line(7.0, 7.1, np.linspace(250.0, 240.0, 50))
+        downstream = line(7.1, 7.2, np.full(50, 242.0))     # il DEM qui e' 2 m piu' alto
+        stray = line(7.2, 7.3, np.full(50, 260.0))          # a monte "finisce" a 242: si', ma il cap e' 5 m
+        profiles = wb.stitch_river_profiles([downstream, upstream, stray])
+        self.assertAlmostEqual(float(profiles[0][0]), 240.0, delta=1e-6, msg="la way a valle non risale")
+        self.assertAlmostEqual(float(profiles[2][0]), 255.0, delta=1e-6,
+                               msg="ma una cucitura non abbassa di piu' di 5 m")
 
 
 @unittest.skipUnless(HAS_GDAL, "serve GDAL con i driver OSM e GPKG e GEOS")
@@ -316,7 +382,9 @@ class BuildOnSyntheticData(unittest.TestCase):
     def test_manifest_counts_the_bodies(self):
         bodies = self.manifest["bodies"]
         self.assertEqual(bodies.get("lago"), 1, bodies)       # la piscina no
-        self.assertEqual(bodies.get("fiume"), 1, bodies)      # l'intermittente no
+        # Il fiume largo 60 m, l'area del fiume e le due way della sua linea;
+        # l'intermittente no.
+        self.assertEqual(bodies.get("fiume"), 4, bodies)
         self.assertEqual(bodies.get("mare"), 1, bodies)
         self.assertEqual(self.manifest["datasetKind"], "water")
 
@@ -359,10 +427,65 @@ class BuildOnSyntheticData(unittest.TestCase):
             self.assertLess(abs(int(tile.flow_v[row, column])), 10)
             prow, pcol = self.post_of(tile, lon, RIVER_LAT)
             surfaces.append(float(tile.surface[prow, pcol]))
+            self.assertLess(float(tile.bed[prow, pcol]), surfaces[-1], "al livello 14 il fiume e' scavato")
         self.assertTrue(surfaces[0] > surfaces[1] > surfaces[2], f"il fiume scende: {surfaces}")
         # Il profilo segue il letto del fiume (terreno - 1,5 m) a meno di mezzo metro.
         expected = float(terrain_height(np.array(7.66), np.array(RIVER_LAT)))
         self.assertAlmostEqual(surfaces[1], expected, delta=0.6)
+
+    def test_narrow_river_is_draped_not_carved(self):
+        # Al livello 13 i 60 m del fiume sono meno di quattro post (76 m): niente
+        # scavo e niente superficie (la superficie la appoggia il runtime), ma la
+        # riva c'e' nel raster.
+        tile = self.tile_at(13, 7.66, RIVER_LAT)
+        prow, pcol = self.post_of(tile, 7.66, RIVER_LAT)
+        self.assertTrue(np.isnan(tile.surface[prow, pcol]) and np.isnan(tile.bed[prow, pcol]))
+        row, column = self.pixel_of(tile, 7.66, RIVER_LAT)
+        self.assertGreater(int(tile.sdf[row, column]), waterformat.SDF_ZERO, "nel raster e' acqua")
+
+    def test_river_area_takes_the_level_of_its_axis_everywhere(self):
+        # Il fiume ad area (come il Po a Torino): la quota viene dalla linea, in
+        # tutta la larghezza; il centro (dove passa la linea, larga 12 m per
+        # OSM) e' scavato come il resto, non una striscia "troppo stretta".
+        w, s, e, n = AREA_RIVER
+        lon = 0.5 * (w + e) + 0.01
+        tile = self.tile_at(14, lon, 0.5 * (s + n))
+        bounds = tiling.tile_bounds(14, tile.x, tile.y)
+        span = tiling.tile_span_deg(14)
+        column = int(round((lon - bounds.west) / span * tiling.TILE_CELLS))
+        rows = [r for r in range(tiling.TILE_POSTS)
+                if s + 0.0002 < bounds.north - r * span / tiling.TILE_CELLS < n - 0.0002]
+        self.assertGreaterEqual(len(rows), 5, "il fiume attraversa almeno cinque post")
+        levels = tile.surface[rows, column]
+        beds = tile.bed[rows, column]
+        self.assertTrue(np.isfinite(levels).all() and np.isfinite(beds).all(), (levels, beds))
+        self.assertLess(float(np.ptp(levels)), 0.15, f"piana di traverso: {levels}")
+        self.assertTrue((beds < levels - 0.2).all(), "scavata in tutta la larghezza, centro compreso")
+        expected = float(terrain_height(np.array(lon), np.array(0.5 * (s + n))))
+        self.assertAlmostEqual(float(levels.mean()), expected, delta=0.6)
+
+    def test_shore_is_a_continuous_v(self):
+        # Fuori dalla riva del lago, per qualche post, il "fondale" e' un tetto
+        # per il terreno: sale dalla superficie con la pendenza della sponda.
+        # Dentro scende con la stessa. Cosi' la mesh a passo 2 incrocia
+        # l'acqua sulla riva.
+        lat = 0.5 * (LAKE_POLYGON[1] + LAKE_POLYGON[3])
+        tile = self.tile_at(14, LAKE_POLYGON[0], lat)
+        row, column = self.post_of(tile, LAKE_POLYGON[0], lat)
+        level = float(tile.surface[row, column + 5])
+        # Due post per lato (il terzo, dentro, e' gia' oltre SHORE_REACH_POSTS).
+        outside = tile.bed[row, column - 2: column] - level        # a ovest della riva
+        inside = level - tile.bed[row, column + 1: column + 3]     # a est
+        self.assertTrue(np.isfinite(outside).all() and (outside > 0).all(), outside)
+        self.assertTrue((np.diff(outside[::-1]) > 0).all(), f"sale allontanandosi: {outside}")
+        # Nessun salto sulla riva: i due post ai lati del post piu' vicino alla
+        # riva ne distano, insieme, due passi, con la stessa pendenza...
+        step = float(np.diff(inside)[0])
+        self.assertAlmostEqual(float(inside[0] + outside[-1]), 2.0 * step, delta=0.5)
+        # ...e fuori, oltre il primo post e mezzo, il tetto sale piu' ripido
+        # (waterclasses.SHORE_FLAT_POSTS): un argine alto resta alto.
+        self.assertGreater(float(np.diff(outside[::-1])[0]), step - 0.3)
+        self.assertTrue(np.isnan(tile.bed[row, column - 8]), "oltre la sponda il terreno non si tocca")
 
     def test_sea_at_geoid_and_deeper_offshore(self):
         near = self.tile_at(14, 7.65, SEA_NORTH - 0.001)

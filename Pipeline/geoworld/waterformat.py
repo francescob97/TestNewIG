@@ -341,11 +341,14 @@ def fixture_tile() -> WaterTile:
     """
     Mezza tile di lago a ovest (quota 230,4 m), terra a est; un fiume che
     scorre verso est lungo la riga 64. Valori facili da controllare dal C++.
+    La superficie va 6 post oltre la riva (post 64), come la scrive la
+    pipeline (SURFACE_FILL_POSTS): le celle a cavallo della riva la vogliono
+    in tutti gli angoli.
     """
     level, x, y = FIXTURE_KEY
     surface = np.full((POSTS, POSTS), np.nan, dtype=np.float32)
     bed = np.full((POSTS, POSTS), np.nan, dtype=np.float32)
-    surface[:, :65] = 230.4
+    surface[:, :71] = 230.4
     bed[:, :64] = 230.4 - (0.5 + 0.12 * np.arange(64, 0, -1, dtype=np.float32) * 9.5)
     columns = np.arange(RASTER, dtype=np.float32)
     distance = np.tile(127.5 - columns, (RASTER, 1))          # riva fra le colonne 127 e 128

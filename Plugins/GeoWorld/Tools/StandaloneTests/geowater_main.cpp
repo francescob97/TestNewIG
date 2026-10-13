@@ -256,12 +256,38 @@ static void TestMesh(const FWaterTile& Fixture)
 	}
 	Check(Up == 0 && Down > 0, "stesso verso delle facce del terreno", Fmt("%.0f su, %.0f giu'", Up, Down));
 
-	// Una tile di terra (nessuna superficie): niente mesh.
-	FWaterTile Dry = Fixture;
-	std::fill(Dry.Surface.begin(), Dry.Surface.end(), std::nanf(""));
+	// Acqua troppo stretta per scavarla (la pipeline non scrive ne' superficie
+	// ne' fondale): la superficie si APPOGGIA sul terreno, 0,3 m sopra, con
+	// gli stessi vertici. Qui il terreno e' piano a 240 m e non scavato.
+	FWaterTile Narrow = Fixture;
+	std::fill(Narrow.Surface.begin(), Narrow.Surface.end(), std::nanf(""));
+	std::fill(Narrow.Bed.begin(), Narrow.Bed.end(), std::nanf(""));
+	Tiles::FHeightTile Plain = FlatTerrain(FixtureKey, 240.0f);
+	const FWaterView NarrowView = FWaterView::Make(Narrow, FixtureKey);
+	CarveHeights(Plain, NarrowView);
+	Mesh::FTileMeshData Draped;
+	BuildWaterMesh(Plain, NarrowView, Parameters, Draped);
+	const Core::FEcef DrapedOrigin = Core::GeodeticToEcef(Draped.Origin, Core::WGS84);
+	const Core::FMat3 DrapedToEcef = Mesh::Detail::MakeLocalNeu(Draped.Origin).Transposed();
+	double DrapedLow = 1e9, DrapedHigh = -1e9;
+	for (size_t Vertex = 0; Vertex < Draped.InteriorVertexCount; ++Vertex)
+	{
+		const Core::FEcef Local{ Draped.Positions[Vertex * 3], Draped.Positions[Vertex * 3 + 1], Draped.Positions[Vertex * 3 + 2] };
+		const double Height = Core::EcefToGeodetic(DrapedToEcef.Transform(Local) + DrapedOrigin, Core::WGS84).HeightM;
+		if (Height < 239.0) { continue; }    // le gonne
+		DrapedLow = std::min(DrapedLow, Height);
+		DrapedHigh = std::max(DrapedHigh, Height);
+	}
+	Check(Draped.TriangleCount > 1000 && std::fabs(DrapedLow - 240.3) < 0.01 && std::fabs(DrapedHigh - 240.3) < 0.01,
+		"acqua stretta, senza superficie nel file: appoggiata sul terreno, 0,3 m sopra",
+		Fmt("%.0f triangoli, da %.3f a %.3f m", Draped.TriangleCount, DrapedLow, DrapedHigh));
+
+	// Una tile di sola terra (l'acqua lontana piu' dei pixel di riva): niente mesh.
+	FWaterTile Dry = Narrow;
+	std::fill(Dry.Sdf.begin(), Dry.Sdf.end(), static_cast<uint8_t>(0));
 	Mesh::FTileMeshData None;
-	BuildWaterMesh(Terrain, FWaterView::Make(Dry, FixtureKey), Parameters, None);
-	Check(None.TriangleCount == 0, "senza superficie, niente mesh");
+	BuildWaterMesh(Plain, FWaterView::Make(Dry, FixtureKey), Parameters, None);
+	Check(None.TriangleCount == 0, "lontano dall'acqua, niente mesh");
 }
 
 static void TestRaster(const FWaterTile& Fixture)
@@ -446,6 +472,158 @@ static void TestTextures()
 		Fmt("media %.2f", Mean));
 }
 
+// ===========================================================================
+//  Il Po a Torino: dati veri (TestData/po_torino_*), il codice del runtime.
+// ===========================================================================
+
+static bool ReadFile(const std::string& Path, std::vector<uint8_t>& Out)
+{
+	std::ifstream Stream(Path, std::ios::binary);
+	if (!Stream) { return false; }
+	Out.assign(std::istreambuf_iterator<char>(Stream), std::istreambuf_iterator<char>());
+	return true;
+}
+
+/**
+ * Disegna una mesh nello spazio della tile (U, V in [0,1], Size x Size pixel):
+ * per ogni pixel la quota (sull'ellissoide) del triangolo che lo copre, NaN
+ * dove non c'e' niente. Solo i triangoli "di sopra" (non le gonne).
+ */
+static std::vector<double> RasterizeHeights(const Mesh::FTileMeshData& Mesh, int Size)
+{
+	std::vector<double> Out(static_cast<size_t>(Size) * Size, std::nan(""));
+	const Core::FEcef Origin = Core::GeodeticToEcef(Mesh.Origin, Core::WGS84);
+	const Core::FMat3 ToEcef = Mesh::Detail::MakeLocalNeu(Mesh.Origin).Transposed();
+	std::vector<double> Heights(Mesh.Positions.size() / 3);
+	for (size_t Vertex = 0; Vertex < Heights.size(); ++Vertex)
+	{
+		const Core::FEcef Local{ Mesh.Positions[Vertex * 3], Mesh.Positions[Vertex * 3 + 1], Mesh.Positions[Vertex * 3 + 2] };
+		Heights[Vertex] = Core::EcefToGeodetic(ToEcef.Transform(Local) + Origin, Core::WGS84).HeightM;
+	}
+	for (size_t Triangle = 0; Triangle < Mesh.Indices.size() / 3; ++Triangle)
+	{
+		const uint32_t A = Mesh.Indices[Triangle * 3], B = Mesh.Indices[Triangle * 3 + 1], C = Mesh.Indices[Triangle * 3 + 2];
+		if (A >= Mesh.InteriorVertexCount || B >= Mesh.InteriorVertexCount || C >= Mesh.InteriorVertexCount) { continue; }
+		const double Ax = Mesh.UVs[A * 2] * Size, Ay = Mesh.UVs[A * 2 + 1] * Size;
+		const double Bx = Mesh.UVs[B * 2] * Size, By = Mesh.UVs[B * 2 + 1] * Size;
+		const double Cx = Mesh.UVs[C * 2] * Size, Cy = Mesh.UVs[C * 2 + 1] * Size;
+		const double Area = (Bx - Ax) * (Cy - Ay) - (By - Ay) * (Cx - Ax);
+		if (std::fabs(Area) < 1e-12) { continue; }
+		const int X0 = std::max(0, static_cast<int>(std::floor(std::min({ Ax, Bx, Cx }))));
+		const int X1 = std::min(Size - 1, static_cast<int>(std::ceil(std::max({ Ax, Bx, Cx }))));
+		const int Y0 = std::max(0, static_cast<int>(std::floor(std::min({ Ay, By, Cy }))));
+		const int Y1 = std::min(Size - 1, static_cast<int>(std::ceil(std::max({ Ay, By, Cy }))));
+		for (int Y = Y0; Y <= Y1; ++Y)
+		{
+			for (int X = X0; X <= X1; ++X)
+			{
+				const double Px = X + 0.5, Py = Y + 0.5;
+				const double W0 = ((Bx - Px) * (Cy - Py) - (By - Py) * (Cx - Px)) / Area;
+				const double W1 = ((Cx - Px) * (Ay - Py) - (Cy - Py) * (Ax - Px)) / Area;
+				const double W2 = 1.0 - W0 - W1;
+				if (W0 < -1e-9 || W1 < -1e-9 || W2 < -1e-9) { continue; }
+				Out[static_cast<size_t>(Y) * Size + X] = W0 * Heights[A] + W1 * Heights[B] + W2 * Heights[C];
+			}
+		}
+	}
+	return Out;
+}
+
+/** La quota di acqua visibile: pixel con acqua (distanza dalla riva > 0) e superficie sopra il terreno. */
+static double VisibleWater(const Tiles::FHeightTile& Terrain, const FWaterTile& Water, const FTileKey& Key, int Step,
+                           double& OutDeepInsideHidden)
+{
+	const FWaterView View = FWaterView::Make(Water, Key);
+	Tiles::FHeightTile Carved = Terrain;
+	CarveHeights(Carved, View);
+	Mesh::FTileMeshParameters TerrainParameters;
+	TerrainParameters.Step = Step;
+	Mesh::FTileMeshData TerrainMesh, WaterMesh;
+	Mesh::BuildTileMesh(Carved, TerrainParameters, TerrainMesh);
+	FWaterMeshParameters WaterParameters;
+	WaterParameters.Step = Step;
+	BuildWaterMesh(Carved, View, WaterParameters, WaterMesh);
+
+	constexpr int Size = 512;
+	const std::vector<double> Ground = RasterizeHeights(TerrainMesh, Size);
+	const std::vector<double> Surface = RasterizeHeights(WaterMesh, Size);
+	int Total = 0, Visible = 0, Deep = 0, DeepHidden = 0;
+	for (int Y = 0; Y < Size; ++Y)
+	{
+		for (int X = 0; X < Size; ++X)
+		{
+			const double Sdf = View.SdfPixelsAt((X + 0.5) / Size, (Y + 0.5) / Size);
+			if (Sdf <= 0.0) { continue; }
+			const size_t Index = static_cast<size_t>(Y) * Size + X;
+			++Total;
+			const bool bShown = std::isfinite(Surface[Index]) && Surface[Index] > Ground[Index];
+			Visible += bShown ? 1 : 0;
+			if (Sdf > 4.0) { ++Deep; DeepHidden += bShown ? 0 : 1; }
+		}
+	}
+	OutDeepInsideHidden = Deep > 0 ? static_cast<double>(DeepHidden) / Deep : 0.0;
+	return Total > 0 ? static_cast<double>(Visible) / Total : 0.0;
+}
+
+static void TestRealPo(const std::string& Directory)
+{
+	Section("8. Il Po a Torino (dati veri): quanta acqua copre il terreno");
+
+	struct FCase { FTileKey Key; const char* What; };
+	const FCase Cases[2] = {
+		{ FTileKey{ 13, 8541, 2045 }, "livello 13, il Po scavato" },
+		{ FTileKey{ 12, 4270, 1022 }, "livello 12, il Po appoggiato (troppo stretto per la mesh)" },
+	};
+	for (const FCase& Case : Cases)
+	{
+		const std::string Stem = Directory + "/po_torino_" + std::to_string(Case.Key.Level) + "_"
+		                       + std::to_string(Case.Key.X) + "_" + std::to_string(Case.Key.Y);
+		std::vector<uint8_t> TerrainBytes, WaterBytes;
+		Tiles::FHeightTile Terrain;
+		FWaterTile Water;
+		std::string Error;
+		if (!ReadFile(Stem + ".ght", TerrainBytes) || !ReadFile(Stem + ".gwa", WaterBytes)
+			|| !Tiles::DecodeTile(TerrainBytes.data(), TerrainBytes.size(), Case.Key, Terrain, Error)
+			|| !LoadWaterTile(WaterBytes, Case.Key, Water, Error))
+		{
+			++GSkipped;
+			std::printf("  [skip] %s: dati non trovati o illeggibili (%s)\n", Case.What, Error.c_str());
+			continue;
+		}
+		// Il "buco" della prima prova: la superficie centinaia di metri sotto
+		// il fiume del DEM (che sull'acqua ha la quota dell'acqua). Dentro il
+		// fiume, la mediana della differenza deve stare entro qualche metro.
+		const FWaterView View = FWaterView::Make(Water, Case.Key);
+		std::vector<double> Gaps;
+		for (int32_t J = 0; J < Tiles::TilePosts; ++J)
+		{
+			for (int32_t I = 0; I < Tiles::TilePosts; ++I)
+			{
+				const float Level = View.SurfaceAtPost(I, J);
+				const double Sdf = View.SdfPixelsAt(static_cast<double>(I) / Tiles::TileCells, static_cast<double>(J) / Tiles::TileCells);
+				if (std::isfinite(Level) && Sdf > 4.0) { Gaps.push_back(Terrain.GetHeight(I, J) - Level); }
+			}
+		}
+		if (!Gaps.empty())
+		{
+			const double Holes = static_cast<double>(std::count_if(Gaps.begin(), Gaps.end(), [](double Gap) { return Gap > 10.0; }));
+			std::nth_element(Gaps.begin(), Gaps.begin() + Gaps.size() / 2, Gaps.end());
+			const double Median = Gaps[Gaps.size() / 2];
+			Check(std::fabs(Median) < 3.0 && Holes == 0.0,
+				std::string(Case.What) + ": la superficie sta alla quota del fiume nel DEM, nessun buco",
+				Fmt("DEM - superficie: mediana %.2f m, %.0f post oltre 10 m sotto il DEM", Median, Holes));
+		}
+
+		double DeepHidden = 0.0;
+		const double Step2 = VisibleWater(Terrain, Water, Case.Key, 2, DeepHidden);
+		Check(Step2 > 0.97 && DeepHidden == 0.0, std::string(Case.What) + ", passo 2: l'acqua si vede, il terreno non la buca",
+			Fmt("%.1f%% visibile, lontano dalla riva coperto %.2f%%", 100.0 * Step2, 100.0 * DeepHidden));
+		const double Step1 = VisibleWater(Terrain, Water, Case.Key, 1, DeepHidden);
+		Check(Step1 > 0.99 && DeepHidden == 0.0, std::string(Case.What) + ", passo 1",
+			Fmt("%.1f%% visibile, lontano dalla riva coperto %.2f%%", 100.0 * Step1, 100.0 * DeepHidden));
+	}
+}
+
 int main(int ArgCount, char** Arguments)
 {
 	std::printf("=====================================================\n");
@@ -464,6 +642,10 @@ int main(int ArgCount, char** Arguments)
 	}
 	TestWaves();
 	TestTextures();
+	{
+		const size_t Slash = Path.find_last_of("/\\");
+		TestRealPo(Slash == std::string::npos ? std::string(".") : Path.substr(0, Slash));
+	}
 
 	std::printf("\n=====================================================\n");
 	std::printf(" RISULTATO: %d passati, %d falliti, %d saltati\n", GPassed, GFailed, GSkipped);

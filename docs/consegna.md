@@ -19,7 +19,7 @@ Ultimo aggiornamento: 2026-10-03. Branch: `claude/charming-goodall-xd2r3g`.
 | 8 | **Strade, ferrovie, piste** da OpenStreetMap: dipinte sul terreno, **3D da vicino** | dipinte provate dall'utente (si vedono); strade 3D provate ("manca la tridimensionalita'"), **rifatte: carreggiata in piano, scarpate, marciapiedi, guardrail, ponti con parapetti e pile — da compilare e provare** — `docs/fase8-design.md`, `docs/fase8-verifica.md`, `docs/strade-3d.md` |
 | dopo | **Flash quando la geometria si affina**: le figlie sostituivano il padre in un frame | **geomorphing e dissolvenza, da compilare e provare** — `docs/strade-3d.md`, sezione 2 |
 | dopo | **Flash del rebase**: l'origine del mondo stava alla quota della camera, e a ogni rebase cielo e nebbia saltavano | **corretto, da riprovare** — `docs/strade-3d.md`, sezione 2 |
-| 9 | **Acqua**: mare, laghi, fiumi scavati nel terreno, Single Layer Water, onde di Gerstner dal vento (meteo minimo: vento medio + raffiche); **stampe della posizione** a destra (lat, lon, quota, s.l.m., dal suolo, rotta) | **codice completo, da compilare e provare** — `docs/fase9-design.md`, `docs/fase9-verifica.md`, `docs/manuale/13-acqua.md` |
+| 9 | **Acqua**: mare, laghi, fiumi scavati nel terreno, Single Layer Water, onde di Gerstner dal vento (meteo minimo: vento medio + raffiche); **stampe della posizione** a destra (lat, lon, quota, s.l.m., dal suolo, rotta) | provata: il fiume era una fossa "a vertici alti e bassi"; **corretto** (quote finte fuori dal DEM, profili cuciti, sponda a V, acqua stretta appoggiata), **da riprovare** — `docs/fase9-design.md` (sezione 12), `docs/fase9-verifica.md` (sezione 0), `docs/manuale/13-acqua.md` |
 | 10–12 | Edifici e monumenti; vegetazione; atmosfera, cielo, nuvole e luce (allargando il meteo nato con la Fase 9) | **da fare** — programma in `docs/fase8-design.md`, sezione 0 |
 | dopo | **Residenza**: selezione indipendente dalla vista, precarico da posizione e velocità, mesh nascoste | **codice completo, mai compilato in UE** — `docs/residenza-design.md` |
 | dopo | **Terza prova**: niente flash grigi (tile mostrate solo vestite), isteresi sul LOD, nuvole tolte con la maschera SCL | **codice completo, da riprovare** — `docs/prova-torino-3.md` |
@@ -53,6 +53,7 @@ gia' incontrati e corretti, per riconoscerli se tornano:
 | `C2664: ... cannot convert argument 1 from 'const wchar_t *' to '...TCheckedFormatStringPrivate...'` su un `FString::Printf` | da UE 5.5 il formato di `Printf` si controlla in compilazione e deve essere un letterale `TEXT("...")`: niente `bCond ? TEXT("a") : TEXT("b")` come formato. Successo con `M_GeoRoad`. Lo intercetta la regola 6 di `CheckSourceDiscipline.sh` |
 | `LNK2005: ... already defined` su una funzione dello strato puro | funzione DEFINITA in un header senza `inline`: ogni `.cpp` che lo include ne fa una copia. Mai successo, ma `Detail::PriorityFromError` era cosi' fino alla residenza. Lo intercetta la regola 3 di `Tools/CheckModuleExports.py` |
 | `C4456: declaration of 'X' hides previous local declaration` dentro una lambda | una variabile della lambda con lo stesso nome di una della funzione che la contiene (anche se la lambda non la cattura). Mai arrivato su Windows: trovato rileggendo le strade 3D della Fase 9 (`Heights` era sia il subsystem delle quote sia le quote scavate). **Nessuno script lo intercetta ancora**: rileggere i nomi nelle lambda dei lavori |
+| Un fiume in una fossa di centinaia di metri, "a vertici alti e bassi" | non un errore di compilazione: la pipeline dell'acqua leggeva come terreno i post che la pipeline del terreno riempie col livello del mare (fuori dal DEM, ai bordi). Corretto in `TerrainSampler.heights`. La lezione: un "non lo so" non deve mai diventare un numero. Lo intercetta `geowater_tests`, sezione 8, sul Po vero |
 
 Dopo aver aggiunto file o cartelle: tasto destro sul `.uproject` ->
 **Generate Visual Studio project files**. IntelliSense non li vede finche' non
@@ -70,7 +71,7 @@ python run.py check-env                              :: SEMPRE per primo
 python run.py fetch --area test -o dati/copernicus   :: DEM libero, 19 MB
 python run.py build -i "dati/copernicus/*.tif" -o dataset/test
 python run.py verify -o dataset/test
-python -m unittest discover -s tests                 :: 173 test
+python -m unittest discover -s tests                 :: 179 test
 
 :: Fase 8: strade su Torino (dettagli in docs/fase8-verifica.md)
 python run.py fetch-osm --area torino -o dati/osm
@@ -98,7 +99,7 @@ build\Debug\geoquadtree_tests.exe                   :: 84 test
 build\Debug\geomesh_tests.exe                       :: 41 test
 build\Debug\geoimagery_tests.exe                    :: 52 test
 build\Debug\georoads_tests.exe                      :: 80 test (dalla radice del repository)
-build\Debug\geowater_tests.exe Plugins\GeoWorld\Source\GeoTiles\TestData\water_fixture.gwa   :: 54 test
+build\Debug\geowater_tests.exe Plugins\GeoWorld\Source\GeoTiles\TestData\water_fixture.gwa   :: 60 test (anche il Po vero)
 Plugins\GeoWorld\Tools\CheckSourceDiscipline.sh      :: serve bash (Git Bash)
 ```
 

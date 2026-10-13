@@ -6,6 +6,10 @@
 
 Termini in ordine alfabetico. Tra parentesi, il capitolo dove sono spiegati.
 
+**Acqua appoggiata** — un'acqua troppo stretta per la mesh del terreno a quel livello (meno di 4 post): non si scava, e la sua superficie sta sul terreno, 0,3 m sopra, con gli stessi vertici. La forma la disegna la maschera della riva. (13)
+
+**Acqua risolta** — un'acqua larga almeno 4 post al livello della tile: si scava, con la sponda a V, e la superficie è piana. (13)
+
 **Alfa premoltiplicato** — un'immagine trasparente il cui colore è già moltiplicato per la
 copertura. Le medie fra pixel (mipmap, filtro bilineare) vengono giuste; in alfa normale i
 bordi si scurirebbero. Le strade sono così. (12)
@@ -179,6 +183,8 @@ sua coordinata. (7)
 
 **Post** — un punto di campionamento di una griglia di quote. (3)
 
+**Post riempito** — un post del terreno dove il sorgente non aveva dati, scritto dalla pipeline con il livello del mare. Per l'acqua non è terreno: si riconosce perché vale esattamente il geoide. (13)
+
 **Previsione del moto** — stima della velocità della camera dalle sue posizioni (`FMotionPredictor`) e proiezione in avanti su una retta. (11)
 
 **Primitiva** (`UPrimitiveComponent`) — un componente che si disegna. (1)
@@ -217,6 +223,8 @@ quote) o un'area (i pixel). Decide se il bordo è condiviso. (3, 7)
 **Single Layer Water** — il modello d'ombreggiatura di Unreal per l'acqua: il colore viene da assorbimento e diffusione nello spessore d'acqua letto dal depth buffer, non da un BaseColor. (13)
 
 **Spazio scalato** — le coordinate ECEF divise per i semiassi (x/a, y/a, z/b): l'ellissoide diventa la sfera unitaria e il test d'orizzonte diventa esatto. (5, 11)
+
+**Sponda a V** — la forma dello scavo attorno alla riva: la stessa funzione della distanza fa la profondità dentro l'acqua e il tetto del terreno fuori, zero sulla riva. Così i triangoli della mesh incrociano l'acqua proprio sulla riva. (13)
 
 **sRGB** — lo spazio di colore delle immagini normali. Una texture da JPEG va
 marcata sRGB. (7)

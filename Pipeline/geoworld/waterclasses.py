@@ -27,7 +27,7 @@ import numpy as np
 
 #: Versione delle regole. Entra nell'impronta della pipeline: se cambia, le
 #: tile si rifanno.
-WATER_RULES_VERSION = 1
+WATER_RULES_VERSION = 2
 
 KIND_SEA = 1
 KIND_LAGOON = 2
@@ -190,6 +190,38 @@ _RAMP = {KIND_SEA: (0.5, 0.05), KIND_LAGOON: (0.3, 0.05), KIND_LAKE: (0.5, 0.12)
 
 def ramp(kind: int) -> tuple[float, float]:
     return _RAMP[kind]
+
+
+#: La pendenza della SPONDA, ai due lati della riva (vedi waterbuild.cut_tile):
+#: fuori il terreno vicino all'acqua non sale piu' ripido di cosi', dentro il
+#: fondale scende almeno cosi' vicino alla riva. Stessa pendenza dai due lati:
+#: allora i triangoli del terreno incrociano l'acqua proprio sulla riva, a
+#: qualunque risoluzione della mesh. Spiagge dolci per il mare, argini per i
+#: fiumi.
+_SHORE_SLOPE = {KIND_SEA: 0.15, KIND_LAGOON: 0.15, KIND_LAKE: 0.3, KIND_RIVER: 0.5, KIND_CANAL: 0.5}
+
+
+def shore_slope(kind: int) -> float:
+    return _SHORE_SLOPE[kind]
+
+
+#: Un'acqua si SCAVA a un livello solo se e' larga almeno cosi' tanti post:
+#: piu' stretta, la mesh del terreno (a passo 2, una cella ogni due post) non
+#: ha vertici dentro e lo scavo diventa un pettine di buchi. Allora niente
+#: scavo, e l'acqua si appoggia sul terreno (WaterMesh.h).
+RESOLVE_POSTS = 4.0
+
+#: Fin dove, fuori dalla riva, la sponda abbassa il terreno (post): una cella
+#: della mesh a passo 2 con un po' di margine.
+SHORE_BAND_POSTS = 4.0
+
+#: Fino a quanti post dalla riva il tetto della sponda segue la "V"; oltre sale
+#: a 45° (i vertici piu' lontani non toccano le celle a cavallo della riva).
+SHORE_FLAT_POSTS = 1.5
+
+#: Fin dove, dentro, la sponda puo' fare il fondale piu' ripido della rampa
+#: (post): piu' in la' basta la rampa, e il mare non diventa un pozzo.
+SHORE_REACH_POSTS = 3.0
 
 
 def depth_at(distance_m, shore_depth, slope, deepest):

@@ -65,6 +65,26 @@ RASTER_MARGIN = 16
 #: Passo di campionamento del terreno lungo i fiumi, in metri.
 RIVER_SAMPLE_M = 20.0
 
+#: La quota di un corpo che non ce l'ha (un'area fluviale fuori dal terreno),
+#: nei layer da rasterizzare: torna NaN dopo (_burn_attribute).
+NO_LEVEL = -1.0e6
+
+#: Un post del terreno che vale il geoide a meno di cosi' e' un riempimento
+#: (tilecut.py scrive il livello del mare dove il sorgente non ha dato).
+FILLED_POST_TOLERANCE_M = 0.05
+
+#: Metri per grado di latitudine (lo stesso numero di WaterMetresPerPixel in C++):
+#: il passo NOMINALE dei post di un livello, uguale in tutte le sue tile.
+NOMINAL_METRES_PER_DEGREE = 111132.0
+
+#: Quanti post attorno all'acqua "risolta" ricevono la quota della superficie:
+#: le celle della mesh a cavallo della riva ne hanno bisogno in tutti e
+#: quattro gli angoli (passo 2, piu' la fascia della sponda).
+SURFACE_FILL_POSTS = 6
+
+#: Fin dove la quota dell'asse di un fiume riempie un'area fluviale, in metri.
+RIVER_AREA_FILL_M = 1500.0
+
 #: Di quanto si allarga il ritaglio del mare oltre il bbox (~10 km).
 SEA_CLIP_MARGIN_DEG = 0.1
 
@@ -104,6 +124,8 @@ class TerrainSampler:
                      bbox.get("east", 180.0), bbox.get("north", 90.0))
         self.index = {level: {(e.x, e.y) for e in terrain_manifest.read_level_index(root, level)}
                       for level in self.levels}
+        #: Il geoide (GeoidSampler), per riconoscere i post riempiti col livello del mare.
+        self.sea_level = None
         self._cache: OrderedDict = OrderedDict()
         self._cache_tiles = cache_tiles
 
@@ -123,35 +145,67 @@ class TerrainSampler:
             self._cache.popitem(last=False)
         return heights
 
+    def covers(self, lons, lats) -> np.ndarray:
+        """Vero dove il terreno ha dati veri: dentro il riquadro del sorgente."""
+        west, south, east, north = self.bbox
+        lons = np.asarray(lons, dtype=np.float64).ravel()
+        lats = np.asarray(lats, dtype=np.float64).ravel()
+        return (lons >= west) & (lons <= east) & (lats >= south) & (lats <= north)
+
     def heights(self, lons, lats) -> np.ndarray:
-        """Quote ellissoidiche, NaN dove il terreno non c'e'."""
+        """
+        Quote ellissoidiche, NaN dove il terreno non c'e'.
+
+        "Non c'e'" vuol dire tre cose, e la prima versione non ne vedeva
+        nessuna. Il Po, che a Torino entra da sud fuori dal DEM, prendeva il
+        "minimo progressivo" di quote finte, e tutto il fiume veniva scavato di
+        200 m:
+
+          - FUORI DAL RIQUADRO del sorgente;
+          - dove il livello NATIVO non ha la tile: i livelli bassi coprono ben
+            oltre il DEM, e le loro tile mescolano dati veri e riempimenti;
+          - sui post RIEMPITI col livello del mare (tilecut.py li scrive cosi'
+            dove il sorgente non ha dato: ai bordi, oltre un confine, in un
+            buco). Sono un numero valido e sbagliato di centinaia di metri; si
+            riconoscono perche' valgono esattamente il geoide, e si scartano
+            se `sea_level` (il geoide) e' dato. L'interpolazione usa solo i
+            post buoni attorno al punto.
+        """
         lons = np.asarray(lons, dtype=np.float64).ravel()
         lats = np.asarray(lats, dtype=np.float64).ravel()
         result = np.full(lons.shape, np.nan)
-        remaining = np.ones(lons.shape, dtype=bool)
+        covered = self.covers(lons, lats)
+        if not covered.any():
+            return result
         cells = tiling.TILE_CELLS
-        for level in reversed(self.levels):
-            if not remaining.any():
-                break
-            span = tiling.tile_span_deg(level)
-            tx = np.floor((lons + 180.0) / span).astype(np.int64)
-            ty = np.floor((90.0 - lats) / span).astype(np.int64)
-            for x, y in set(zip(tx[remaining].tolist(), ty[remaining].tolist())):
-                heights = self._tile(level, x, y)
-                if heights is None:
-                    continue
-                pick = remaining & (tx == x) & (ty == y)
-                west = -180.0 + x * span
-                north = 90.0 - y * span
-                fx = np.clip((lons[pick] - west) / span * cells, 0.0, cells)
-                fy = np.clip((north - lats[pick]) / span * cells, 0.0, cells)
-                i0 = np.minimum(np.floor(fx).astype(np.intp), cells - 1)
-                j0 = np.minimum(np.floor(fy).astype(np.intp), cells - 1)
-                ax, ay = fx - i0, fy - j0
-                h = (heights[j0, i0] * (1 - ax) * (1 - ay) + heights[j0, i0 + 1] * ax * (1 - ay)
-                     + heights[j0 + 1, i0] * (1 - ax) * ay + heights[j0 + 1, i0 + 1] * ax * ay)
-                result[pick] = h
-                remaining &= ~pick
+        level = self.levels[-1]
+        span = tiling.tile_span_deg(level)
+        tx = np.floor((lons + 180.0) / span).astype(np.int64)
+        ty = np.floor((90.0 - lats) / span).astype(np.int64)
+        for x, y in set(zip(tx[covered].tolist(), ty[covered].tolist())):
+            heights = self._tile(level, x, y)
+            if heights is None:
+                continue
+            pick = covered & (tx == x) & (ty == y)
+            west = -180.0 + x * span
+            north = 90.0 - y * span
+            fx = np.clip((lons[pick] - west) / span * cells, 0.0, cells)
+            fy = np.clip((north - lats[pick]) / span * cells, 0.0, cells)
+            i0 = np.minimum(np.floor(fx).astype(np.intp), cells - 1)
+            j0 = np.minimum(np.floor(fy).astype(np.intp), cells - 1)
+            ax, ay = fx - i0, fy - j0
+            columns = np.stack([i0, i0 + 1, i0, i0 + 1])
+            rows = np.stack([j0, j0, j0 + 1, j0 + 1])
+            weights = np.stack([(1 - ax) * (1 - ay), ax * (1 - ay), (1 - ax) * ay, ax * ay])
+            values = heights[rows, columns].astype(np.float64)
+            valid = np.isfinite(values)
+            if self.sea_level is not None:
+                sea = np.asarray(self.sea_level(west + columns * span / cells, north - rows * span / cells),
+                                 dtype=np.float64)
+                valid &= np.abs(values - sea) > FILLED_POST_TOLERANCE_M
+            weight = (weights * valid).sum(axis=0)
+            h = (weights * np.where(valid, values, 0.0)).sum(axis=0) / np.maximum(weight, 1.0e-12)
+            result[pick] = np.where(weight >= 0.5, h, np.nan)
         return result
 
 
@@ -221,12 +275,19 @@ class BathymetrySampler:
 #  Piccoli attrezzi GDAL
 # =============================================================================
 
+_GDAL_MODULES: tuple | None = None
+
+
 def _gdal():
-    from osgeo import gdal, ogr, osr
-    gdal.UseExceptions()
-    ogr.UseExceptions()
-    osr.UseExceptions()
-    return gdal, ogr, osr
+    """I moduli di GDAL, con le eccezioni accese (una volta: si chiama per ogni geometria)."""
+    global _GDAL_MODULES
+    if _GDAL_MODULES is None:
+        from osgeo import gdal, ogr, osr
+        gdal.UseExceptions()
+        ogr.UseExceptions()
+        osr.UseExceptions()
+        _GDAL_MODULES = (gdal, ogr, osr)
+    return _GDAL_MODULES
 
 
 def _memory_vector():
@@ -355,6 +416,23 @@ def _area_km2(geometry) -> float:
     return copy.GetArea() / 1.0e6
 
 
+def _mean_width_m(geometry, area_km2: float) -> float:
+    """
+    La larghezza media di un'area d'acqua: 2 x area / perimetro. Per un nastro
+    (un fiume) e' la sua larghezza; per un cerchio e' il raggio, cioe' meta'
+    del diametro: per decidere se un'acqua "si vede" nella mesh e' dalla parte
+    giusta (prudente). La prima versione usava la radice dell'area: per i
+    26 km² del Po vicino a Torino, 5 km di "larghezza" a un fiume di 150 m.
+    """
+    west, east, south, north = geometry.GetEnvelope()
+    forward, _ = _metric_transforms(0.5 * (west + east), 0.5 * (south + north))
+    copy = geometry.Clone()
+    copy.Transform(forward)
+    boundary = copy.Boundary()
+    perimeter = boundary.Length() if boundary is not None else 0.0
+    return 2.0 * area_km2 * 1.0e6 / perimeter if perimeter > 0.0 else math.sqrt(area_km2) * 1000.0
+
+
 # =============================================================================
 #  I corpi d'acqua
 # =============================================================================
@@ -398,19 +476,25 @@ def read_block(path: str) -> list[Body]:
 
 
 def _sample_inside(geometry, max_points: int = 4000) -> tuple[np.ndarray, np.ndarray]:
-    """Punti regolari dentro un poligono (per la quota di un lago)."""
+    """
+    Punti regolari dentro un poligono (per la quota di un lago).
+
+    Il passo viene dall'AREA, non dal riquadro: un fiume lungo e stretto ha un
+    riquadro enorme e un'area piccola, e una griglia sul riquadro (la prima
+    versione) metteva i punti a 1 km l'uno dall'altro, quasi tutti fuori dal
+    fiume largo 150 m.
+    """
     gdal, _, _ = _gdal()
     west, east, south, north = geometry.GetEnvelope()
-    side = max(east - west, north - south, 1e-9)
-    count = int(max(8, min(math.sqrt(max_points), 256)))
-    step = side / count
+    area = max(geometry.GetArea(), 1e-18)                       # gradi²
+    step = max(math.sqrt(area / max_points), max(east - west, north - south) / 4096.0, 1e-9)
     width = max(1, int(math.ceil((east - west) / step)))
     height = max(1, int(math.ceil((north - south) / step)))
     raster = _mem_raster(width, height, (west, step, 0, north, 0, -step), gdal.GDT_Byte)
     datasource = _memory_vector()
     layer = _layer(datasource, "lago", ())
     _add(layer, geometry)
-    mask = _rasterize(raster, layer, burn=1)
+    mask = _rasterize(raster, layer, burn=1, all_touched=True)
     rows, columns = np.nonzero(mask)
     if len(rows) == 0:
         centroid = geometry.Centroid()
@@ -432,14 +516,24 @@ def lake_level(geometry, terrain: TerrainSampler) -> float:
     return float(np.percentile(heights, 20)) if heights.size else float("nan")
 
 
-def river_profile(points: np.ndarray, terrain: TerrainSampler) -> tuple[np.ndarray, np.ndarray] | None:
-    """
-    L'asse di un fiume ogni RIVER_SAMPLE_M metri, con la quota dell'acqua:
-    il terreno sull'asse, con il MINIMO PROGRESSIVO nel verso della linea.
+#: Mediana mobile sul profilo di un fiume, in campioni (9 x 20 m = 180 m): toglie
+#: i buchi e i picchi brevi del DEM prima del minimo progressivo.
+RIVER_MEDIAN_SAMPLES = 9
 
-    Le way dei fiumi in OSM sono orientate a valle. Dove il DEM risale (un
-    ponte, una briglia, il rumore) l'acqua non risale con lui.
-    """
+#: Un tratto del profilo piu' basso di cosi' rispetto alla mediana del km
+#: attorno e' un errore del DEM, non il fiume: si scarta e si interpola. (Un
+#: salto vero di 15 m in mezzo km e' una diga: meglio una rampa che un buco.)
+RIVER_OUTLIER_DROP_M = 15.0
+RIVER_OUTLIER_WINDOW = 51
+
+#: La cucitura fra due linee non abbassa l'inizio di una linea di piu' di
+#: cosi' rispetto al suo terreno: se la linea a monte finisce MOLTO piu' in
+#: basso, l'errore e' a monte, e non si propaga a tutto il fiume.
+MAX_STITCH_DROP_M = 5.0
+
+
+def _densify(points: np.ndarray) -> np.ndarray:
+    """I punti di una linea, con un punto ogni RIVER_SAMPLE_M metri (gli estremi restano quelli veri)."""
     lon = points[:, 0]
     lat = points[:, 1]
     dense_lon = [lon[0]]
@@ -453,14 +547,144 @@ def river_profile(points: np.ndarray, terrain: TerrainSampler) -> tuple[np.ndarr
             t = step / steps
             dense_lon.append(lon[index - 1] + (lon[index] - lon[index - 1]) * t)
             dense_lat.append(lat[index - 1] + (lat[index] - lat[index - 1]) * t)
-    dense = np.column_stack([dense_lon, dense_lat])
-    heights = terrain.heights(dense[:, 0], dense[:, 1])
-    valid = np.isfinite(heights)
-    if not valid.any():
+    return np.column_stack([dense_lon, dense_lat])
+
+
+def _running_median(values: np.ndarray, window: int) -> np.ndarray:
+    half = window // 2
+    if len(values) <= 2 * half:
+        return np.full(len(values), float(np.median(values)))
+    padded = np.pad(values, half, mode="edge")
+    return np.median(np.lib.stride_tricks.sliding_window_view(padded, 2 * half + 1), axis=1)
+
+
+def _smooth_heights(raw: np.ndarray) -> np.ndarray | None:
+    """
+    Il terreno lungo un fiume, pulito; NaN dove non si sa. None se non si sa
+    da nessuna parte.
+
+    - Si usano SOLO i campioni validi, e non quelli a ridosso di un buco: un
+      post sul bordo del DEM mescola il dato vero con il riempimento (a Torino,
+      194 m invece di 262). La prima versione estendeva il primo campione
+      valido a tutta la parte scoperta, e il minimo progressivo se lo portava
+      dietro per tutto il fiume.
+    - I crolli lunghi (un buco del DEM di qualche centinaio di metri) si
+      confrontano con la mediana del km e si tolgono.
+    - Una mediana corta toglie i buchi e i picchi brevi (un ponte).
+    """
+    valid = np.isfinite(raw)
+    trusted = valid.copy()
+    for shift in (1, 2):
+        trusted[shift:] &= valid[:-shift]
+        trusted[:-shift] &= valid[shift:]
+    if trusted.sum() < 3:
+        trusted = valid
+    if not trusted.any():
         return None
-    positions = np.arange(len(heights))
-    heights = np.interp(positions, positions[valid], heights[valid])
-    return dense, np.minimum.accumulate(heights)
+    indices = np.nonzero(trusted)[0]
+    values = raw[indices]
+    keep = values > _running_median(values, RIVER_OUTLIER_WINDOW) - RIVER_OUTLIER_DROP_M
+    if keep.any():
+        indices, values = indices[keep], values[keep]
+    result = np.full(len(raw), np.nan)
+    result[indices] = _running_median(values, RIVER_MEDIAN_SAMPLES)
+    return result
+
+
+def _profile(heights: np.ndarray, cap: float = math.inf) -> np.ndarray:
+    """
+    La quota dell'acqua: il minimo progressivo dei campioni validi (partendo al
+    massimo da `cap`), e nei tratti senza terreno la quota del tratto valido
+    piu' vicino. Un tratto scoperto non entra nel minimo: non sa niente.
+    """
+    indices = np.nonzero(np.isfinite(heights))[0]
+    running = np.minimum.accumulate(np.minimum(heights[indices], cap))
+    return np.interp(np.arange(len(heights)), indices, running)
+
+
+def _first_valid(heights: np.ndarray) -> float:
+    return float(heights[np.isfinite(heights)][0])
+
+
+def _flows_backwards(heights: np.ndarray) -> bool:
+    """
+    La linea sale nel suo verso? Le way dei fiumi in OSM vanno verso valle, ma
+    non sempre. Si confrontano il primo e l'ultimo quinto dei campioni validi
+    (mediane), con una soglia prudente: almeno 2 m, e 1 m per km (i fiumi di
+    pianura scendono di pochi decimetri per km, un ponte o il rumore non
+    fanno 2 m di mediana).
+    """
+    values = heights[np.isfinite(heights)]
+    count = len(values)
+    if count < 10:
+        return False
+    fifth = max(2, count // 5)
+    rise = float(np.median(values[-fifth:]) - np.median(values[:fifth]))
+    return rise > max(2.0, count * RIVER_SAMPLE_M / 1000.0)
+
+
+def river_profile(points: np.ndarray, terrain: TerrainSampler) -> tuple[np.ndarray, np.ndarray] | None:
+    """
+    L'asse di UNA linea ogni RIVER_SAMPLE_M metri, con la quota dell'acqua: il
+    terreno sull'asse (pulito, _smooth_heights) con il MINIMO PROGRESSIVO nel
+    verso della linea. Dove il DEM risale (un ponte, una briglia) l'acqua non
+    risale con lui. Per piu' linee dello stesso fiume: stitch_river_profiles.
+    """
+    dense = _densify(points)
+    heights = _smooth_heights(terrain.heights(dense[:, 0], dense[:, 1]))
+    if heights is None:
+        return None
+    return dense, _profile(heights)
+
+
+@dataclass
+class RiverLine:
+    """Una linea d'acqua in attesa del profilo: i punti fitti e il terreno sotto."""
+    kind: int
+    width: float
+    dense: np.ndarray        # (n, 2) lon, lat
+    heights: np.ndarray      # terreno pulito sui punti (NaN dove non si sa)
+
+
+def _endpoint(point) -> tuple[int, int]:
+    return int(round(float(point[0]) * 1.0e7)), int(round(float(point[1]) * 1.0e7))
+
+
+def stitch_river_profiles(lines: list[RiverLine], passes: int = 12) -> list[np.ndarray]:
+    """
+    I profili di tutte le linee, CUCITI dove una linea comincia nel punto in
+    cui ne finisce un'altra.
+
+    In OSM un fiume e' spezzato in decine di way. Col minimo progressivo fatto
+    way per way, ogni way ripartiva dal terreno del suo primo punto: se la way a
+    monte era finita piu' in basso (un tratto basso del DEM), l'acqua all'inizio
+    della way a valle RISALIVA, con un gradino di metri. Qui ogni linea parte al
+    massimo dalla quota a cui finiscono le linee che entrano nel suo primo
+    punto (anche gli affluenti che sboccano li'). Le quote possono solo
+    scendere, quindi qualche passata basta a stabilizzarle.
+    """
+    ending_at: dict[tuple[int, int], list[int]] = {}
+    for index, line in enumerate(lines):
+        ending_at.setdefault(_endpoint(line.dense[-1]), []).append(index)
+    caps = [math.inf] * len(lines)
+    profiles = [_profile(line.heights) for line in lines]
+    # Prima le linee piu' alte (a monte): di solito basta una passata.
+    order = sorted(range(len(lines)), key=lambda i: -_first_valid(lines[i].heights))
+    for _ in range(passes):
+        changed = False
+        for index in order:
+            incoming = [j for j in ending_at.get(_endpoint(lines[index].dense[0]), []) if j != index]
+            if not incoming:
+                continue
+            cap = min(float(profiles[j][-1]) for j in incoming)
+            cap = max(cap, _first_valid(lines[index].heights) - MAX_STITCH_DROP_M)
+            if cap < caps[index] - 1.0e-6:
+                caps[index] = cap
+                profiles[index] = _profile(lines[index].heights, cap)
+                changed = True
+        if not changed:
+            break
+    return profiles
 
 
 # =============================================================================
@@ -606,6 +830,7 @@ def extract_bodies(osm_paths: list[str], sea_path: str | None, terrain: TerrainS
     bodies_by_kind: dict[str, int] = {}
     skipped = {"senza terreno": 0, "troppo piccoli": 0}
     extent = [180.0, 90.0, -180.0, -90.0]
+    lines: list[RiverLine] = []
 
     def store(body: Body) -> None:
         west, east, south, north = body.envelope
@@ -630,6 +855,11 @@ def extract_bodies(osm_paths: list[str], sea_path: str | None, terrain: TerrainS
                         continue
                     piece = Body(body.kind, False, body.level, body.wave, body.deepest,
                                  body.width, body.area_km2, clipped)
+                if not body.is_line and body.kind in (waterclasses.KIND_RIVER, waterclasses.KIND_CANAL):
+                    # Il ripiego della quota, sul pezzo del blocco (NaN se il
+                    # pezzo e' fuori dal terreno: allora solo l'asse).
+                    piece = Body(piece.kind, False, lake_level(piece.geometry, terrain), piece.wave,
+                                 piece.deepest, piece.width, piece.area_km2, piece.geometry)
                 pending.setdefault((bx, by), bytearray()).extend(encode_body(piece))
         if sum(len(data) for data in pending.values()) > 64 * 1024 * 1024:
             flush()
@@ -650,14 +880,16 @@ def extract_bodies(osm_paths: list[str], sea_path: str | None, terrain: TerrainS
                     continue
                 kind = classified.kind
                 level = float("nan")
-                if kind in (waterclasses.KIND_LAKE, waterclasses.KIND_RIVER, waterclasses.KIND_CANAL):
-                    # I fiumi larghi prendono la quota dall'asse, dove c'e'; il
-                    # percentile e' il ripiego.
+                if kind == waterclasses.KIND_LAKE:
                     level = lake_level(geometry, terrain)
                     if not math.isfinite(level):
                         skipped["senza terreno"] += 1
                         continue
-                width = math.sqrt(area) * 1000.0
+                # I fiumi e i canali larghi prendono la quota dall'ASSE (la
+                # linea che li attraversa), nel taglio: qui non serve niente.
+                # Se l'asse manca, il ripiego si calcola pezzo per pezzo in
+                # store(), sul pezzo vicino, non su 26 km² di fiume in discesa.
+                width = _mean_width_m(geometry, area)
                 store(Body(kind, False, level, waterclasses.wave_exposure(kind, area),
                            waterclasses.max_depth(kind, area, width), width, area, geometry))
             else:
@@ -665,18 +897,23 @@ def extract_bodies(osm_paths: list[str], sea_path: str | None, terrain: TerrainS
                 for part in parts:
                     if len(part) < 2:
                         continue
-                    profile = river_profile(part, terrain)
-                    if profile is None:
+                    dense = _densify(np.asarray(part, dtype=np.float64)[:, :2])
+                    heights = _smooth_heights(terrain.heights(dense[:, 0], dense[:, 1]))
+                    if heights is None:
                         skipped["senza terreno"] += 1
                         continue
-                    dense, levels = profile
-                    line = ogr.Geometry(ogr.wkbLineString25D)
-                    for (lon, lat), z in zip(dense, levels):
-                        line.AddPoint(float(lon), float(lat), float(z))
-                    kind = classified.kind
-                    store(Body(kind, True, float("nan"), waterclasses.wave_exposure(kind),
-                               waterclasses.max_depth(kind, 0.0, classified.width_m),
-                               classified.width_m, 0.0, line))
+                    if _flows_backwards(heights):
+                        dense, heights = dense[::-1].copy(), heights[::-1].copy()
+                        skipped["girate (salivano)"] = skipped.get("girate (salivano)", 0) + 1
+                    lines.append(RiverLine(classified.kind, classified.width_m, dense, heights))
+
+    # Le linee, tutte insieme: i profili si cuciono fra una way e l'altra.
+    for river, levels in zip(lines, stitch_river_profiles(lines)):
+        line = ogr.Geometry(ogr.wkbLineString25D)
+        for (lon, lat), z in zip(river.dense, levels):
+            line.AddPoint(float(lon), float(lat), float(z))
+        store(Body(river.kind, True, float("nan"), waterclasses.wave_exposure(river.kind),
+                   waterclasses.max_depth(river.kind, 0.0, river.width), river.width, 0.0, line))
 
     if sea_path:
         report(f"      leggo il mare da {sea_path}")
@@ -709,6 +946,10 @@ class _Layers:
     lakes: object
     datasource: object
     counts: dict
+    #: Gli assi che ATTRAVERSANO un'area fluviale, e la loro corrente: solo loro
+    #: danno quota e corrente alle aree (non il canale che le costeggia).
+    area_axes: object = None
+    area_flow: object = None
 
 
 def _box(west, south, east, north):
@@ -717,22 +958,74 @@ def _box(west, south, east, north):
         f"POLYGON(({west} {south},{east} {south},{east} {north},{west} {north},{west} {south}))")
 
 
+def _resolved(body: Body, post_m: float) -> bool:
+    """
+    L'acqua e' abbastanza larga da scavarla a questo livello? (waterclasses.
+    RESOLVE_POSTS.) Il mare e le lagune si'. Il passo dei post e' quello
+    NOMINALE del livello (in latitudine): uguale in tutte le tile del livello,
+    cosi' un fiume non e' scavato in una tile e non in quella accanto.
+    """
+    if body.kind in (waterclasses.KIND_SEA, waterclasses.KIND_LAGOON):
+        return True
+    return body.width >= waterclasses.RESOLVE_POSTS * post_m
+
+
 def _prepare_layers(bodies: list[Body], roi, tile_centre, metres_per_px: float,
-                    simplify_deg: float) -> _Layers:
+                    simplify_deg: float, post_m: float = 0.0) -> _Layers:
     """Ritaglia, bufferizza e mette in layer di memoria i corpi vicini alla tile."""
     _, ogr, _ = _gdal()
     west, south, east, north = roi
     clip = _box(west, south, east, north)
     datasource = _memory_vector()
-    fields = ("level", "wave", "d0", "slope", "deep", "kind")
+    fields = ("level", "wave", "d0", "slope", "deep", "kind", "res", "vs")
     layers = {name: _layer(datasource, name, fields)
               for name in ("sea", "river_areas", "river_buffers", "lakes")}
     centrelines = _layer(datasource, "centrelines", ())
     flow = _layer(datasource, "flow", ("fu", "fv"))
+    area_axes = _layer(datasource, "area_axes", ())
+    area_flow = _layer(datasource, "area_flow", ("fu", "fv"))
     forward, backward = _metric_transforms(*tile_centre)
     counts = {name: 0 for name in ("sea", "river_areas", "river_buffers", "lakes")}
 
+    # Le aree fluviali vicine, per sapere quali linee le attraversano. La
+    # prima versione dava a ogni pixel di un'area la quota dell'asse PIU'
+    # VICINO, qualunque fosse: un canale a fianco del Po, 4 m piu' alto,
+    # inclinava mezzo fiume verso di se'.
+    river_area_shapes = []
     for body in bodies:
+        if not body.is_line and body.kind in (waterclasses.KIND_RIVER, waterclasses.KIND_CANAL):
+            bw, be, bs, bn = body.envelope
+            if not (be < west or bw > east or bn < south or bs > north):
+                river_area_shapes.append(body.geometry)
+
+    def crosses_river_area(line) -> bool:
+        lw, le, ls, ln = line.GetEnvelope()[:4]
+        for shape in river_area_shapes:
+            aw, ae, as_, an = shape.GetEnvelope()
+            if le < aw or lw > ae or ln < as_ or ls > an:
+                continue
+            if line.Intersects(shape):
+                return True
+        return False
+
+    def add_flow(target, body, speed) -> None:
+        points = body.geometry.GetPoints()
+        for (lon0, lat0, *_), (lon1, lat1, *_) in zip(points[:-1], points[1:]):
+            east_m, north_m = tiling.metres_per_degree(0.5 * (lat0 + lat1))
+            dx = (lon1 - lon0) * east_m
+            dy = (lat1 - lat0) * north_m          # verso NORD
+            length = math.hypot(dx, dy)
+            if length <= 0.0:
+                continue
+            segment = ogr.Geometry(ogr.wkbLineString)
+            segment.AddPoint_2D(lon0, lat0)
+            segment.AddPoint_2D(lon1, lat1)
+            # u verso est, v verso SUD (come le righe del raster).
+            _add(target, segment, fu=speed * dx / length, fv=-speed * dy / length)
+
+    # Dentro ogni layer i corpi larghi per ultimi: dove due si sovrappongono
+    # vincono le regole (profondita', "risolto") di quello largo.
+    for body in sorted(bodies, key=lambda candidate: candidate.width):
         bw, be, bs, bn = body.envelope
         reach = 0.0 if not body.is_line else body.width / 111000.0 + 1e-6
         if be + reach < west or bw - reach > east or bn + reach < south or bs - reach > north:
@@ -741,12 +1034,20 @@ def _prepare_layers(bodies: list[Body], roi, tile_centre, metres_per_px: float,
         # pixel, un fiume piu' stretto di mezzo pixel.
         if body.kind == waterclasses.KIND_LAKE and body.area_km2 * 1.0e6 < 4.0 * metres_per_px ** 2:
             continue
+        if body.is_line and crosses_river_area(body.geometry):
+            # L'asse di un'area fluviale (il Po a Torino e' un'area, con la sua
+            # linea dentro): porta quota e corrente a tutta l'area, a
+            # qualunque livello, anche dove la linea e' troppo sottile per
+            # disegnarla.
+            _add(area_axes, body.geometry)
+            add_flow(area_flow, body, waterclasses.FLOW_SPEED.get(body.kind, 0.0))
         if body.is_line and body.width < 0.5 * metres_per_px:
             continue
 
         shore, slope = waterclasses.ramp(body.kind)
-        values = {"level": body.level if math.isfinite(body.level) else 0.0, "wave": body.wave,
-                  "d0": shore, "slope": slope, "deep": body.deepest, "kind": body.kind}
+        values = {"level": body.level if math.isfinite(body.level) else NO_LEVEL, "wave": body.wave,
+                  "d0": shore, "slope": slope, "deep": body.deepest, "kind": body.kind,
+                  "res": 1.0 if _resolved(body, post_m) else 0.0, "vs": waterclasses.shore_slope(body.kind)}
 
         if not body.is_line:
             geometry = body.geometry.Intersection(clip)
@@ -764,20 +1065,7 @@ def _prepare_layers(bodies: list[Body], roi, tile_centre, metres_per_px: float,
         # direzione (per la corrente), il buffer largo quanto il fiume (per la
         # maschera e il fondale).
         _add(centrelines, body.geometry)
-        points = body.geometry.GetPoints()
-        speed = waterclasses.FLOW_SPEED.get(body.kind, 0.0)
-        for (lon0, lat0, *_), (lon1, lat1, *_) in zip(points[:-1], points[1:]):
-            east_m, north_m = tiling.metres_per_degree(0.5 * (lat0 + lat1))
-            dx = (lon1 - lon0) * east_m
-            dy = (lat1 - lat0) * north_m          # verso NORD
-            length = math.hypot(dx, dy)
-            if length <= 0.0:
-                continue
-            segment = ogr.Geometry(ogr.wkbLineString)
-            segment.AddPoint_2D(lon0, lat0)
-            segment.AddPoint_2D(lon1, lat1)
-            # u verso est, v verso SUD (come le righe del raster).
-            _add(flow, segment, fu=speed * dx / length, fv=-speed * dy / length)
+        add_flow(flow, body, waterclasses.FLOW_SPEED.get(body.kind, 0.0))
 
         flat = body.geometry.Clone()
         flat.FlattenTo2D()
@@ -791,7 +1079,7 @@ def _prepare_layers(bodies: list[Body], roi, tile_centre, metres_per_px: float,
         counts["river_buffers"] += 1
 
     return _Layers(layers["sea"], layers["river_areas"], layers["river_buffers"], centrelines, flow,
-                   layers["lakes"], datasource, counts)
+                   layers["lakes"], datasource, counts, area_axes, area_flow)
 
 
 def _burn_masks(layers: _Layers, width: int, height: int, geotransform, all_touched: bool) -> dict:
@@ -818,7 +1106,8 @@ def _burn_attribute(layers: _Layers, names: tuple[str, ...], attribute: str, wid
         raster = _mem_raster(width, height, geotransform, gdal.GDT_Float32, fill=np.nan)
         burned = _rasterize(raster, getattr(layers, name), attribute=attribute, all_touched=all_touched)
         result = np.where(np.isfinite(burned), burned, result)
-    return result
+    # Una quota che non c'e' (NO_LEVEL) torna NaN: chi viene dopo la riempie.
+    return np.where(result <= NO_LEVEL + 1.0, np.nan, result)
 
 
 def _downsample(values: np.ndarray, factor: int = 2) -> np.ndarray:
@@ -827,8 +1116,12 @@ def _downsample(values: np.ndarray, factor: int = 2) -> np.ndarray:
 
 
 #: L'ordine in cui i corpi si coprono: il mare sotto, i laghi sopra (un fiume
-#: che entra in un lago prende la quota del lago dentro il lago).
-ORDER = ("sea", "river_areas", "river_buffers", "lakes")
+#: che entra in un lago prende la quota del lago dentro il lago). Le AREE dei
+#: fiumi sopra le loro LINEE: il Po a Torino e' un'area larga 128 m con dentro
+#: la sua linea, larga 12 m per OSM. Con la linea sopra (la prima versione),
+#: il centro del fiume aveva le regole della linea: un metro di fondale, e
+#: "troppo stretto per scavarlo".
+ORDER = ("sea", "river_buffers", "river_areas", "lakes")
 
 
 def cut_tile(level: int, x: int, y: int, bodies: list[Body], geoid: GeoidSampler,
@@ -864,8 +1157,9 @@ def cut_tile(level: int, x: int, y: int, bodies: list[Body], geoid: GeoidSampler
 
     roi = (bounds.west - (margin_p + 1) * post_deg, bounds.south - (margin_p + 1) * post_deg,
            bounds.east + (margin_p + 1) * post_deg, bounds.north + (margin_p + 1) * post_deg)
+    nominal_post_m = tiling.post_spacing_deg(level) * NOMINAL_METRES_PER_DEGREE
     layers = _prepare_layers(bodies, roi, (0.5 * (bounds.west + bounds.east), centre_lat), mpp,
-                             simplify_deg=px2 * 0.5 if level < 12 else 0.0)
+                             simplify_deg=px2 * 0.5 if level < 12 else 0.0, post_m=nominal_post_m)
     if sum(layers.counts.values()) == 0:
         return None
 
@@ -884,22 +1178,45 @@ def cut_tile(level: int, x: int, y: int, bodies: list[Body], geoid: GeoidSampler
         areas = _burn_attribute(layers, ("river_areas",), "level", size_f, size_f, gt_f)
         level_f = np.where(masks["river_areas"] & np.isfinite(areas), areas, level_f)
     has_lines = layers.centrelines.GetFeatureCount() > 0
+    has_area_axes = layers.area_axes.GetFeatureCount() > 0 and masks["river_areas"].any()
     flow_u = flow_v = None
-    if has_lines:
-        raster = _mem_raster(size_f, size_f, gt_f, gdal.GDT_Float32, fill=np.nan)
-        axis = _rasterize(raster, layers.centrelines, from_z=True, all_touched=True).astype(np.float64)
-        widest_px = int(min(400, max(8, max((b.width for b in bodies if b.is_line), default=0.0)
-                                     / (px2 * min(east_m, north_m)))))
-        axis = _fill_nearest(axis, widest_px)
-        pick = (masks["river_areas"] | masks["river_buffers"]) & np.isfinite(axis)
-        level_f = np.where(pick, axis, level_f)
+    px2_m = px2 * min(east_m, north_m)
+    widest_px = int(min(400, max(8, max((b.width for b in bodies if b.is_line), default=0.0) / px2_m)))
 
-        raster_u = _mem_raster(size_f, size_f, gt_f, gdal.GDT_Float32, fill=np.nan)
-        raster_v = _mem_raster(size_f, size_f, gt_f, gdal.GDT_Float32, fill=np.nan)
-        u = _fill_nearest(_rasterize(raster_u, layers.flow, attribute="fu", all_touched=True).astype(np.float64),
-                          widest_px)
-        v = _fill_nearest(_rasterize(raster_v, layers.flow, attribute="fv", all_touched=True).astype(np.float64),
-                          widest_px)
+    def axis_raster(layer, reach_px: int) -> np.ndarray:
+        raster = _mem_raster(size_f, size_f, gt_f, gdal.GDT_Float32, fill=np.nan)
+        return _fill_nearest(_rasterize(raster, layer, from_z=True, all_touched=True).astype(np.float64), reach_px)
+
+    def flow_rasters(layer, reach_px: int) -> tuple[np.ndarray, np.ndarray]:
+        result = []
+        for attribute in ("fu", "fv"):
+            raster = _mem_raster(size_f, size_f, gt_f, gdal.GDT_Float32, fill=np.nan)
+            burned = _rasterize(raster, layer, attribute=attribute, all_touched=True).astype(np.float64)
+            result.append(_fill_nearest(burned, reach_px))
+        return result[0], result[1]
+
+    u = v = None
+    if has_lines:
+        # Le linee: quota e corrente dal loro asse, larghe quanto la linea.
+        axis = axis_raster(layers.centrelines, widest_px)
+        level_f = np.where(masks["river_buffers"] & np.isfinite(axis), axis, level_f)
+        u, v = flow_rasters(layers.flow, widest_px)
+    if has_area_axes:
+        # Le aree: dai soli assi che le attraversano, in tutta la larghezza.
+        # La prima versione si fermava a ~8 pixel dall'asse, e il resto del
+        # Po prendeva la quota di ripiego dell'area. Il riempimento costa
+        # quanto il suo raggio: si usa quello che serve davvero (la distanza
+        # dei pixel dell'area dall'asse piu' vicino).
+        burned = _rasterize(_mem_raster(size_f, size_f, gt_f, gdal.GDT_Float32, fill=np.nan),
+                            layers.area_axes, from_z=True, all_touched=True)
+        needed = float(_proximity_m(np.isfinite(burned), 1, 1.0)[masks["river_areas"]].max()) + 2.0
+        reach_px = int(min(size_f, RIVER_AREA_FILL_M / px2_m, max(widest_px, needed)))
+        area_axis = axis_raster(layers.area_axes, reach_px)
+        level_f = np.where(masks["river_areas"] & np.isfinite(area_axis), area_axis, level_f)
+        area_u, area_v = flow_rasters(layers.area_flow, reach_px)
+        u = area_u if u is None else np.where(masks["river_areas"] & np.isfinite(area_u), area_u, u)
+        v = area_v if v is None else np.where(masks["river_areas"] & np.isfinite(area_v), area_v, v)
+    if u is not None:
         flow_u = np.where(river & np.isfinite(u), u, 0.0)
         flow_v = np.where(river & np.isfinite(v), v, 0.0)
     if layers.counts["lakes"]:
@@ -923,49 +1240,131 @@ def cut_tile(level: int, x: int, y: int, bodies: list[Body], geoid: GeoidSampler
 
     # --- I post: superficie e fondale ----------------------------------------------
     # Il post i della tile sta sullo spigolo fra i pixel di F di colonna
-    # 2*margin + 4i - 1 e 2*margin + 4i: la sua superficie e' la media dei
-    # quattro pixel attorno (quelli d'acqua). Si calcola con 7 post di margine,
-    # perche' il riempimento dei post vicini all'acqua sia lo stesso nelle due
-    # tile che condividono un bordo.
+    # 2*margin + 4i - 1 e 2*margin + 4i: i suoi valori sono la media dei quattro
+    # pixel attorno. Si calcolano con 7 post di margine, perche' i riempimenti
+    # attorno all'acqua siano gli stessi nelle due tile che condividono un bordo.
     extra = 7
     count = posts + 2 * extra
     centre = 2 * margin + 4 * (np.arange(count) - extra)
-    stack = np.stack([level_f[np.ix_(centre + dr, centre + dc)] for dr in (-1, 0) for dc in (-1, 0)])
-    with np.errstate(invalid="ignore"):
-        valid = np.isfinite(stack)
-        totals = np.where(valid, stack, 0.0).sum(axis=0)
-        numbers = valid.sum(axis=0)
-        surface_wide = np.where(numbers > 0, totals / np.maximum(numbers, 1), np.nan)
-    surface_wide = _fill_nearest(surface_wide, 3)
-    surface = surface_wide[extra: extra + posts, extra: extra + posts]
+    inner = slice(extra, extra + posts)
 
-    # Il fondale: la distanza dalla riva sui post (griglia P, con il suo
-    # margine largo) e le regole del corpo a cui il post appartiene.
-    masks_p = _burn_masks(layers, size_p, size_p, gt_p, all_touched=True)
-    water_p = masks_p["sea"] | masks_p["river_areas"] | masks_p["river_buffers"] | masks_p["lakes"]
-    distance_p = _proximity_m(water_p, 0, post_deg * math.sqrt(east_m * north_m))
+    def at_posts(field: np.ndarray) -> np.ndarray:
+        stack = np.stack([field[np.ix_(centre + dr, centre + dc)] for dr in (-1, 0) for dc in (-1, 0)])
+        with np.errstate(invalid="ignore"):
+            valid = np.isfinite(stack)
+            totals = np.where(valid, stack, 0.0).sum(axis=0)
+            numbers = valid.sum(axis=0)
+            return np.where(numbers > 0, totals / np.maximum(numbers, 1), np.nan)
+
+    # ------------------------------------------------------------------
+    #  ACQUA "RISOLTA" E NO. Un'acqua larga almeno RESOLVE_POSTS post (a
+    #  questo livello) si scava; una piu' stretta no: la mesh del terreno, a
+    #  passo 2, non ha vertici dentro, e lo scavo diventerebbe un pettine di
+    #  buchi (era il fiume "a vertici alti e bassi" della prima prova). Per
+    #  quella il file non porta ne' superficie ne' fondale: la superficie la
+    #  appoggia sul terreno il runtime (WaterMesh.h), e la forma la da' la
+    #  distanza dalla riva del raster, come sempre.
+    # ------------------------------------------------------------------
+    resolved = water & (np.nan_to_num(_burn_attribute(layers, ORDER, "res", size_f, size_f, gt_f)) > 0.5)
+    unresolved = water & ~resolved
+    signed_r = (np.where(resolved, _proximity_m(resolved, 0, pixel2_m) - half,
+                         -(_proximity_m(resolved, 1, pixel2_m) - half))
+                if resolved.any() else np.full(water.shape, -1.0e9))
+    to_unresolved = _proximity_m(unresolved, 1, pixel2_m) if unresolved.any() else np.full(water.shape, 1.0e9)
+
+    # La superficie: dai pixel d'acqua risolta attorno al post, poi allargata
+    # di SURFACE_FILL_POSTS post (le celle a cavallo della riva la vogliono in
+    # tutti gli angoli). Non verso un'acqua NON risolta piu' vicina: li'
+    # comanda il terreno.
+    surface_wide = _fill_nearest(at_posts(np.where(resolved, level_f, np.nan)), SURFACE_FILL_POSTS)
+    shore_wide = at_posts(signed_r)
+    nearer_unresolved = (shore_wide <= 0.0) & (at_posts(to_unresolved) < -shore_wide)
+    surface_wide = np.where(nearer_unresolved, np.nan, surface_wide)
+    surface = surface_wide[inner, inner]
+    shore = shore_wide[inner, inner]          # distanza con segno dalla riva risolta, in metri
+
+    # ------------------------------------------------------------------
+    #  IL FONDALE, E LA SPONDA. Il terreno della tile e' una mesh a passo 2:
+    #  fra un vertice in acqua e uno a terra c'e' un triangolo, e l'acqua si
+    #  vede solo dove il triangolo sta SOTTO la superficie. La prima versione
+    #  scavava solo dentro (0,3 m + una rampa dolce): il vertice a terra,
+    #  alto, tirava su il triangolo, e il terreno copriva l'acqua per meta'
+    #  cella lungo tutte le rive (il 20% dell'acqua del Po, a Torino).
+    #
+    #  Ora la riva e' una "V" con la STESSA pendenza dai due lati
+    #  (waterclasses.shore_slope): dentro il fondale scende almeno di
+    #  pendenza x distanza (fino a SHORE_REACH_POSTS), fuori il terreno non sale
+    #  piu' di cosi' (fino a SHORE_BAND_POSTS). Lungo un lato del triangolo il
+    #  terreno e' allora lineare nella distanza dalla riva, e incrocia
+    #  l'acqua proprio sulla riva. Fuori, il "fondale" e' un tetto: lo scavo
+    #  prende il minimo fra terreno e fondale, e un terreno gia' basso resta
+    #  com'e'.
+    # ------------------------------------------------------------------
+    post_m = post_deg * math.sqrt(east_m * north_m)
+    vs_f = np.where(resolved, _burn_attribute(layers, ORDER, "vs", size_f, size_f, gt_f), np.nan)
+    vs_f = _fill_nearest(vs_f, int(4 * (waterclasses.SHORE_BAND_POSTS + 2)))
+    shore_slope = np.nan_to_num(at_posts(vs_f)[inner, inner], nan=0.3)
+
+    # Lontano dalla riva (la rampa del mare arriva a 1,2 km) la distanza viene
+    # dalla griglia P, che vede fin la'; vicino, da F, che e' piu' precisa.
+    res_p = _burn_attribute(layers, ORDER, "res", size_p, size_p, gt_p)
+    resolved_p = np.nan_to_num(res_p) > 0.5
+    distance_p = _proximity_m(resolved_p, 0, post_m)
     d0 = _burn_attribute(layers, ORDER, "d0", size_p, size_p, gt_p, all_touched=True)
     slope = _burn_attribute(layers, ORDER, "slope", size_p, size_p, gt_p, all_touched=True)
     deep = _burn_attribute(layers, ORDER, "deep", size_p, size_p, gt_p, all_touched=True)
     kind = _burn_attribute(layers, ORDER, "kind", size_p, size_p, gt_p, all_touched=True)
 
+    # Le regole del corpo d'acqua arrivano anche ai post della sponda, fuori
+    # dal poligono: dal corpo piu' vicino.
+    reach_p = int(waterclasses.SHORE_BAND_POSTS) + 3
+    d0, slope, deep = (_fill_nearest(field, reach_p) for field in (d0, slope, deep))
+
     tile_rows = slice(margin_p, margin_p + posts)
-    depth = waterclasses.depth_at(distance_p, np.nan_to_num(d0, nan=0.3), np.nan_to_num(slope, nan=0.1),
-                                  np.nan_to_num(deep, nan=1.0))[tile_rows, tile_rows]
+    near_limit = 6.0 * post_m
+    # Distanza dalla riva risolta, dentro (dalla griglia P se lontana) e fuori.
+    distance = np.where(shore > 0.0,
+                        np.where(shore < near_limit, shore, distance_p[tile_rows, tile_rows]),
+                        -shore)
+    shore_depth = np.nan_to_num(d0, nan=0.3)[tile_rows, tile_rows]
+    ramp_slope = np.nan_to_num(slope, nan=0.1)[tile_rows, tile_rows]
+    deepest = np.nan_to_num(deep, nan=1.0)[tile_rows, tile_rows]
+    steep = shore_slope * np.minimum(distance, waterclasses.SHORE_REACH_POSTS * post_m)
+    # La stessa funzione della distanza dentro (profondita') e fuori (altezza
+    # massima della sponda): la "V" e' simmetrica anche quando il fondale
+    # tocca il massimo del corpo (5 m per un fiume), e il terreno incrocia
+    # l'acqua sulla riva. Fuori, un pendio ripido a ridosso dell'acqua
+    # diventa per una cella una sponda bassa: e' il prezzo, e si vede meno
+    # del terreno che copre l'acqua.
+    #
+    # E CONTINUA sulla riva: zero sulla riva, e i primi decimetri di
+    # profondita' (shore_depth) arrivano con la pendenza della sponda, non
+    # di colpo. Con il salto, un vertice che cade proprio sulla riva valeva
+    # +0,3 m se "appena fuori" e -0,3 m se "appena dentro", e quei 60 cm
+    # bastavano a far spuntare il terreno dall'acqua.
+    rise = np.minimum(shore_depth, shore_slope * distance)
+    depth = np.minimum(deepest, np.maximum(rise + ramp_slope * distance, steep))
     if bathymetry is not None:
         post_lons = bounds.west + np.arange(posts) * post_deg
         post_lats = bounds.north - np.arange(posts) * post_deg
         lon_grid, lat_grid = np.meshgrid(post_lons, post_lats)
         measured = bathymetry.depth(lon_grid, lat_grid)
         sea_posts = np.isin(kind[tile_rows, tile_rows], (waterclasses.KIND_SEA, waterclasses.KIND_LAGOON))
-        shore = np.nan_to_num(d0, nan=0.5)[tile_rows, tile_rows]
-        ramp_free = shore + np.nan_to_num(slope, nan=0.05)[tile_rows, tile_rows] \
-            * distance_p[tile_rows, tile_rows]
+        ramp_free = shore_depth + ramp_slope * distance
         use = sea_posts & np.isfinite(measured)
-        depth = np.where(use, np.maximum(shore, np.minimum(ramp_free, measured)), depth)
+        depth = np.where(use, np.maximum(np.maximum(shore_depth, np.minimum(ramp_free, measured)), steep), depth)
 
-    carve = water_p[tile_rows, tile_rows] & np.isfinite(surface)
-    bed = np.where(carve, surface - depth, np.nan)
+    # Fuori, il tetto della sponda serve solo ai vertici delle celle a
+    # cavallo della riva: oltre SHORE_FLAT_POSTS sale ripido (45°), e un
+    # argine alto resta un argine alto, abbassato solo a ridosso dell'acqua.
+    outside_roof = depth + np.maximum(0.0, distance - waterclasses.SHORE_FLAT_POSTS * post_m)
+
+    inside = (shore > 0.0) & np.isfinite(surface)
+    band = (shore <= 0.0) & (shore > -waterclasses.SHORE_BAND_POSTS * post_m) & np.isfinite(surface)
+    bed = np.full((posts, posts), np.nan)
+    bed = np.where(inside, surface - depth, bed)
+    bed = np.where(band, surface + outside_roof, bed)
+    carve = np.isfinite(bed)
 
     if not water_core.any() and not carve.any():
         return None
@@ -1096,9 +1495,15 @@ def build(*, osm: list[str], terrain_root: str, output: str, sea: str | None = N
     if geoid is None:
         from . import geoid as geoid_module
         report(f"[0/3] geoide ({terrain.vertical_crs}) sull'area")
+        # Su tutta l'area del terreno, non solo su quella dell'acqua: serve
+        # anche a riconoscere i post riempiti col livello del mare lungo i
+        # fiumi che escono dal riquadro (TerrainSampler.heights).
+        geoid_region = (min(region[0], terrain.bbox[0]), min(region[1], terrain.bbox[1]),
+                        max(region[2], terrain.bbox[2]), max(region[3], terrain.bbox[3]))
         grid, geotransform, _error, _spacing = geoid_module.build_aligned_undulation_grid(
-            tuple(region), terrain.vertical_crs, max_error_m=0.01, log=report)
+            geoid_region, terrain.vertical_crs, max_error_m=0.01, log=report)
         geoid = GeoidSampler(grid, geotransform)
+    terrain.sea_level = geoid
 
     # --- 1. estrai --------------------------------------------------------------
     inputs = list(osm) + ([sea] if sea else [])
@@ -1246,9 +1651,15 @@ def verify(root: str, report: Report = _null_report, sample_per_level: int = 16)
             if (tile.level, tile.x, tile.y) != (level, entry.x, entry.y) or tile.flags != entry.flags:
                 report(f"  livello {level}: {entry.x},{entry.y} non corrisponde all'indice")
                 bad += 1
-            both = np.isfinite(tile.surface) & np.isfinite(tile.bed)
+            # Dentro l'acqua il fondale sta sotto la superficie; fuori (la
+            # sponda) e' un tetto per il terreno e puo' stare sopra.
+            sdf = waterformat.bytes_to_sdf(tile.sdf).astype(np.float64)
+            padded = np.pad(sdf, 1, mode="edge")
+            at_post = 0.25 * (padded[0:257:2, 0:257:2] + padded[0:257:2, 1:258:2]
+                              + padded[1:258:2, 0:257:2] + padded[1:258:2, 1:258:2])
+            both = np.isfinite(tile.surface) & np.isfinite(tile.bed) & (at_post > 1.0)
             if both.any() and (tile.bed[both] > tile.surface[both] + 1e-3).any():
-                report(f"  livello {level}: {entry.x},{entry.y} ha il fondale sopra la superficie")
+                report(f"  livello {level}: {entry.x},{entry.y} ha il fondale sopra la superficie in acqua")
                 bad += 1
             if np.isfinite(tile.bed).any() and not np.isfinite(tile.surface).any():
                 report(f"  livello {level}: {entry.x},{entry.y} scava senza superficie")
