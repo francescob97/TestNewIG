@@ -13,6 +13,7 @@ stesso, e il conto si controlla a mano.
 import json
 import os
 import re
+import shutil
 import sys
 import tempfile
 import time
@@ -123,6 +124,9 @@ class ContractWithCpp(unittest.TestCase):
         self.assertEqual(self.constant("WaterSdfZero"), waterformat.SDF_ZERO)
         self.assertEqual(self.constant("WaterSdfScale"), waterformat.SDF_SCALE)
         self.assertEqual(self.constant("WaterFlowScale"), 100.0)
+        self.assertEqual(self.constant("WaterRulesVersion"), waterclasses.WATER_RULES_VERSION,
+                         "WaterRulesVersion (C++) deve seguire WATER_RULES_VERSION: il motore "
+                         "dice in rosso che un dataset e' vecchio confrontando i due")
 
     def test_fixture_is_up_to_date(self):
         with open(FIXTURE, "rb") as handle:
@@ -528,6 +532,19 @@ class BuildOnSyntheticData(unittest.TestCase):
 
     def test_verify_passes(self):
         self.assertEqual(self.waterbuild.verify(self.output), 0)
+
+    def test_verify_flags_old_rules(self):
+        # Un dataset fatto con regole vecchie e' coerente ma sbagliato: e' cio'
+        # che si vedeva come fiumi in fondo a una fossa dopo la correzione.
+        with tempfile.TemporaryDirectory() as directory:
+            copy = os.path.join(directory, "acqua")
+            shutil.copytree(self.output, copy, ignore=shutil.ignore_patterns("_work"))
+            manifest = waterformat.read_manifest(copy)
+            manifest["rulesVersion"] = waterclasses.WATER_RULES_VERSION - 1
+            waterformat.write_manifest(copy, manifest)
+            messages = []
+            self.assertEqual(self.waterbuild.verify(copy, report=messages.append), 1)
+            self.assertTrue(any("VECCHIE" in m for m in messages), messages)
 
     def test_rerun_skips_and_matches(self):
         before = {e.x: e for e in waterformat.read_level_index(self.output, 14)}

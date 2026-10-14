@@ -1623,6 +1623,15 @@ def verify(root: str, report: Report = _null_report, sample_per_level: int = 16)
         return 1
     problems = 0
     report(f"dataset  : {document['datasetName']}")
+    rules = document.get("rulesVersion", 0)
+    if rules < waterclasses.WATER_RULES_VERSION:
+        # Lo stesso controllo del motore (WaterRulesVersion): un dataset fatto
+        # con regole vecchie e' leggibile e coerente, ma i suoi numeri no.
+        report(f"regole   : {rules}, VECCHIE (adesso sono le {waterclasses.WATER_RULES_VERSION}): "
+               f"rifai build-water su questa cartella")
+        problems += 1
+    else:
+        report(f"regole   : {rules}")
     report(f"corpi    : " + ", ".join(f"{k} {v:,}" for k, v in sorted(document.get("bodies", {}).items())))
     try:
         grid, _ = waterformat.read_geoid(root)

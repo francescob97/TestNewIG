@@ -311,6 +311,27 @@ correzione si misurava in pochi secondi, invece di un giro di compilazione su
 Windows. Lo stesso conto, fatto con il codice C++ del runtime su due tile vere
 del Po, ora è un test (`geowater_tests`, sezione 8).
 
+### La seconda prova: il dato vecchio
+
+Alla seconda prova il canyon c'era ancora, sulla Dora. Prima di toccare il
+codice abbiamo messo a confronto la posizione della camera (dalle stampe a
+destra) con i due dataset rifatti qui. Con la pipeline vecchia, la Dora era
+scavata di 250–330 m proprio lì. Con quella nuova non era scavata per niente,
+perché è stretta e quindi si appoggia. Il codice era a posto: Unreal stava
+aprendo un dataset d'acqua fatto prima della correzione.
+
+È un errore facile, perché un dataset vecchio **non è rotto**. Il formato non
+è cambiato, i file si leggono, `verify` era contento: solo i numeri dentro
+erano sbagliati. La cura è la stessa del materiale vecchio: il dato porta la
+**versione delle regole** che l'ha fatto (`rulesVersion` nel manifest), il
+motore conosce la sua (`WaterRulesVersion`), e se il dato è più vecchio lo
+dice con una **riga rossa fissa**, con la cartella e il comando per rifarlo.
+
+> ⚠️ **Trappola (fatta in questo progetto).** Quando una correzione cambia i
+> **dati** e non il formato, versiona le regole e falle controllare a chi
+> legge. Altrimenti il dato vecchio continua a girare e sembra un bug del
+> codice nuovo.
+
 ---
 
 ## Nota Unreal
@@ -388,3 +409,5 @@ ciò che cambia per tile (il raster) resta nelle istanze di materiale.
 - "Non lo so" non è un numero: fuori dal DEM il campionatore dice NaN, non il
   livello del mare. E la mesh decide cosa si può disegnare: l'acqua larga si
   scava con una sponda a V continua, quella stretta si appoggia sul terreno.
+- Un dato fatto con **regole vecchie** si legge benissimo ed è sbagliato in
+  silenzio: il manifest porta `rulesVersion`, e il motore lo dice in rosso.

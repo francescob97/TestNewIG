@@ -52,6 +52,15 @@ namespace GeoWorld::Tiles
 	/** Corrente: int8 in centesimi di m/s (1 m/s = 100). */
 	inline constexpr float WaterFlowScale = 100.0f;
 
+	/**
+	 * Le REGOLE con cui la pipeline fa l'acqua ("rulesVersion" nel manifest,
+	 * waterclasses.WATER_RULES_VERSION). Quando cambiano le regole il formato
+	 * resta quello e i numeri no: un dataset piu' vecchio si apre lo stesso,
+	 * ma lo si dice in rosso. Con le regole 1 i fiumi diventavano fosse
+	 * profonde fino a 300 m (docs/fase9-design.md, sezione 12).
+	 */
+	inline constexpr int32_t WaterRulesVersion = 2;
+
 	// Flag della tile (header e indice). Stessi valori di waterclasses.py.
 	inline constexpr uint16_t WaterTileSea = 1 << 0;
 	inline constexpr uint16_t WaterTileLake = 1 << 1;

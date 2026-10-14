@@ -50,6 +50,17 @@ public:
 	bool TileExists(const GeoWorld::Tiles::FTileKey& Key) const;
 	FString GetTileFilePath(const GeoWorld::Tiles::FTileKey& Key) const;
 
+	/** Le regole della pipeline che l'ha fatto ("rulesVersion" nel manifest; 0 = non lo dice). */
+	int32 GetRulesVersion() const { return RulesVersion; }
+
+	/**
+	 * Vuota se il dataset e' fatto con le regole di adesso (WaterRulesVersion);
+	 * altrimenti la frase da dire in rosso, con la cartella e il comando per
+	 * rifarlo. Un dataset vecchio si apre lo stesso: e' il dato a essere
+	 * sbagliato, e vederlo aiuta a capire che e' lui.
+	 */
+	FString GetStaleReason() const;
+
 	/** N del geoide (quota ellissoidica del livello del mare) in un punto, se il dataset lo copre. */
 	bool SampleGeoid(double LonDeg, double LatDeg, double& OutUndulation) const { return Geoid.Sample(LonDeg, LatDeg, OutUndulation); }
 	bool HasGeoid() const { return Geoid.IsValid(); }
@@ -62,6 +73,7 @@ private:
 	bool bIsOpen = false;
 	double West = 0.0, South = 0.0, East = 0.0, North = 0.0;
 	int32 MinLevel = -1, MaxLevel = -1;
+	int32 RulesVersion = 0;
 	TArray<FLevelInfo> Levels;
 	GeoWorld::Tiles::FGeoidGrid Geoid;
 };

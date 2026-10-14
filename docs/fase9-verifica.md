@@ -10,7 +10,8 @@
 - la pipeline intera su dati sintetici (terreno a tre livelli, un lago, un
   fiume largo 60 m con la sua corrente, un fiume ad area con la sua linea come
   il Po, un mare, un fiume intermittente e una piscina che devono sparire),
-  le quote fuori dal DEM, i profili e la sponda: 29 test Python, 179 in tutto;
+  le quote fuori dal DEM, i profili, la sponda e le regole vecchie: 30 test
+  Python, 180 in tutto;
 - il lettore C++ su una tile scritta dalla pipeline vera, lo scavo, la mesh
   della superficie, il raster, le onde dal vento (energia dello spettro, niente
   creste ripiegate, **niente salti né "mare che scorre" quando il vento
@@ -56,6 +57,31 @@ Cosa deve cambiare, sul Po:
   cella e mezza della mesh: è il prezzo della riva pulita;
 - un **salto** di 3 m vicino al ponte Vittorio Emanuele è vero: è la traversa
   del Michelotti, smussata in una rampa di un centinaio di metri.
+
+### 0.1 Dopo la seconda prova (la fossa c'è ancora)
+
+Gli screenshot della seconda prova (la Dora in un canyon a pareti a dente di
+sega, guardando verso nord-ovest da 45,0726° N 7,6929° E) coincidono **punto
+per punto** con l'acqua fatta dalla pipeline **di prima**: rifatta qui con
+quella, la Dora fra Alpignano e Torino è scavata di 250–330 m proprio lì; con
+quella di adesso non è scavata affatto (è stretta, si appoggia) e lo scavo più
+profondo di tutta l'area è 16 m (i Murazzi, sezione 0). Unreal stava aprendo
+un dataset d'acqua vecchio. I modi per arrivarci sono tre: `build-water`
+lanciato prima del `git pull`, lanciato su un'altra cartella, o non lanciato.
+
+Da adesso non si può più sbagliare senza accorgersene:
+
+1. `geo.Water.Open` scrive le **regole** e la **cartella** del dataset aperto,
+   e l'overlay (`geo.Water.Debug 1`) le ripete;
+2. un dataset fatto con regole vecchie mostra una **riga rossa fissa**,
+   overlay acceso o no: *"Acqua VECCHIA: ... Rifalla: python run.py
+   build-water ... -o <cartella>"*;
+3. `python run.py verify-water -o <cartella>` scrive `regole   : 2`; con un
+   dataset vecchio dice `VECCHIE` e non chiude con "TUTTO A POSTO".
+
+Per riprovare: `git pull`, ricompila, rifai l'acqua (sezione 1), controlla
+`verify-water`, poi `geo.Water.Open` **sulla stessa cartella**, e guarda che
+dica `regole 2`.
 
 ---
 
@@ -182,8 +208,9 @@ turchese dove il fondale è vicino, blu scuro al largo.
 | Superfici | da fermi: "in attesa" a zero; qualche ms per costruzione (sui worker) |
 | Vento | il vento del mare, con Hs e onda di picco dello spettro |
 | Mare | (gialla) solo mentre le onde cambiano dopo un cambio di vento |
+| Dataset, Cartella | nome, livelli, **regole** (adesso 2) e la cartella aperta |
 | Tile d'acqua | in cache, errori 0 |
-| riga rossa | manca un materiale: punto 2 |
+| riga rossa | manca un materiale (punto 2), o il dataset è vecchio (sezione 0.1) |
 
 ## 4. I comandi
 
@@ -208,6 +235,7 @@ turchese dove il fondale è vicino, blu scuro al largo.
 | Il terreno non è scavato ma l'acqua c'è | dataset d'acqua di un altro terreno | rifai `build-water` con `--terrain` uguale al terreno aperto |
 | Acqua sopra le sponde, o sponde sopra l'acqua | livello del lago o profilo del fiume | screenshot + `inspect-water` della tile: la quota della superficie viene dal 20° percentile del terreno nel lago, e dal minimo progressivo lungo il fiume |
 | Un fiume in una fossa profonda, a vertici alti e bassi | dati d'acqua fatti con la pipeline di prima (quote finte fuori dal DEM) | rifai `build-water` (sezione 0) |
+| Riga rossa fissa "Acqua VECCHIA" | il dataset aperto è fatto con regole precedenti a quelle del motore | rifai `build-water` su quella cartella (la riga la scrive), poi `geo.Water.Open` su **quella** cartella (sezione 0.1) |
 | Il fiume da lontano sembra "dipinto" sul terreno, senza profondità | è troppo stretto per la mesh a quel livello: acqua appoggiata | normale; avvicinandosi si scava |
 | La corrente va verso monte | linea OSM al contrario, o segno sbagliato | dimmi quale fiume |
 | Le onde "corrono" o saltano quando cambi vento | non dovrebbe (sezione 3.3) | dimmi a che distanza e con quale vento |

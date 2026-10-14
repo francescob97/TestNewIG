@@ -135,6 +135,8 @@ private:
 	void RemoveAllWater();
 	void OnGeoreferenceRebased(const FGeoreferenceSnapshot& Snapshot);
 	void DrawDebugOverlay();
+	/** Senza overlay: la riga rossa del dataset vecchio, se lo e'. */
+	void DrawStaleWarning() const;
 
 	UPROPERTY(Transient) TObjectPtr<UGeoTerrainSubsystem> Terrain;
 	UPROPERTY(Transient) TObjectPtr<UGeoWaterStreamingSubsystem> Streaming;

@@ -98,7 +98,7 @@ le classi di errore di compilazione gia' incontrate su Windows -- shadowing,
 simboli non esportati fra moduli, tipi di comando console inesistenti,
 collisioni da build unity, metodi inesistenti chiamati sulle nostre classi.
 
-387 test C++ in totale, piu' 179 test Python della pipeline.
+387 test C++ in totale, piu' 180 test Python della pipeline.
 
 **Dopo la prima prova su Torino** (materiale, scene Sentinel, prestazioni): `docs/prova-torino.md`.
 **Dopo la seconda** (troppi triangoli, RAM): `docs/prova-torino-2.md`.
@@ -126,7 +126,7 @@ python run.py fetch-water -o dati/acqua
 python run.py build-water --osm dati/osm/nord-ovest-latest.osm.pbf --sea dati/acqua/water-polygons-split-4326.zip --terrain dataset/terreno -o dataset/acqua
 python run.py verify-water -o dataset/acqua
 
-python -m unittest discover -s tests               :: 179 test, sorgente sintetico
+python -m unittest discover -s tests               :: 180 test, sorgente sintetico
 ```
 
 Su Windows serve conda: vedi `Pipeline/README.md`.

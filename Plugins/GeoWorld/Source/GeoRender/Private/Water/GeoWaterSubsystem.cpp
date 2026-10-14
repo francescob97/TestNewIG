@@ -257,6 +257,17 @@ void UGeoWaterSubsystem::Tick(float DeltaTime)
 	IGeoTerrainMeshProvider* Provider = Terrain ? Terrain->GetProvider() : nullptr;
 	if (Provider && Terrain->IsEnabled()) { Synchronise(Provider); }
 	if (bShowDebugOverlay) { DrawDebugOverlay(); }
+	else { DrawStaleWarning(); }
+}
+
+void UGeoWaterSubsystem::DrawStaleWarning() const
+{
+	// Un dataset fatto con regole vecchie si vede SEMPRE in rosso, overlay o
+	// no: dieci secondi di messaggio all'apertura si perdono, e il sintomo (i
+	// fiumi in fondo a una fossa) sembra un difetto del motore, non del dato.
+	if (!GEngine || !bEnabled || !Streaming || !Streaming->IsDatasetOpen()) { return; }
+	const FString Stale = Streaming->GetDataset().GetStaleReason();
+	if (!Stale.IsEmpty()) { GEngine->AddOnScreenDebugMessage(0x6F1F, 0.0f, FColor::Red, Stale); }
 }
 
 void UGeoWaterSubsystem::Synchronise(IGeoTerrainMeshProvider* Provider)
@@ -578,9 +589,13 @@ void UGeoWaterSubsystem::DrawDebugOverlay()
 	else
 	{
 		const FGeoWaterDataset& Dataset = Streaming->GetDataset();
-		Line(FColor::White, FString::Printf(TEXT("Dataset    : '%s', livelli %d..%d, %lld tile, geoide %s"),
+		Line(FColor::White, FString::Printf(TEXT("Dataset    : '%s', livelli %d..%d, %lld tile, regole %d, geoide %s"),
 			*Dataset.GetDatasetName(), Dataset.GetMinLevel(), Dataset.GetMaxLevel(),
-			static_cast<long long>(Dataset.GetIndexedTileCount()), Dataset.HasGeoid() ? TEXT("si'") : TEXT("no")));
+			static_cast<long long>(Dataset.GetIndexedTileCount()), Dataset.GetRulesVersion(),
+			Dataset.HasGeoid() ? TEXT("si'") : TEXT("no")));
+		Line(FColor::White, FString::Printf(TEXT("Cartella   : %s"), *Dataset.GetRootDirectory()));
+		const FString Stale = Dataset.GetStaleReason();
+		if (!Stale.IsEmpty()) { Line(FColor::Red, Stale); }
 	}
 	if (!bEnabled) { Line(FColor::Yellow, TEXT("Acqua spenta (geo.Water.Enable 1)")); }
 

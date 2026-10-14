@@ -1729,10 +1729,13 @@ namespace GeoWaterConsole
 		const FGeoWaterDataset& Dataset = Streaming->GetDataset();
 		double West, South, East, North;
 		Dataset.GetBoundingBox(West, South, East, North);
-		GeoTerrainConsole::Report(FString::Printf(TEXT("Acqua '%s': livelli %d..%d, %lld tile"),
+		GeoTerrainConsole::Report(FString::Printf(TEXT("Acqua '%s': livelli %d..%d, %lld tile, regole %d"),
 			*Dataset.GetDatasetName(), Dataset.GetMinLevel(), Dataset.GetMaxLevel(),
-			static_cast<long long>(Dataset.GetIndexedTileCount())));
+			static_cast<long long>(Dataset.GetIndexedTileCount()), Dataset.GetRulesVersion()));
+		GeoTerrainConsole::Report(FString::Printf(TEXT("Cartella: %s"), *Dataset.GetRootDirectory()));
 		GeoTerrainConsole::Report(FString::Printf(TEXT("Area: ovest %.4f  sud %.4f  est %.4f  nord %.4f"), West, South, East, North));
+		const FString Stale = Dataset.GetStaleReason();
+		if (!Stale.IsEmpty()) { GeoTerrainConsole::Report(Stale, FColor::Red); }
 		const FString Problem = Water->GetMaterialProblem();
 		if (!Problem.IsEmpty()) { GeoTerrainConsole::Report(Problem, FColor::Red); }
 		return true;

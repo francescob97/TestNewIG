@@ -26,7 +26,9 @@ from dataclasses import dataclass
 import numpy as np
 
 #: Versione delle regole. Entra nell'impronta della pipeline: se cambia, le
-#: tile si rifanno.
+#: tile si rifanno. Va nel manifest ("rulesVersion"), e il motore la
+#: confronta con WaterRulesVersion (WaterTileFormat.h): un dataset fatto con
+#: regole piu' vecchie lo dice in rosso. Cambiandola, cambia anche quella.
 WATER_RULES_VERSION = 2
 
 KIND_SEA = 1

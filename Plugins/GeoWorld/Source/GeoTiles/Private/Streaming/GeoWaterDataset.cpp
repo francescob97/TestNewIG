@@ -17,6 +17,7 @@ void FGeoWaterDataset::Close()
 	Levels.Reset();
 	Geoid = GeoWorld::Tiles::FGeoidGrid();
 	MinLevel = MaxLevel = -1;
+	RulesVersion = 0;
 }
 
 bool FGeoWaterDataset::Open(const FString& InRootDirectory, FString& OutError)
@@ -52,6 +53,7 @@ bool FGeoWaterDataset::Open(const FString& InRootDirectory, FString& OutError)
 		return false;
 	}
 	Root->TryGetStringField(TEXT("datasetName"), DatasetName);
+	Root->TryGetNumberField(TEXT("rulesVersion"), RulesVersion);
 
 	const TSharedPtr<FJsonObject>* Box = nullptr;
 	if (Root->TryGetObjectField(TEXT("boundingBox"), Box) && Box)
@@ -116,10 +118,21 @@ bool FGeoWaterDataset::Open(const FString& InRootDirectory, FString& OutError)
 	}
 
 	bIsOpen = true;
-	UE_LOG(LogGeoWorld, Log, TEXT("[GeoWater] '%s': livelli %d..%d, %lld tile, geoide %s"),
-		*DatasetName, MinLevel, MaxLevel, static_cast<long long>(GetIndexedTileCount()),
-		Geoid.IsValid() ? TEXT("si'") : TEXT("no"));
+	UE_LOG(LogGeoWorld, Log, TEXT("[GeoWater] '%s' (%s): livelli %d..%d, %lld tile, regole %d, geoide %s"),
+		*DatasetName, *RootDirectory, MinLevel, MaxLevel, static_cast<long long>(GetIndexedTileCount()),
+		RulesVersion, Geoid.IsValid() ? TEXT("si'") : TEXT("no"));
+	const FString Stale = GetStaleReason();
+	if (!Stale.IsEmpty()) { UE_LOG(LogGeoWorld, Warning, TEXT("[GeoWater] %s"), *Stale); }
 	return true;
+}
+
+FString FGeoWaterDataset::GetStaleReason() const
+{
+	if (!bIsOpen || RulesVersion >= GeoWorld::Tiles::WaterRulesVersion) { return FString(); }
+	return FString::Printf(
+		TEXT("Acqua VECCHIA: '%s' e' fatta con le regole %d, il motore vuole le %d (con le vecchie i fiumi ")
+		TEXT("diventano fosse profonde). Rifalla: python run.py build-water ... -o %s"),
+		*DatasetName, RulesVersion, GeoWorld::Tiles::WaterRulesVersion, *RootDirectory);
 }
 
 const FGeoWaterDataset::FLevelInfo* FGeoWaterDataset::FindLevel(int32 Level) const

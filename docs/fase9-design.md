@@ -428,3 +428,22 @@ Il test `geowater_tests`, sezione 8, rifà queste misure **con il codice del
 runtime** su due coppie di tile vere (`TestData/po_torino_*`), e fallisce sui
 dati di prima.
 
+### 12.1 La seconda prova: un dataset vecchio aperto
+
+La seconda prova mostrava ancora un canyon, sulla Dora. Era il dato, non il
+codice: rifatto con la pipeline di prima, lo scavo della Dora a ovest di
+Torino arriva a 250–330 m esattamente dove guardava la camera; con quella
+nuova la Dora non è scavata (è più stretta di 4 post) e il massimo dell'area è
+16 m. Abbiamo controllato anche gli altri sospetti: un terreno con il livello
+14 (la Dora diventa "risolta" e si scava: massimo 16 m), i processi lanciati
+come su Windows (`spawn`: identico), e la ricostruzione sopra una cartella con
+i dati vecchi e il loro `_work` (le regole nuove rifanno tutto).
+
+Il formato non cambia quando cambiano le regole, quindi un dataset vecchio si
+legge benissimo ed è sbagliato in silenzio. Adesso no: il manifest porta
+`rulesVersion`, il motore lo confronta con `WaterRulesVersion`
+(`WaterTileFormat.h`) e, se è vecchio, lo dice con una riga rossa fissa che
+nomina la cartella e il comando; `verify-water` lo conta come problema. Un
+test Python tiene allineati i due numeri. Il dataset vecchio si apre lo
+stesso: nasconderlo farebbe sparire il sintomo, non la causa.
+
