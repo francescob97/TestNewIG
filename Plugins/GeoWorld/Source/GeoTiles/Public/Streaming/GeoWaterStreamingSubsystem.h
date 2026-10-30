@@ -60,6 +60,8 @@ public:
 
 	/** Gia' in cache, oppure nullptr. Non avvia nessun caricamento. */
 	FWaterTilePtr FindLoadedTile(const FTileKey& Key);
+	/** Come FindLoadedTile, senza toccare l'ordine della cache. */
+	FWaterTilePtr PeekLoadedTile(const FTileKey& Key) const { return Cache.Peek(Key); }
 
 	/** Chiede una tile. Ritorna subito. Priorita': piu' basso = piu' urgente. */
 	EGeoTileState RequestTile(const FTileKey& Key, int32 Priority = 0);

@@ -115,6 +115,15 @@ else()
 	target_compile_options(geowater_tests PRIVATE -Wall -Wextra -O2)
 endif()
 
+add_executable(geoweather_tests geoweather_main.cpp)
+target_include_directories(geoweather_tests PRIVATE ${GEORENDER_DIR}/Public)
+
+if (MSVC)
+	target_compile_options(geoweather_tests PRIVATE /W4)
+else()
+	target_compile_options(geoweather_tests PRIVATE -Wall -Wextra -O2)
+endif()
+
 enable_testing()
 add_test(NAME geocore COMMAND geocore_tests)
 add_test(NAME geotiles COMMAND geotiles_tests)
@@ -125,3 +134,4 @@ add_test(NAME georoads COMMAND georoads_tests
 	${CMAKE_CURRENT_SOURCE_DIR}/../../Source/GeoTiles/TestData/vector_fixture.gvt)
 add_test(NAME geowater COMMAND geowater_tests
 	${CMAKE_CURRENT_SOURCE_DIR}/../../Source/GeoTiles/TestData/water_fixture.gwa)
+add_test(NAME geoweather COMMAND geoweather_tests)

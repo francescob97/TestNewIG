@@ -104,4 +104,15 @@ namespace GeoWorld::Format
 		std::snprintf(Buffer, sizeof(Buffer), "%03lld", Rounded);
 		return std::string(Buffer) + Degree;
 	}
+
+	/**
+	 * Vento: "7,2 m/s (14 kt) da 245°". La direzione e' quella DA CUI
+	 * soffia, come nei bollettini; i nodi perche' li usa chi vola e chi va
+	 * per mare.
+	 */
+	inline std::string Wind(double SpeedMs, double FromDegrees)
+	{
+		constexpr double KnotsPerMs = 3600.0 / 1852.0;
+		return Number(SpeedMs, 1) + " m/s (" + Number(SpeedMs * KnotsPerMs, 0) + " kt) da " + Heading(FromDegrees);
+	}
 }

@@ -140,6 +140,8 @@ float normale, e per questo passa da un nodo `TruncateLWC`. (1, 2, 13)
 
 **Manifest** — il file `manifest.json` che descrive un dataset. (3)
 
+**Mare aperto** — il mare lontano dalla costa, dove il dataset del terreno non ha tile (nemmeno un post di dato). `build-water` annota le tile che mancano e sono tutte mare (`opensea.bin`), e il runtime ci costruisce terreno e acqua virtuali. (13)
+
 **MarkRenderStateDirty** — dire a Unreal che una proprietà di disegno è cambiata e
 il proxy di scena va rifatto. (6)
 
@@ -212,7 +214,11 @@ quote) o un'area (i pixel). Decide se il bordo è condiviso. (3, 7)
 
 **Residenza** — l'insieme delle scelte su cosa tenere in memoria e pronto, in base a posizione e velocità invece che alla direzione dello sguardo. (11)
 
+**Ridosso** — la zona sottovento a una cresta ripida: il vento si stacca dalla cresta e dietro resta un vortice (il rotore). Meno vento, molta più turbolenza. (14)
+
 **Riscaldamento** — dopo un salto, qualche decimo di secondo in cui si costruiscono più mesh per frame (24 invece di 4): il frame rallenta, il terreno arriva tutto insieme. (11)
+
+**Rugosità** (`z0`) — quanto il suolo è ruvido per il vento, in metri: 0,2 mm il mare, 3 cm un prato, 1 m una città. Decide quanto lo strato limite frena il vento al suolo e quanto è rafficato. (14)
 
 **Scavo** — abbassare le quote del terreno sotto l'acqua fino al fondale prima di costruirne la mesh, così l'acqua ha una profondità vera. Lo fa il terreno, con la funzione che gli consegna l'acqua (`SetHeightEditor`). (13)
 
@@ -234,6 +240,8 @@ toccare il subsystem. (2)
 
 **Stampe della posizione** — il riquadro a destra con latitudine, longitudine, quota (ellissoide, livello del mare, dal suolo) e rotta. Disegnato con `UDebugDrawService`, anche nell'editor. (13)
 
+**Strato limite** — i primi ~600 m d'aria, dove il vento sente l'attrito del suolo: cresce con il logaritmo della quota e gira con lei. Sopra c'è il vento di gradiente. (14)
+
 **Strato puro / ponte Unreal** — la divisione di ogni modulo in C++ standard
 testabile e codice che usa il motore. (0)
 
@@ -248,7 +256,11 @@ testabile e codice che usa il motore. (0)
 **Tile vettoriale** (`.gvt`) — una tile che contiene linee (punti e proprietà) invece di
 pixel. Il runtime le disegna alla risoluzione che serve. Livelli 10..13. (12)
 
+**Tile virtuale** — una tile che il dataset non ha e che il runtime costruisce in memoria, sui thread del pool come una lettura: oggi il fondale e l'acqua del mare aperto. Il resto del motore non sa che è virtuale. (13)
+
 **TINITALY** — il modello del terreno dell'Italia a 10 m dell'INGV. (3)
+
+**Turbolenza congelata** — l'ipotesi di Taylor: su tempi brevi le raffiche non cambiano, vengono solo trasportate dal vento. Il campo delle raffiche scorre con il vento medio, e una raffica si vede correre sul lago. (14)
 
 **UBT / UHT** — Unreal Build Tool e Unreal Header Tool: compilano e generano codice. (1)
 
@@ -257,6 +269,10 @@ A 6.371 km è 64 cm, a 10 km è 0,6 mm. (2)
 
 **UObject** — la classe base universale di Unreal, con riflessione e garbage
 collector. (1)
+
+**Vento di gradiente** — il vento sopra lo strato limite, che non sente il suolo. Con 10 m/s alla stazione meteo è ~17 m/s. (14)
+
+**Vento di riferimento** — il dato da cui parte la simulazione del vento: velocità e direzione a 10 m su un prato, come in un bollettino (METAR). Tutto il resto lo calcola il campo. (14)
 
 **Vestitore** — chi mette qualcosa sopra il terreno e decide quando una tile è pronta da
 mostrare: le ortofoto e le strade. Il terreno ne accetta più d'uno, per nome. (11, 12)
@@ -413,7 +429,9 @@ il primo comando da provare quando non si vede niente. (6)
 | `docs/fase8-verifica.md` | come provare le strade |
 | `docs/strade-3d.md` | strade 3D da vicino, e il flash del rebase |
 | `docs/fase9-design.md` | acqua, vento, stampe della posizione |
-| `docs/fase9-verifica.md` | come provare l'acqua |
+| `docs/fase9-verifica.md` | come provare l'acqua (e il mare aperto) |
+| `docs/vento-design.md` | il vento: la simulazione |
+| `docs/vento-verifica.md` | come provare il vento |
 | `docs/residenza-design.md` | cosa tenere pronto: posizione, velocità, mesh nascoste |
 | `docs/residenza-verifica.md` | come verificare la residenza |
 | `docs/prova-torino.md` | la prima prova vera: cause del mosaico, prestazioni, tutta Italia |

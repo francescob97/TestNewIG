@@ -3,6 +3,8 @@
 #include "GeoCoreModule.h"
 
 #include "Dom/JsonObject.h"
+#include "HAL/FileManager.h"
+#include "Misc/Compression.h"
 #include "Misc/FileHelper.h"
 #include "Misc/Paths.h"
 #include "Serialization/JsonReader.h"
@@ -16,6 +18,7 @@ void FGeoWaterDataset::Close()
 	bIsOpen = false;
 	Levels.Reset();
 	Geoid = GeoWorld::Tiles::FGeoidGrid();
+	OpenSea.Reset();
 	MinLevel = MaxLevel = -1;
 	RulesVersion = 0;
 }
@@ -117,13 +120,57 @@ bool FGeoWaterDataset::Open(const FString& InRootDirectory, FString& OutError)
 		UE_LOG(LogGeoWorld, Warning, TEXT("[GeoWater] geoid.bin: %s"), UTF8_TO_TCHAR(GeoidError.c_str()));
 	}
 
+	LoadOpenSea();
+
 	bIsOpen = true;
-	UE_LOG(LogGeoWorld, Log, TEXT("[GeoWater] '%s' (%s): livelli %d..%d, %lld tile, regole %d, geoide %s"),
+	UE_LOG(LogGeoWorld, Log, TEXT("[GeoWater] '%s' (%s): livelli %d..%d, %lld tile, regole %d, geoide %s, mare aperto %lld tile"),
 		*DatasetName, *RootDirectory, MinLevel, MaxLevel, static_cast<long long>(GetIndexedTileCount()),
-		RulesVersion, Geoid.IsValid() ? TEXT("si'") : TEXT("no"));
+		RulesVersion, Geoid.IsValid() ? TEXT("si'") : TEXT("no"),
+		static_cast<long long>(OpenSea.IsValid() ? OpenSea->Sea.Tiles.size() : 0));
 	const FString Stale = GetStaleReason();
 	if (!Stale.IsEmpty()) { UE_LOG(LogGeoWorld, Warning, TEXT("[GeoWater] %s"), *Stale); }
 	return true;
+}
+
+void FGeoWaterDataset::LoadOpenSea()
+{
+	// Facoltativo come il geoide: un dataset fatto senza --sea non ce l'ha, e
+	// senza il geoide non si saprebbe a che quota mettere l'acqua.
+	TArray<uint8> Blob;
+	if (!FFileHelper::LoadFileToArray(Blob, *FPaths::Combine(RootDirectory, TEXT("opensea.bin")), FILEREAD_Silent))
+	{
+		return;
+	}
+	if (!Geoid.IsValid())
+	{
+		UE_LOG(LogGeoWorld, Warning, TEXT("[GeoWater] opensea.bin senza geoid.bin: mare aperto spento"));
+		return;
+	}
+	GeoWorld::Tiles::FOpenSeaHeader Header;
+	std::string Error;
+	if (!GeoWorld::Tiles::ParseOpenSeaHeader(Blob.GetData(), Blob.Num(), Header, Error))
+	{
+		UE_LOG(LogGeoWorld, Warning, TEXT("[GeoWater] %s"), UTF8_TO_TCHAR(Error.c_str()));
+		return;
+	}
+	// NOTA UE: con NAME_Zlib il buffer di destinazione deve avere ESATTAMENTE
+	// la dimensione decompressa, che l'header permette di calcolare.
+	TArray<uint8> Plain;
+	Plain.SetNumUninitialized(static_cast<int32>(Header.ExpectedPlainBytes()));
+	if (!FCompression::UncompressMemory(NAME_Zlib, Plain.GetData(), Plain.Num(),
+			Blob.GetData() + GeoWorld::Tiles::OpenSeaHeaderBytes, static_cast<int32>(Header.PayloadBytes)))
+	{
+		UE_LOG(LogGeoWorld, Warning, TEXT("[GeoWater] opensea.bin: decompressione zlib fallita"));
+		return;
+	}
+	auto Data = MakeShared<FGeoOpenSeaData, ESPMode::ThreadSafe>();
+	if (!GeoWorld::Tiles::DecodeOpenSeaPayload(Header, Plain.GetData(), Plain.Num(), Data->Sea, Error))
+	{
+		UE_LOG(LogGeoWorld, Warning, TEXT("[GeoWater] %s"), UTF8_TO_TCHAR(Error.c_str()));
+		return;
+	}
+	Data->Geoid = Geoid;
+	if (!Data->Sea.IsEmpty()) { OpenSea = Data; }
 }
 
 FString FGeoWaterDataset::GetStaleReason() const
@@ -160,13 +207,18 @@ bool FGeoWaterDataset::ResolveWaterKey(const GeoWorld::Tiles::FTileKey& TerrainK
 	{
 		if (!FindLevel(Level)) { return false; }
 		OutWaterKey = TerrainKey;
-		return TileExists(TerrainKey);
+		// Al largo la tile d'acqua non c'e' perche' non c'era il terreno: e'
+		// virtuale, come la tile di terreno che la chiede.
+		return TileExists(TerrainKey) || IsOpenSea(TerrainKey);
 	}
 
 	// Oltre il livello piu' fine: l'antenato, ritagliato (FWaterView).
 	const uint32 Depth = static_cast<uint32>(Level - MaxLevel);
 	OutWaterKey = GeoWorld::Tiles::FTileKey{ static_cast<uint32>(MaxLevel), TerrainKey.X >> Depth, TerrainKey.Y >> Depth };
-	return TileExists(OutWaterKey);
+	if (TileExists(OutWaterKey)) { return true; }
+	if (!IsOpenSea(TerrainKey)) { return false; }
+	OutWaterKey = TerrainKey;
+	return true;
 }
 
 FString FGeoWaterDataset::GetTileFilePath(const GeoWorld::Tiles::FTileKey& Key) const

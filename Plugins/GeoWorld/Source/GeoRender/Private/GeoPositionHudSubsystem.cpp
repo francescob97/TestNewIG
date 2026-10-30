@@ -6,6 +6,7 @@
 #include "Streaming/GeoTileStreamingSubsystem.h"
 #include "Terrain/GeoTerrainSubsystem.h"
 #include "Water/GeoWaterSubsystem.h"
+#include "Weather/GeoWeatherSubsystem.h"
 
 #include "CanvasItem.h"
 #include "Debug/DebugDrawService.h"
@@ -70,9 +71,17 @@ bool UGeoPositionHudSubsystem::GroundHeightAt(double LonDeg, double LatDeg, doub
 	{
 		uint32 X = 0, Y = 0;
 		Tiles::TileForLonLat(static_cast<uint32>(Level), LonDeg, LatDeg, X, Y);
-		const UGeoTileStreamingSubsystem::FTilePtr Tile =
-			Streaming->FindLoadedTile(Tiles::FTileKey{ static_cast<uint32>(Level), X, Y });
+		const Tiles::FTileKey Key{ static_cast<uint32>(Level), X, Y };
+		const UGeoTileStreamingSubsystem::FTilePtr Tile = Streaming->FindLoadedTile(Key);
 		if (!Tile || !Tile->IsValid()) { continue; }
+
+		// Al largo la tile e' virtuale e le sue quote sono il FONDALE: il
+		// suolo che conta e' il mare, cioe' il geoide.
+		const UGeoWaterSubsystem* Water = World->GetSubsystem<UGeoWaterSubsystem>();
+		if (Streaming->IsVirtualTile(Key) && Water && Water->GetGeoidUndulation(LonDeg, LatDeg, OutHeight))
+		{
+			return true;
+		}
 
 		const Mesh::FSurfaceSampler Surface(*Tile, Step);
 		OutHeight = Surface.HeightAt(LonDeg, LatDeg);
@@ -133,6 +142,19 @@ void UGeoPositionHudSubsystem::Draw(UCanvas* Canvas, APlayerController* /*Contro
 	// La rotta e' lo yaw della vista: con gli assi del progetto (X nord, Y
 	// est) lo yaw di Unreal e' l'azimut della bussola, vicino all'origine.
 	Add(TEXT("Rotta"), Format::Heading(Canvas->SceneView->ViewRotation.Yaw));
+
+	// Il vento: qui, alla quota della vista (con la raffica di adesso), e a
+	// 10 m dal suolo sotto di te, come lo darebbe una stazione meteo.
+	if (const UGeoWeatherSubsystem* WeatherSubsystem = GetWorld()->GetSubsystem<UGeoWeatherSubsystem>())
+	{
+		const Weather::FWindSample Wind = WeatherSubsystem->SampleWind(LatDeg, LonDeg, Here.HeightM);
+		Add(TEXT("Vento"), Format::Wind(Wind.MeanSpeed(), Wind.MeanFromDegrees()));
+		Add(TEXT("Raffiche"), Format::Number(Wind.GustSpeed(), 1) + " m/s, adesso " + Format::Number(Wind.Speed(), 1)
+			+ ", verticale " + (Wind.Up >= 0.0 ? "+" : "") + Format::Number(Wind.Up, 1) + " m/s");
+		const Weather::FWindSample Surface = WeatherSubsystem->SampleWind(LatDeg, LonDeg,
+			(GroundHeightAt(LonDeg, LatDeg, Ground) ? Ground : Here.HeightM) + Weather::ReferenceHeightM);
+		Add(TEXT("A 10 m"), Format::Wind(Surface.MeanSpeed(), Surface.MeanFromDegrees()));
+	}
 
 	// --- Disegno --------------------------------------------------------------
 	const UFont* Font = GEngine->GetMediumFont();

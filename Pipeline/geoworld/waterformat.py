@@ -72,6 +72,17 @@ GEOID_FILENAME = "geoid.bin"
 GEOID_MAGIC = b"GWGE"
 GEOID_HEADER = struct.Struct("<4sHHIIddd")       # 40 byte
 
+OPEN_SEA_FILENAME = "opensea.bin"
+OPEN_SEA_MAGIC = b"GWOS"
+OPEN_SEA_VERSION = 1
+#: magic, versione, riservato, tile, colonne, righe, byte del payload,
+#: ovest, nord, passo (gradi): 48 byte.
+OPEN_SEA_HEADER = struct.Struct("<4sHHIIIIddd")
+OPEN_SEA_RECORD = struct.Struct("<III")          # livello, x, y
+#: Profondita' del fondale del mare aperto: decimetri sotto il geoide, uint16.
+#: 0xFFFF = terra, o fuori dalla griglia.
+OPEN_SEA_NO_DEPTH = 0xFFFF
+
 
 @dataclass
 class WaterTile:
@@ -271,13 +282,82 @@ def read_geoid(root: str) -> tuple[np.ndarray, tuple[float, float, float]]:
     return grid, (lon, lat, spacing)
 
 
+# --- Mare aperto -----------------------------------------------------------------
+#
+# Dove il dataset del terreno non ha tile (il mare lontano dalla costa: le
+# tile senza nemmeno un post di dato non si scrivono) non c'e' niente da
+# disegnare: il quadtree raffina la tile costiera e al posto delle figlie in
+# mare lascia un buco. Il file dice al runtime dove quei buchi sono MARE:
+#
+#   header  48 byte: "GWOS", versione, riservato, numero di tile, colonne e
+#           righe della griglia, byte del payload, ovest, nord, passo della
+#           griglia (gradi; bordi delle celle, non centri)
+#   payload zlib di:
+#     tile        n x (uint32 livello, x, y): le tile SENZA terreno tutte in
+#                 mare, al livello piu' grossolano possibile; vale anche per
+#                 tutte le loro discendenti
+#     profondita' righe x colonne uint16, decimetri sotto il geoide; 0xFFFF a
+#                 terra. Il runtime ci appoggia il fondale delle tile virtuali.
+
+@dataclass
+class OpenSea:
+    tiles: list                 # [(livello, x, y)], ordinate
+    depth: np.ndarray           # float32 (righe, colonne), metri; NaN a terra
+    west: float
+    north: float
+    spacing: float
+
+
+def encode_open_sea(sea: OpenSea) -> bytes:
+    rows, columns = sea.depth.shape
+    tiles = b"".join(OPEN_SEA_RECORD.pack(int(level), int(x), int(y)) for level, x, y in sea.tiles)
+    depth_dm = np.full(sea.depth.shape, OPEN_SEA_NO_DEPTH, dtype="<u2")
+    valid = np.isfinite(sea.depth)
+    depth_dm[valid] = np.clip(np.round(sea.depth[valid] * 10.0), 0, OPEN_SEA_NO_DEPTH - 1)
+    payload = zlib.compress(tiles + depth_dm.tobytes(), 6)
+    return OPEN_SEA_HEADER.pack(OPEN_SEA_MAGIC, OPEN_SEA_VERSION, 0, len(sea.tiles), columns, rows,
+                                len(payload), float(sea.west), float(sea.north),
+                                float(sea.spacing)) + payload
+
+
+def decode_open_sea(blob: bytes) -> OpenSea:
+    (magic, version, _, count, columns, rows, payload_bytes,
+     west, north, spacing) = OPEN_SEA_HEADER.unpack_from(blob, 0)
+    if magic != OPEN_SEA_MAGIC or version != OPEN_SEA_VERSION:
+        raise ValueError("opensea.bin non valido")
+    plain = zlib.decompress(blob[OPEN_SEA_HEADER.size:OPEN_SEA_HEADER.size + payload_bytes])
+    expected = count * OPEN_SEA_RECORD.size + rows * columns * 2
+    if len(plain) != expected:
+        raise ValueError(f"opensea.bin: payload di {len(plain)} byte, attesi {expected}")
+    tiles = [OPEN_SEA_RECORD.unpack_from(plain, i * OPEN_SEA_RECORD.size) for i in range(count)]
+    depth_dm = np.frombuffer(plain, dtype="<u2", count=rows * columns,
+                             offset=count * OPEN_SEA_RECORD.size).reshape(rows, columns)
+    depth = np.where(depth_dm == OPEN_SEA_NO_DEPTH, np.nan, depth_dm / 10.0).astype(np.float32)
+    return OpenSea(tiles, depth, west, north, spacing)
+
+
+def write_open_sea(root: str, sea: OpenSea) -> str:
+    path = os.path.join(root, OPEN_SEA_FILENAME)
+    os.makedirs(root, exist_ok=True)
+    temporary = f"{path}.tmp"
+    with open(temporary, "wb") as handle:
+        handle.write(encode_open_sea(sea))
+    os.replace(temporary, path)
+    return path
+
+
+def read_open_sea(root: str) -> OpenSea:
+    with open(os.path.join(root, OPEN_SEA_FILENAME), "rb") as handle:
+        return decode_open_sea(handle.read())
+
+
 # --- Manifest -------------------------------------------------------------------
 
 def build_manifest(*, dataset_name: str, bbox: tuple[float, float, float, float],
                    levels: list[dict], source: dict, body_counts: dict[str, int],
-                   pipeline_version: str) -> dict:
+                   pipeline_version: str, open_sea: dict | None = None) -> dict:
     west, south, east, north = bbox
-    return {
+    document = {
         "formatVersion": 1,
         "generator": f"geoworld-pipeline {pipeline_version}",
         "datasetName": dataset_name,
@@ -307,6 +387,9 @@ def build_manifest(*, dataset_name: str, bbox: tuple[float, float, float, float]
                                   "uint32 byte del file"],
                        "sortedBy": "(y, x)"},
     }
+    if open_sea is not None:
+        document["openSea"] = open_sea
+    return document
 
 
 def write_manifest(root: str, manifest: dict) -> str:
@@ -363,3 +446,21 @@ def fixture_tile() -> WaterTile:
 
 def fixture_bytes() -> bytes:
     return encode_tile(fixture_tile())
+
+
+#: Il mare aperto di riferimento: TestData/opensea_fixture.bin.
+OPEN_SEA_FIXTURE_TILES = [(9, 534, 130), (11, 2131, 521), (11, 2132, 521)]
+
+
+def open_sea_fixture() -> OpenSea:
+    """
+    Tre tile e una griglia 4 x 3 da 0,25 gradi con ovest 7,5 e nord 44,5: la
+    colonna 0 e' terra, poi 10 m, 25,5 m e 60 m di profondita'. Valori facili
+    da controllare dal C++.
+    """
+    depth = np.array([[np.nan, 10.0, 25.5, 60.0]] * 3, dtype=np.float32)
+    return OpenSea(list(OPEN_SEA_FIXTURE_TILES), depth, 7.5, 44.5, 0.25)
+
+
+def open_sea_fixture_bytes() -> bytes:
+    return encode_open_sea(open_sea_fixture())

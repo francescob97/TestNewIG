@@ -219,9 +219,11 @@ di sbagliare, tutti evitati:
 
 ## 13.9 Il vento: il primo pezzo del meteo
 
-`UGeoWeatherSubsystem` tiene un vento medio (velocità, direzione **da cui**
-soffia, come nei bollettini) e lo modula con delle **raffiche** lente. È il seme
-della futura fase del meteo.
+`UGeoWeatherSubsystem` tiene il vento (velocità, direzione **da cui** soffia,
+come nei bollettini). Dalla simulazione del vento (capitolo 14) è un campo vero:
+le onde crescono con il vento **medio sul mare aperto** sotto la camera, più
+forte di quello della stazione a terra, e l'increspatura segue la **raffica che
+sta passando** in quel punto.
 
 Le onde lunghe seguono il vento **medio**; le raffiche muovono solo
 l'increspatura e la schiuma. Non è solo una scelta tecnica (sezione 13.8): è la
@@ -332,6 +334,40 @@ dice con una **riga rossa fissa**, con la cartella e il comando per rifarlo.
 > legge. Altrimenti il dato vecchio continua a girare e sembra un bug del
 > codice nuovo.
 
+## 13.13 Mari e oceani: il mare aperto
+
+Al largo il dataset del terreno **non ha tile**: la pipeline del terreno non
+scrive una tile senza nemmeno un post di dato, ed è giusto (per l'Italia il
+riquadro è cinque volte la terra). Ma il quadtree, raffinando la tile della
+costa, disegna solo le figlie che esistono: scendendo verso il mare aperto si
+apriva un **buco** grande come il Tirreno.
+
+La soluzione ha due metà.
+
+- **La pipeline sa dov'è il mare.** `build-water`, con i poligoni del mare,
+  scende nel quadtree del terreno e annota le tile che **mancano** e stanno
+  **tutte in mare**, al livello più grossolano possibile (una tile annotata vale
+  per tutte le sue discendenti), più una griglia della profondità del fondale.
+  È `opensea.bin`, accanto alle tile d'acqua.
+- **Il runtime costruisce quello che manca.** Lo streaming del terreno accetta
+  una **sorgente di tile virtuali**: per una tile che il dataset non ha, chiede
+  alla sorgente se sa costruirla. Il dataset d'acqua sa farlo per il mare aperto:
+  il fondale (geoide meno profondità) e, per l'acqua, una superficie al geoide
+  tutta lontana dalla riva. Si costruiscono sui thread del pool, come una
+  lettura dal disco, in meno di un millisecondo.
+
+> 💡 **Esempio.** Volando da Genova verso la Corsica a 300 m di quota, il
+> quadtree vuole le tile del livello 13 sotto di te. Il terreno non le ha (non
+> c'è terra); `opensea.bin` dice che la tile di livello 9 che le contiene è
+> tutta mare. Lo streaming le costruisce: fondale a −60 m, acqua al geoide,
+> onde piene. Il resto del motore (quadtree, mesh, materiale) non sa che sono
+> virtuali.
+
+> ⚠️ **Trappola.** Il mare virtuale si accende **con lo scavo**, non da solo:
+> se l'acqua è spenta, o manca il suo materiale, un fondale a −60 m senza acqua
+> sopra sarebbe peggio del buco. E "dal suolo", nelle stampe, al largo si misura
+> dal mare, non dal fondale.
+
 ---
 
 ## Nota Unreal
@@ -380,12 +416,13 @@ ciò che cambia per tile (il raster) resta nelle istanze di materiale.
 | `Pipeline/geoworld/waterclasses.py` | da tag OSM a corpo d'acqua, le regole della sezione 13.3 |
 | `Pipeline/geoworld/waterformat.py` | formato `.gwa`, indici, manifest, geoide |
 | `Pipeline/geoworld/waterbuild.py` | estrazione, taglio, verifica |
-| `GeoTiles/Public/Tiles/WaterTileFormat.h` | lettura del formato (puro) |
+| `GeoTiles/Public/Tiles/WaterTileFormat.h` | lettura del formato, anche `opensea.bin` (puro) |
+| `GeoTiles/Public/Tiles/OpenSea.h` | le tile virtuali del mare aperto (puro) |
 | `GeoTiles/.../Streaming/GeoWater*` | dataset e caricamento |
 | `GeoRender/Public/Water/WaterMesh.h` | scavo, mesh, raster (puro) |
 | `GeoRender/Public/Water/WaveSpectrum.h` | dal vento alle onde, niente salti (puro) |
 | `GeoRender/Public/Water/WaterTextures.h` | normale di dettaglio e schiuma (puro) |
-| `GeoRender/Public/Weather/Wind.h`, `.../Weather/GeoWeatherSubsystem.*` | il vento |
+| `GeoRender/Public/Weather/*` | il vento (capitolo 14) |
 | `GeoRender/.../Water/GeoWaterSubsystem.*` | il runtime |
 | `GeoRender/.../GeoPositionHudSubsystem.*`, `GeoCore/Public/Geo/GeoFormat.h` | le stampe |
 | `GeoWorldEditor/Private/GeoTerrainMaterialFactory.cpp` | `M_GeoWater`, `MPC_GeoWater` |
@@ -411,3 +448,5 @@ ciò che cambia per tile (il raster) resta nelle istanze di materiale.
   scava con una sponda a V continua, quella stretta si appoggia sul terreno.
 - Un dato fatto con **regole vecchie** si legge benissimo ed è sbagliato in
   silenzio: il manifest porta `rulesVersion`, e il motore lo dice in rosso.
+- Al largo il terreno non c'è: il mare aperto si **costruisce** a runtime (tile
+  virtuali), da poche righe di dati (`opensea.bin`).

@@ -8,6 +8,8 @@
 #include "Misc/Compression.h"
 #include "Misc/FileHelper.h"
 
+#include "Tiles/OpenSea.h"
+
 #include <string>
 
 /**
@@ -24,11 +26,25 @@ public:
 	FGeoWaterLoadWork(UGeoWaterStreamingSubsystem* InOwner, const GeoWorld::Tiles::FTileKey& InKey, const FString& InPath)
 		: Owner(InOwner), Key(InKey), Path(InPath) {}
 
+	/** Una tile di MARE APERTO: si costruisce invece di leggerla (Tiles/OpenSea.h). */
+	FGeoWaterLoadWork(UGeoWaterStreamingSubsystem* InOwner, const GeoWorld::Tiles::FTileKey& InKey, FGeoOpenSeaPtr InOpenSea)
+		: Owner(InOwner), Key(InKey), OpenSea(MoveTemp(InOpenSea)) {}
+
 	virtual void DoThreadedWork() override
 	{
 		UGeoWaterStreamingSubsystem::FLoadResult Result;
 		Result.Key = Key;
 		const double Started = FPlatformTime::Seconds();
+
+		if (OpenSea.IsValid())
+		{
+			auto Tile = MakeShared<GeoWorld::Tiles::FWaterTile>();
+			if (GeoWorld::Tiles::BuildOpenSeaWaterTile(Key, OpenSea->Geoid, *Tile)) { Result.Tile = Tile; }
+			else { Result.Error = TEXT("mare aperto: il geoide non copre la tile"); }
+			Result.Seconds = FPlatformTime::Seconds() - Started;
+			Finish(MoveTemp(Result));
+			return;
+		}
 
 		TArray<uint8> Blob;
 		if (!FFileHelper::LoadFileToArray(Blob, *Path))
@@ -89,6 +105,7 @@ private:
 	TWeakObjectPtr<UGeoWaterStreamingSubsystem> Owner;
 	GeoWorld::Tiles::FTileKey Key;
 	FString Path;
+	FGeoOpenSeaPtr OpenSea;
 };
 
 // ============================================================================
@@ -178,7 +195,8 @@ EGeoTileState UGeoWaterStreamingSubsystem::RequestTile(const FTileKey& Key, int3
 {
 	if (!Dataset.IsOpen()) { return EGeoTileState::Errore; }
 	if (Cache.Peek(Key)) { return EGeoTileState::Pronta; }
-	if (!Dataset.TileExists(Key)) { return EGeoTileState::Assente; }
+	const bool bOpenSea = !Dataset.TileExists(Key) && Dataset.IsOpenSea(Key);
+	if (!Dataset.TileExists(Key) && !bOpenSea) { return EGeoTileState::Assente; }
 
 	const uint64 Packed = Key.Pack();
 	if (Failed.Contains(Packed)) { return EGeoTileState::Errore; }
@@ -186,7 +204,8 @@ EGeoTileState UGeoWaterStreamingSubsystem::RequestTile(const FTileKey& Key, int3
 	if (!Pool.IsRunning()) { return EGeoTileState::Errore; }
 
 	InFlight.Add(Packed);
-	Pool.AddWork(new FGeoWaterLoadWork(this, Key, Dataset.GetTileFilePath(Key)), Priority);
+	if (bOpenSea) { Pool.AddWork(new FGeoWaterLoadWork(this, Key, Dataset.GetOpenSea()), Priority); }
+	else { Pool.AddWork(new FGeoWaterLoadWork(this, Key, Dataset.GetTileFilePath(Key)), Priority); }
 	return EGeoTileState::InCaricamento;
 }
 

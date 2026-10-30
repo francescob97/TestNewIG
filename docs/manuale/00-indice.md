@@ -49,7 +49,8 @@ Due convenzioni tipografiche:
 | 10 | `10-glossario.md` | Glossario e mappa completa dei file |
 | 11 | `11-residenza.md` | Dopo le sei fasi — Cosa tenere pronto: posizione, velocità, mesh nascoste |
 | 12 | `12-strade.md` | Fase 8 — Strade, ferrovie e piste: i dati vettoriali |
-| 13 | `13-acqua.md` | Fase 9 — L'acqua, il vento, e le stampe della posizione |
+| 13 | `13-acqua.md` | Fase 9 — L'acqua, il vento, e le stampe della posizione; mari e oceani |
+| 14 | `14-vento.md` | Il vento: da un numero a un campo (strato limite, rilievi, raffiche) |
 
 La Fase 7 (entità, CIGI, DIS, HLA) è solo progettata: la trovi in
 `docs/fase7-design.md`. Il programma dalla Fase 8 alla 12 (strade, acqua,

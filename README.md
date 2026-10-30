@@ -37,9 +37,13 @@ Il progetto `TestNewIG` e' un guscio vuoto: tutto il codice vive in
 - [x] **Fase 8** — strade, ferrovie e piste da OpenStreetMap, dipinte da lontano e
       **3D da vicino** *(`docs/fase8-design.md`, prova: `docs/fase8-verifica.md`,
       strade 3D, transizioni morbide del terreno e flash: `docs/strade-3d.md`)*
-- [x] **Fase 9** — acqua: mare, laghi, fiumi, con le onde dal vento; stampe della
-      posizione a destra *(`docs/fase9-design.md`, prova: `docs/fase9-verifica.md`,
-      per chi impara: `docs/manuale/13-acqua.md`)*
+- [x] **Fase 9** — acqua: mare (anche aperto, lontano dalla costa), laghi, fiumi,
+      con le onde dal vento; stampe della posizione a destra *(`docs/fase9-design.md`,
+      prova: `docs/fase9-verifica.md`, per chi impara: `docs/manuale/13-acqua.md`)*
+- [x] **Vento** — simulazione: strato limite, rugosità, rilievi, raffiche che
+      viaggiano, venti in quota; primo pezzo del meteo della Fase 12
+      *(`docs/vento-design.md`, prova: `docs/vento-verifica.md`, per chi impara:
+      `docs/manuale/14-vento.md`)*
 - [ ] Fase 10 — edifici e monumenti
 - [ ] Fase 11 — vegetazione
 - [ ] Fase 12 — atmosfera, cielo, nuvole e luce
@@ -57,7 +61,7 @@ Il progetto `TestNewIG` e' un guscio vuoto: tutto il codice vive in
 | Quote | **ellissoidiche** WGS84 (ortometriche del sorgente + ondulazione del geoide) |
 | Ortofoto | piramide **separata**, stesso tiling; 256x256 pixel registrati sulle AREE (nessuna sovrapposizione), payload JPEG |
 | Strade | tile **vettoriali** `.gvt`, stesso tiling, livelli 10..13; linee in int16 locali (extent 16384, buffer 1/8), disegnate a runtime |
-| Acqua | tile `.gwa`, una per tile di terreno: superficie e fondale sui 129x129 post, raster 256x256 (distanza dalla riva, onde, corrente), zlib; piu' il geoide |
+| Acqua | tile `.gwa`, una per tile di terreno: superficie e fondale sui 129x129 post, raster 256x256 (distanza dalla riva, onde, corrente), zlib; piu' il geoide e il mare aperto (`opensea.bin`: le tile senza terreno tutte in mare, e il fondale) |
 
 Dettagli e motivazioni in `docs/fase2-design.md`.
 
@@ -77,14 +81,15 @@ Dettagli e motivazioni in `docs/fase2-design.md`.
 ```bash
 cmake -S Plugins/GeoWorld/Tools/StandaloneTests -B build
 cmake --build build
-./build/geocore_tests        # 48 test  -- geodesia, rebasing, formato delle stampe (lat, lon, quota)
+./build/geocore_tests        # 49 test  -- geodesia, rebasing, formato delle stampe (lat, lon, quota, vento)
 ./build/geotiles_tests       # 22 test  -- formato tile, cache (piu' quelli su un dataset vero)
 ./build/geoquadtree_tests    # 84 test  -- LOD, culling, orizzonte, residenza
 ./build/geomesh_tests        # 41 test  -- mesh, gonne, giunzioni, passo, geomorphing
 ./build/geoimagery_tests     # 52 test  -- drappeggio, formato immagine, mipmap
 ./build/georoads_tests       # 80 test  -- strade: formato .gvt, larghezze misurate, ritagli, strade 3D, marciapiedi e incroci
 ./build/geowater_tests Plugins/GeoWorld/Source/GeoTiles/TestData/water_fixture.gwa
-                             # 60 test  -- acqua: formato .gwa, scavo, mesh, onde dal vento, texture, il Po vero
+                             # 71 test  -- acqua: formato .gwa, scavo, mesh, onde dal vento, texture, il Po vero, mare aperto
+./build/geoweather_tests     # 26 test  -- vento: strato limite, rugosita', venti in quota, rilievi, raffiche, variabilita'
 
 ./Plugins/GeoWorld/Tools/CheckSourceDiscipline.sh
 python3 Plugins/GeoWorld/Tools/CheckShadowedParameters.py
@@ -98,7 +103,7 @@ le classi di errore di compilazione gia' incontrate su Windows -- shadowing,
 simboli non esportati fra moduli, tipi di comando console inesistenti,
 collisioni da build unity, metodi inesistenti chiamati sulle nostre classi.
 
-387 test C++ in totale, piu' 180 test Python della pipeline.
+425 test C++ in totale, piu' 187 test Python della pipeline.
 
 **Dopo la prima prova su Torino** (materiale, scene Sentinel, prestazioni): `docs/prova-torino.md`.
 **Dopo la seconda** (troppi triangoli, RAM): `docs/prova-torino-2.md`.
@@ -126,7 +131,7 @@ python run.py fetch-water -o dati/acqua
 python run.py build-water --osm dati/osm/nord-ovest-latest.osm.pbf --sea dati/acqua/water-polygons-split-4326.zip --terrain dataset/terreno -o dataset/acqua
 python run.py verify-water -o dataset/acqua
 
-python -m unittest discover -s tests               :: 180 test, sorgente sintetico
+python -m unittest discover -s tests               :: 187 test, sorgente sintetico
 ```
 
 Su Windows serve conda: vedi `Pipeline/README.md`.

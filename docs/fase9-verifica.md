@@ -10,13 +10,16 @@
 - la pipeline intera su dati sintetici (terreno a tre livelli, un lago, un
   fiume largo 60 m con la sua corrente, un fiume ad area con la sua linea come
   il Po, un mare, un fiume intermittente e una piscina che devono sparire),
-  le quote fuori dal DEM, i profili, la sponda e le regole vecchie: 30 test
-  Python, 180 in tutto;
+  le quote fuori dal DEM, i profili, la sponda, le regole vecchie e il mare
+  aperto: 37 test Python, 187 in tutto;
+- il mare aperto: le tile senza terreno tutte in mare, al livello più
+  grossolano, nessun buco scoperto, il fondale che scende dalla riva (Python), e
+  le tile virtuali costruite dal runtime (`geowater_tests`, sezione 9);
 - il lettore C++ su una tile scritta dalla pipeline vera, lo scavo, la mesh
   della superficie, il raster, le onde dal vento (energia dello spettro, niente
   creste ripiegate, **niente salti né "mare che scorre" quando il vento
   cambia**, rebase) e le texture generate; e, su due tile **vere** del Po a
-  Torino, quanta acqua copre il terreno con il codice del runtime: 60 test
+  Torino, quanta acqua copre il terreno con il codice del runtime: 71 test
   standalone (`geowater_tests`); la formattazione delle stampe (virgola, gradi-primi-secondi):
   11 test nuovi in `geocore_tests`;
 - i controlli statici (shadowing, simboli fra moduli, build unity, metodi
@@ -82,6 +85,29 @@ Da adesso non si può più sbagliare senza accorgersene:
 Per riprovare: `git pull`, ricompila, rifai l'acqua (sezione 1), controlla
 `verify-water`, poi `geo.Water.Open` **sulla stessa cartella**, e guarda che
 dica `regole 2`.
+
+### 0.2 Mari e oceani: il mare aperto
+
+Al largo il terreno non ha tile, e scendendo di quota si apriva un buco al
+posto del mare. Adesso `build-water` con `--sea` scrive anche `opensea.bin`
+(le tile senza terreno tutte in mare, e il fondale), e il runtime ci costruisce
+terreno e acqua in memoria. Per vederlo serve un'area con del mare **lontano
+dalla costa** dentro il riquadro: Genova va bene se allarghi il riquadro verso
+sud.
+
+```bat
+python run.py build-water --osm dati\osm\nord-ovest-latest.osm.pbf --sea dati\acqua\water-polygons-split-4326.zip --terrain dataset\italia -o dataset\acqua_genova --bbox 8.60 44.00 9.20 44.48
+python run.py verify-water -o dataset\acqua_genova
+```
+
+- `build-water` scrive `mare aperto: N tile senza terreno tutte in mare`, e
+  `verify-water` una riga `mare     : N tile di mare aperto, fondale su ...`.
+- In Unreal `geo.Water.Open` dice `Mare aperto: N tile senza terreno`, e
+  l'overlay (`geo.Water.Debug 1`) quante tile di terreno virtuali ha chiesto.
+- **Cosa vedere:** dalla costa verso il largo, scendendo fino a pochi metri
+  dall'acqua, il mare continua (con le onde, più grandi al largo) invece di
+  aprirsi in un buco. `Dal suolo` nelle stampe è misurato dal mare.
+- Senza `--sea` la riga dell'overlay è gialla: "Mare aperto: no".
 
 ---
 
@@ -235,6 +261,8 @@ turchese dove il fondale è vicino, blu scuro al largo.
 | Il terreno non è scavato ma l'acqua c'è | dataset d'acqua di un altro terreno | rifai `build-water` con `--terrain` uguale al terreno aperto |
 | Acqua sopra le sponde, o sponde sopra l'acqua | livello del lago o profilo del fiume | screenshot + `inspect-water` della tile: la quota della superficie viene dal 20° percentile del terreno nel lago, e dal minimo progressivo lungo il fiume |
 | Un fiume in una fossa profonda, a vertici alti e bassi | dati d'acqua fatti con la pipeline di prima (quote finte fuori dal DEM) | rifai `build-water` (sezione 0) |
+| Al largo, scendendo, si apre un buco al posto del mare | dataset d'acqua senza `opensea.bin` (fatto senza `--sea`, o prima di questa versione), o acqua spenta | rifai `build-water` con `--sea` (sezione 0.2); l'overlay dice "Mare aperto: no" |
+| Al largo il fondale si vede scuro a gradini | la tile costiera e quella virtuale hanno fondali diversi di qualche metro | atteso sotto poca acqua (`docs/fase9-design.md`, sezione 13) |
 | Riga rossa fissa "Acqua VECCHIA" | il dataset aperto è fatto con regole precedenti a quelle del motore | rifai `build-water` su quella cartella (la riga la scrive), poi `geo.Water.Open` su **quella** cartella (sezione 0.1) |
 | Il fiume da lontano sembra "dipinto" sul terreno, senza profondità | è troppo stretto per la mesh a quel livello: acqua appoggiata | normale; avvicinandosi si scava |
 | La corrente va verso monte | linea OSM al contrario, o segno sbagliato | dimmi quale fiume |

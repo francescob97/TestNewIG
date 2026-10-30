@@ -557,6 +557,8 @@ static void TestFormat()
 		"metri: interi sopra i 100 m, un decimale sotto", F::Metres(1234.4) + " / " + F::Metres(12.34));
 	Check(F::Heading(-87.0) == "273" + Deg && F::Heading(359.7) == "000" + Deg && F::Heading(5.0) == "005" + Deg,
 		"rotta 000..359", F::Heading(-87.0) + " / " + F::Heading(359.7));
+	Check(F::Wind(7.2, 245.4) == "7,2 m/s (14 kt) da 245" + Deg && F::Wind(0.0, 0.0) == "0,0 m/s (0 kt) da 000" + Deg,
+		"vento: m/s, nodi, da dove soffia", F::Wind(7.2, 245.4));
 }
 
 // ===========================================================================

@@ -28,6 +28,7 @@
 #include "EngineUtils.h"
 #include "GameFramework/PlayerController.h"
 #include "HAL/IConsoleManager.h"
+#include "Geo/GeoFormat.h"
 #include "Geo/GeoUnits.h"
 
 #include <cmath>
@@ -1733,6 +1734,11 @@ namespace GeoWaterConsole
 			*Dataset.GetDatasetName(), Dataset.GetMinLevel(), Dataset.GetMaxLevel(),
 			static_cast<long long>(Dataset.GetIndexedTileCount()), Dataset.GetRulesVersion()));
 		GeoTerrainConsole::Report(FString::Printf(TEXT("Cartella: %s"), *Dataset.GetRootDirectory()));
+		if (const FGeoOpenSeaPtr OpenSea = Dataset.GetOpenSea())
+		{
+			GeoTerrainConsole::Report(FString::Printf(TEXT("Mare aperto: %lld tile senza terreno, tutte mare"),
+				static_cast<long long>(OpenSea->Sea.Tiles.size())));
+		}
 		GeoTerrainConsole::Report(FString::Printf(TEXT("Area: ovest %.4f  sud %.4f  est %.4f  nord %.4f"), West, South, East, North));
 		const FString Stale = Dataset.GetStaleReason();
 		if (!Stale.IsEmpty()) { GeoTerrainConsole::Report(Stale, FColor::Red); }
@@ -1800,26 +1806,140 @@ static FAutoConsoleCommandWithWorld GeoWaterStatsCommand(
 		if (!Problem.IsEmpty()) { GeoTerrainConsole::Report(Problem, FColor::Red); }
 	}));
 
+namespace GeoWeatherConsole
+{
+	static UGeoWeatherSubsystem* Get(UWorld* World)
+	{
+		return World ? World->GetSubsystem<UGeoWeatherSubsystem>() : nullptr;
+	}
+
+	static FString Wind(double SpeedMs, double FromDegrees)
+	{
+		return FString(UTF8_TO_TCHAR(GeoWorld::Format::Wind(SpeedMs, FromDegrees).c_str()));
+	}
+
+	/** Il riassunto che ogni comando del meteo stampa dopo aver cambiato qualcosa. */
+	static void Report(const UGeoWeatherSubsystem* Weather)
+	{
+		const GeoWorld::Weather::FWindSettings& Settings = Weather->GetSettings();
+		const GeoWorld::Weather::FWind Reference = Weather->GetReferenceWind();
+		const GeoWorld::Weather::FWind Sea = Weather->GetSeaWind();
+		GeoTerrainConsole::Report(FString::Printf(TEXT("Vento: %s a 10 m su un prato; turbolenza x%.2f, variabilita' %.2f"),
+			*Wind(Reference.SpeedMs, Reference.FromDegrees), Settings.Turbulence, Settings.Variability));
+		GeoTerrainConsole::Report(FString::Printf(TEXT("  sul mare %s -> mare completamente sviluppato: Hs %.2f m, onda di picco %.0f m"),
+			*Wind(Sea.SpeedMs, Sea.FromDegrees), GeoWorld::Water::SignificantWaveHeight(Sea.SpeedMs),
+			GeoWorld::Water::PeakWavelength(FMath::Max(Sea.SpeedMs, 0.5))), FColor::White);
+		for (const GeoWorld::Weather::FWindLayer& Layer : Settings.Aloft)
+		{
+			GeoTerrainConsole::Report(FString::Printf(TEXT("  in quota, %.0f m s.l.m.: %s"), Layer.AltitudeM,
+				*Wind(Layer.SpeedMs, Layer.FromDegrees)), FColor::White);
+		}
+	}
+}
+
 static FAutoConsoleCommandWithWorldAndArgs GeoWeatherWindCommand(
 	TEXT("geo.Weather.Wind"),
-	TEXT("geo.Weather.Wind <m/s> [gradi da cui soffia] [raffiche 0..1] - il vento (onde dell'acqua). Senza argomenti dice quello attuale."),
+	TEXT("geo.Weather.Wind <m/s> [gradi da cui soffia] [turbolenza 0..2] - il vento di riferimento: 10 m su un prato, come un METAR. Senza argomenti dice quello attuale."),
 	FConsoleCommandWithWorldAndArgsDelegate::CreateStatic(
 		[](const TArray<FString>& Args, UWorld* World)
 	{
-		UGeoWeatherSubsystem* Weather = World ? World->GetSubsystem<UGeoWeatherSubsystem>() : nullptr;
+		UGeoWeatherSubsystem* Weather = GeoWeatherConsole::Get(World);
 		if (!Weather) { return; }
 		if (Args.Num() >= 1)
 		{
-			const GeoWorld::Weather::FWind Mean = Weather->GetMeanWind();
-			Weather->SetWind(FCString::Atod(*Args[0]), Args.Num() >= 2 ? FCString::Atod(*Args[1]) : Mean.FromDegrees);
-			if (Args.Num() >= 3) { Weather->SetGustiness(FCString::Atod(*Args[2])); }
+			const GeoWorld::Weather::FWind Current = Weather->GetSettings().Reference;
+			Weather->SetWind(FCString::Atod(*Args[0]), Args.Num() >= 2 ? FCString::Atod(*Args[1]) : Current.FromDegrees);
+			if (Args.Num() >= 3) { Weather->SetTurbulence(FCString::Atod(*Args[2])); }
 		}
-		const GeoWorld::Weather::FWind Mean = Weather->GetMeanWind();
-		GeoTerrainConsole::Report(FString::Printf(
-			TEXT("Vento: %.1f m/s (%.0f km/h) da %.0f gradi, raffiche %.0f%%   -> mare completamente sviluppato: Hs %.2f m, onda di picco %.0f m"),
-			Mean.SpeedMs, Mean.SpeedMs * 3.6, Mean.FromDegrees, Weather->GetGustiness() * 100.0,   /* percentuale, non-unita */
-			GeoWorld::Water::SignificantWaveHeight(Mean.SpeedMs), GeoWorld::Water::PeakWavelength(FMath::Max(Mean.SpeedMs, 0.5))));
+		GeoWeatherConsole::Report(Weather);
 		GeoTerrainConsole::Report(TEXT("  Il mare ci arriva in qualche secondo, senza scatti."), FColor::White);
+	}));
+
+static FAutoConsoleCommandWithWorldAndArgs GeoWeatherTurbulenceCommand(
+	TEXT("geo.Weather.Turbulence"),
+	TEXT("geo.Weather.Turbulence <0..2> - le raffiche: 0 aria liscia, 1 l'atmosfera vera, 2 il doppio."),
+	FConsoleCommandWithWorldAndArgsDelegate::CreateStatic(
+		[](const TArray<FString>& Args, UWorld* World)
+	{
+		UGeoWeatherSubsystem* Weather = GeoWeatherConsole::Get(World);
+		if (!Weather) { return; }
+		if (Args.Num() >= 1) { Weather->SetTurbulence(FCString::Atod(*Args[0])); }
+		GeoWeatherConsole::Report(Weather);
+	}));
+
+static FAutoConsoleCommandWithWorldAndArgs GeoWeatherVariabilityCommand(
+	TEXT("geo.Weather.Variability"),
+	TEXT("geo.Weather.Variability <0..1> - il tempo che cambia da solo: velocita' e direzione derivano in decine di minuti."),
+	FConsoleCommandWithWorldAndArgsDelegate::CreateStatic(
+		[](const TArray<FString>& Args, UWorld* World)
+	{
+		UGeoWeatherSubsystem* Weather = GeoWeatherConsole::Get(World);
+		if (!Weather) { return; }
+		if (Args.Num() >= 1) { Weather->SetVariability(FCString::Atod(*Args[0])); }
+		GeoWeatherConsole::Report(Weather);
+	}));
+
+static FAutoConsoleCommandWithWorldAndArgs GeoWeatherAloftCommand(
+	TEXT("geo.Weather.WindAloft"),
+	TEXT("geo.Weather.WindAloft <quota s.l.m. m> <m/s> <gradi> | clear - un vento in quota (sopra lo strato limite il vento lo segue)."),
+	FConsoleCommandWithWorldAndArgsDelegate::CreateStatic(
+		[](const TArray<FString>& Args, UWorld* World)
+	{
+		UGeoWeatherSubsystem* Weather = GeoWeatherConsole::Get(World);
+		if (!Weather) { return; }
+		if (Args.Num() == 1 && Args[0].Equals(TEXT("clear"), ESearchCase::IgnoreCase))
+		{
+			Weather->ClearWindAloft();
+		}
+		else if (Args.Num() >= 3)
+		{
+			Weather->SetWindAloft(FCString::Atod(*Args[0]), FCString::Atod(*Args[1]), FCString::Atod(*Args[2]));
+		}
+		else
+		{
+			GeoTerrainConsole::Report(TEXT("Uso: geo.Weather.WindAloft <quota s.l.m. m> <m/s> <gradi>  oppure  geo.Weather.WindAloft clear"),
+				FColor::Red);
+		}
+		GeoWeatherConsole::Report(Weather);
+	}));
+
+static FAutoConsoleCommandWithWorldAndArgs GeoWeatherSeedCommand(
+	TEXT("geo.Weather.Seed"),
+	TEXT("geo.Weather.Seed <n> - il seme delle raffiche: stesso seme, stesse raffiche negli stessi punti."),
+	FConsoleCommandWithWorldAndArgsDelegate::CreateStatic(
+		[](const TArray<FString>& Args, UWorld* World)
+	{
+		UGeoWeatherSubsystem* Weather = GeoWeatherConsole::Get(World);
+		if (!Weather || Args.Num() < 1) { return; }
+		Weather->SetSeed(static_cast<uint32>(FCString::Atoi(*Args[0])));
+		GeoWeatherConsole::Report(Weather);
+	}));
+
+static FAutoConsoleCommandWithWorldAndArgs GeoWeatherDebugCommand(
+	TEXT("geo.Weather.Debug"),
+	TEXT("geo.Weather.Debug <0|1> - overlay del vento: riferimento, mare, sotto di te, a 10 m, alla tua quota."),
+	FConsoleCommandWithWorldAndArgsDelegate::CreateStatic(
+		[](const TArray<FString>& Args, UWorld* World)
+	{
+		UGeoWeatherSubsystem* Weather = GeoWeatherConsole::Get(World);
+		if (!Weather) { return; }
+		const bool bValue = (Args.Num() >= 1) ? (FCString::Atoi(*Args[0]) != 0) : !Weather->IsDebugOverlayEnabled();
+		Weather->SetDebugOverlayEnabled(bValue);
+		if (!bValue && GEngine) { GEngine->ClearOnScreenDebugMessages(); }
+	}));
+
+static FAutoConsoleCommandWithWorldAndArgs GeoWeatherArrowsCommand(
+	TEXT("geo.Weather.Arrows"),
+	TEXT("geo.Weather.Arrows <quota sul suolo m> - frecce del vento attorno a te (lunghe quanto il vento fa in 20 s); 0 le spegne."),
+	FConsoleCommandWithWorldAndArgsDelegate::CreateStatic(
+		[](const TArray<FString>& Args, UWorld* World)
+	{
+		UGeoWeatherSubsystem* Weather = GeoWeatherConsole::Get(World);
+		if (!Weather) { return; }
+		const double Height = (Args.Num() >= 1) ? FCString::Atod(*Args[0]) : (Weather->GetArrowHeight() > 0.0 ? 0.0 : 50.0);
+		Weather->SetArrowHeight(Height);
+		GeoTerrainConsole::Report(Height > 0.0 ? FString::Printf(TEXT("Frecce del vento a %.0f m dal suolo"), Height)
+		                                       : FString(TEXT("Frecce del vento spente")));
 	}));
 
 static FAutoConsoleCommandWithWorldAndArgs GeoWaterDemoCommand(

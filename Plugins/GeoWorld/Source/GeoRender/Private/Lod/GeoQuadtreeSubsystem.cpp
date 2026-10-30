@@ -36,23 +36,17 @@ namespace
 
 		virtual bool TileExists(const FTileKey& Key) const override
 		{
-			if (!Streaming) { return false; }
-
-			// L'indice del livello deve essere in memoria, altrimenti la
+			// Lo streaming carica l'indice del livello se manca (altrimenti la
 			// risposta sarebbe "non esiste" per il solo fatto di non averlo
-			// ancora caricato. Costa una lettura la prima volta per livello.
-			FString Error;
-			const_cast<FGeoTileDataset&>(Streaming->GetDataset())
-				.EnsureLevelIndex(static_cast<int32>(Key.Level), Error);
-
-			return Streaming->GetDataset().TileExists(Key);
+			// ancora letto), e conta anche le tile VIRTUALI: il mare aperto.
+			return Streaming && Streaming->TileExists(Key);
 		}
 
 		virtual bool GetHeightRange(const FTileKey& Key, double& OutMin, double& OutMax) const override
 		{
 			if (!Streaming) { return false; }
 			float Minimum = 0.0f, Maximum = 0.0f;
-			if (!Streaming->GetDataset().GetTileHeightRange(Key, Minimum, Maximum)) { return false; }
+			if (!Streaming->GetTileHeightRange(Key, Minimum, Maximum)) { return false; }
 			OutMin = Minimum;
 			OutMax = Maximum;
 			return true;
@@ -455,7 +449,7 @@ void UGeoQuadtreeSubsystem::DrawSelection() const
 		if (Drawn++ >= MaxTilesToDraw) { break; }
 
 		float MinHeight = 0.0f, MaxHeight = 0.0f;
-		Streaming->GetDataset().GetTileHeightRange(Tile.Key, MinHeight, MaxHeight);
+		Streaming->GetTileHeightRange(Tile.Key, MinHeight, MaxHeight);
 
 		const Tiles::FTileBounds Bounds =
 			Tiles::GetTileBounds(Tile.Key.Level, Tile.Key.X, Tile.Key.Y);

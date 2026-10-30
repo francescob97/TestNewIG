@@ -36,6 +36,11 @@ public:
 	FGeoTileLoadWork(UGeoTileStreamingSubsystem* InOwner, const FTileKey& InKey, const FString& InPath)
 		: Owner(InOwner), Key(InKey), Path(InPath) {}
 
+	/** Una tile VIRTUALE: si costruisce invece di leggerla (vedi FGeoVirtualTerrain). */
+	FGeoTileLoadWork(UGeoTileStreamingSubsystem* InOwner, const FTileKey& InKey,
+	                 FGeoVirtualTerrainPtr InVirtual, int32 InGeneration)
+		: Owner(InOwner), Key(InKey), Virtual(MoveTemp(InVirtual)), Generation(InGeneration) {}
+
 	virtual void DoThreadedWork() override
 	{
 		const double Started = FPlatformTime::Seconds();
@@ -44,7 +49,14 @@ public:
 		Result.Key = Key;
 
 		TArray<uint8> Blob;
-		if (!FFileHelper::LoadFileToArray(Blob, *Path))
+		if (Virtual.IsValid())
+		{
+			Result.VirtualGeneration = Generation;
+			auto Tile = MakeShared<FHeightTile>();
+			if (Virtual->Build && Virtual->Build(Key, *Tile)) { Result.Tile = Tile; }
+			else { Result.Error = TEXT("tile virtuale non costruibile (geoide assente?)"); }
+		}
+		else if (!FFileHelper::LoadFileToArray(Blob, *Path))
 		{
 			Result.Error = FString::Printf(TEXT("file non leggibile: %s"), *Path);
 		}
@@ -76,6 +88,7 @@ public:
 	{
 		UGeoTileStreamingSubsystem::FLoadResult Result;
 		Result.Key = Key;
+		Result.VirtualGeneration = Virtual.IsValid() ? Generation : -1;
 		Result.Error = TEXT("annullata");
 		Owner->CompletedLoads.Enqueue(MoveTemp(Result));
 		delete this;
@@ -85,6 +98,8 @@ private:
 	UGeoTileStreamingSubsystem* Owner = nullptr;
 	FTileKey Key;
 	FString Path;
+	FGeoVirtualTerrainPtr Virtual;
+	int32 Generation = -1;
 };
 
 // ============================================================================
@@ -134,6 +149,8 @@ void UGeoTileStreamingSubsystem::Deinitialize()
 	CompletedLoads.Empty();
 	InFlight.Empty();
 	Cache.Clear();
+	VirtualKeys.Empty();
+	Virtual.Reset();
 	OnTileLoaded.Clear();
 
 	Super::Deinitialize();
@@ -164,6 +181,14 @@ void UGeoTileStreamingSubsystem::DrainCompletedLoads()
 	while (CompletedLoads.Dequeue(Result))
 	{
 		InFlight.Remove(Result.Key.Pack());
+
+		// Una tile virtuale della sorgente di prima: non e' piu' vera.
+		if (Result.VirtualGeneration >= 0 && Result.VirtualGeneration != VirtualGeneration)
+		{
+			VirtualKeys.Remove(Result.Key.Pack());
+			OnTileLoaded.Broadcast(Result.Key, false);
+			continue;
+		}
 
 		if (Result.Tile.IsValid())
 		{
@@ -221,8 +246,52 @@ EGeoTileState UGeoTileStreamingSubsystem::GetTileState(const FTileKey& Key) cons
 {
 	if (Cache.Peek(Key)) { return EGeoTileState::Pronta; }
 	if (InFlight.Contains(Key.Pack())) { return EGeoTileState::InCaricamento; }
-	if (!Dataset.TileExists(Key)) { return EGeoTileState::Assente; }
+	if (!Dataset.TileExists(Key) && !IsVirtualTile(Key)) { return EGeoTileState::Assente; }
 	return EGeoTileState::NonCaricata;
+}
+
+// ============================================================================
+//  Tile virtuali
+// ============================================================================
+
+void UGeoTileStreamingSubsystem::SetVirtualTerrain(FGeoVirtualTerrainPtr InVirtual)
+{
+	Virtual = MoveTemp(InVirtual);
+	++VirtualGeneration;
+	for (const TPair<uint64, FTileKey>& Pair : VirtualKeys)
+	{
+		Cache.Remove(Pair.Value);
+		InFlight.Remove(Pair.Key);
+	}
+	VirtualKeys.Empty();
+}
+
+bool UGeoTileStreamingSubsystem::IsVirtualTile(const FTileKey& Key) const
+{
+	if (!Virtual.IsValid() || !Virtual->Exists || !Dataset.IsOpen()) { return false; }
+	const int32 Level = static_cast<int32>(Key.Level);
+	if (Level < Dataset.GetMinLevel() || Level > Dataset.GetMaxLevel()) { return false; }
+	// Senza l'indice del livello "il dataset non ce l'ha" non vuol dire niente:
+	// una tile vera sembrerebbe virtuale.
+	const FGeoTileDataset::FLevelInfo* Info = Dataset.GetLevels().FindByPredicate(
+		[Level](const FGeoTileDataset::FLevelInfo& Candidate) { return Candidate.Level == Level; });
+	if (!Info || !Info->bIndexLoaded) { return false; }
+	return !Dataset.TileExists(Key) && Virtual->Exists(Key);
+}
+
+bool UGeoTileStreamingSubsystem::TileExists(const FTileKey& Key)
+{
+	// L'indice del livello deve essere in memoria, altrimenti la risposta
+	// sarebbe "non esiste" per il solo fatto di non averlo ancora caricato.
+	FString Error;
+	Dataset.EnsureLevelIndex(static_cast<int32>(Key.Level), Error);
+	return Dataset.TileExists(Key) || IsVirtualTile(Key);
+}
+
+bool UGeoTileStreamingSubsystem::GetTileHeightRange(const FTileKey& Key, float& OutMin, float& OutMax) const
+{
+	if (Dataset.GetTileHeightRange(Key, OutMin, OutMax)) { return true; }
+	return IsVirtualTile(Key) && Virtual->HeightRange && Virtual->HeightRange(Key, OutMin, OutMax);
 }
 
 EGeoTileState UGeoTileStreamingSubsystem::RequestTile(const FTileKey& Key, int32 Priority)
@@ -239,7 +308,8 @@ EGeoTileState UGeoTileStreamingSubsystem::RequestTile(const FTileKey& Key, int32
 	{
 		return EGeoTileState::Errore;
 	}
-	if (!Dataset.TileExists(Key)) { return EGeoTileState::Assente; }
+	const bool bVirtual = !Dataset.TileExists(Key) && IsVirtualTile(Key);
+	if (!Dataset.TileExists(Key) && !bVirtual) { return EGeoTileState::Assente; }
 
 	if (!LoadPool) { return EGeoTileState::Errore; }
 
@@ -257,8 +327,19 @@ EGeoTileState UGeoTileStreamingSubsystem::RequestTile(const FTileKey& Key, int32
 		static_cast<int32>(EQueuedWorkPriority::High),
 		static_cast<int32>(EQueuedWorkPriority::Lowest));
 
-	LoadPool->AddQueuedWork(new FGeoTileLoadWork(this, Key, Dataset.GetTileFilePath(Key)),
-		static_cast<EQueuedWorkPriority>(PriorityValue));
+	if (bVirtual)
+	{
+		// Si costruisce sul pool come una lettura: qualche decimo di
+		// millisecondo a tile, e sopra il mare ne arrivano decine insieme.
+		VirtualKeys.Add(Packed, Key);
+		LoadPool->AddQueuedWork(new FGeoTileLoadWork(this, Key, Virtual, VirtualGeneration),
+			static_cast<EQueuedWorkPriority>(PriorityValue));
+	}
+	else
+	{
+		LoadPool->AddQueuedWork(new FGeoTileLoadWork(this, Key, Dataset.GetTileFilePath(Key)),
+			static_cast<EQueuedWorkPriority>(PriorityValue));
+	}
 
 	return EGeoTileState::InCaricamento;
 }
@@ -293,7 +374,11 @@ int32 UGeoTileStreamingSubsystem::GetCacheBudgetMB() const
 	return static_cast<int32>(Cache.GetStats().BudgetBytes / (1024ull * 1024ull));
 }
 
-void UGeoTileStreamingSubsystem::ClearCache() { Cache.Clear(); }
+void UGeoTileStreamingSubsystem::ClearCache()
+{
+	Cache.Clear();
+	VirtualKeys.Empty();
+}
 
 void UGeoTileStreamingSubsystem::SetTilePinned(const FTileKey& Key, bool bPinned)
 {

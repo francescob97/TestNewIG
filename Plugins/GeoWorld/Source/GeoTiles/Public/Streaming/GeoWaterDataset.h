@@ -11,6 +11,9 @@
 //    ritagliato, se il dataset si ferma prima (ResolveWaterKey).
 //  - Porta il GEOIDE dell'area (geoid.bin), che serve alla quota sul livello
 //    del mare nelle stampe a schermo.
+//  - Porta il MARE APERTO (opensea.bin): le tile che il terreno non ha e che
+//    sono tutte mare. Il runtime ci costruisce terreno e acqua virtuali
+//    (Tiles/OpenSea.h), cosi' al largo non c'e' un buco.
 // =============================================================================
 #pragma once
 
@@ -18,6 +21,17 @@
 
 #include "Tiles/TileKey.h"
 #include "Tiles/WaterTileFormat.h"
+
+/**
+ * Il mare aperto con il suo geoide: dati IMMUTABILI condivisi con i thread
+ * che costruiscono le tile virtuali, che possono finire dopo una riapertura.
+ */
+struct FGeoOpenSeaData
+{
+	GeoWorld::Tiles::FOpenSea Sea;
+	GeoWorld::Tiles::FGeoidGrid Geoid;
+};
+using FGeoOpenSeaPtr = TSharedPtr<const FGeoOpenSeaData, ESPMode::ThreadSafe>;
 
 class GEOTILES_API FGeoWaterDataset
 {
@@ -61,12 +75,18 @@ public:
 	 */
 	FString GetStaleReason() const;
 
+	/** Il mare aperto (nullptr se il dataset non ce l'ha: fatto senza --sea). */
+	FGeoOpenSeaPtr GetOpenSea() const { return OpenSea; }
+	/** La tile, o un suo antenato, e' mare aperto (niente terreno, tutta acqua). */
+	bool IsOpenSea(const GeoWorld::Tiles::FTileKey& Key) const { return OpenSea.IsValid() && OpenSea->Sea.Covers(Key); }
+
 	/** N del geoide (quota ellissoidica del livello del mare) in un punto, se il dataset lo copre. */
 	bool SampleGeoid(double LonDeg, double LatDeg, double& OutUndulation) const { return Geoid.Sample(LonDeg, LatDeg, OutUndulation); }
 	bool HasGeoid() const { return Geoid.IsValid(); }
 
 private:
 	const FLevelInfo* FindLevel(int32 Level) const;
+	void LoadOpenSea();
 
 	FString RootDirectory;
 	FString DatasetName;
@@ -76,4 +96,5 @@ private:
 	int32 RulesVersion = 0;
 	TArray<FLevelInfo> Levels;
 	GeoWorld::Tiles::FGeoidGrid Geoid;
+	FGeoOpenSeaPtr OpenSea;
 };

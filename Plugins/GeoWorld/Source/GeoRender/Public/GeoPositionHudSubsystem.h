@@ -10,6 +10,9 @@
 //      s.l.m.      1.186 m  (se c'e' il geoide: dataset dell'acqua)
 //      Dal suolo     842 m  (se le quote sotto sono in memoria)
 //      Rotta        273°
+//      Vento      7,2 m/s (14 kt) da 245°   alla quota della vista (Weather)
+//      Raffiche   11,3 m/s, adesso 8,1, verticale +0,4 m/s
+//      A 10 m     4,1 m/s (8 kt) da 232°    sotto di te, come una stazione meteo
 //
 //  PERCHE' NON AddOnScreenDebugMessage come gli overlay. Quei messaggi stanno
 //  tutti a SINISTRA, in colonna, e si mescolano con gli overlay dei subsystem.

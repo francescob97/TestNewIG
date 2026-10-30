@@ -19,8 +19,9 @@ Ultimo aggiornamento: 2026-10-03. Branch: `claude/charming-goodall-xd2r3g`.
 | 8 | **Strade, ferrovie, piste** da OpenStreetMap: dipinte sul terreno, **3D da vicino** | dipinte provate dall'utente (si vedono); strade 3D provate ("manca la tridimensionalita'"), **rifatte: carreggiata in piano, scarpate, marciapiedi, guardrail, ponti con parapetti e pile — da compilare e provare** — `docs/fase8-design.md`, `docs/fase8-verifica.md`, `docs/strade-3d.md` |
 | dopo | **Flash quando la geometria si affina**: le figlie sostituivano il padre in un frame | **geomorphing e dissolvenza, da compilare e provare** — `docs/strade-3d.md`, sezione 2 |
 | dopo | **Flash del rebase**: l'origine del mondo stava alla quota della camera, e a ogni rebase cielo e nebbia saltavano | **corretto, da riprovare** — `docs/strade-3d.md`, sezione 2 |
-| 9 | **Acqua**: mare, laghi, fiumi scavati nel terreno, Single Layer Water, onde di Gerstner dal vento (meteo minimo: vento medio + raffiche); **stampe della posizione** a destra (lat, lon, quota, s.l.m., dal suolo, rotta) | provata due volte: il fiume era una fossa "a vertici alti e bassi"; **corretto** (quote finte fuori dal DEM, profili cuciti, sponda a V, acqua stretta appoggiata); la seconda prova girava su un dataset d'acqua vecchio, ora segnalato in rosso; **da riprovare con l'acqua rifatta** — `docs/fase9-design.md` (sezione 12), `docs/fase9-verifica.md` (sezione 0), `docs/manuale/13-acqua.md` |
-| 10–12 | Edifici e monumenti; vegetazione; atmosfera, cielo, nuvole e luce (allargando il meteo nato con la Fase 9) | **da fare** — programma in `docs/fase8-design.md`, sezione 0 |
+| 9 | **Acqua**: mare (anche **aperto**, con tile virtuali dove il terreno non c'è), laghi, fiumi scavati nel terreno, Single Layer Water, onde di Gerstner dal vento; **stampe della posizione** a destra (lat, lon, quota, s.l.m., dal suolo, rotta, vento) | provata due volte: il fiume era una fossa "a vertici alti e bassi"; **corretto** (quote finte fuori dal DEM, profili cuciti, sponda a V, acqua stretta appoggiata); la seconda prova girava su un dataset d'acqua vecchio, ora segnalato in rosso; **da riprovare con l'acqua rifatta** — `docs/fase9-design.md` (sezione 12), `docs/fase9-verifica.md` (sezione 0), `docs/manuale/13-acqua.md` |
+| — | **Vento**: simulazione in ogni punto e a ogni quota (strato limite e rugosità, rotazione, venti in quota, rilievi con ridosso e vento verticale, raffiche coerenti trasportate, variabilità); onde dal vento sul mare, stampe, frecce di debug, `GetWindNorthEastUp` per i Blueprint | **da provare** — `docs/vento-design.md`, `docs/vento-verifica.md`, `docs/manuale/14-vento.md` |
+| 10–12 | Edifici e monumenti; vegetazione; atmosfera, cielo, nuvole e luce (allargando il meteo, che oggi ha il vento) | **da fare** — programma in `docs/fase8-design.md`, sezione 0 |
 | dopo | **Residenza**: selezione indipendente dalla vista, precarico da posizione e velocità, mesh nascoste | **codice completo, mai compilato in UE** — `docs/residenza-design.md` |
 | dopo | **Terza prova**: niente flash grigi (tile mostrate solo vestite), isteresi sul LOD, nuvole tolte con la maschera SCL | **codice completo, da riprovare** — `docs/prova-torino-3.md` |
 | dopo | **Seconda prova**: soglia 8 px, mesh a passo 2, meno dettaglio fuori vista, wireframe spento: da 18 a 2,5 milioni di triangoli | **codice completo, da riprovare** — `docs/prova-torino-2.md` |
@@ -72,7 +73,7 @@ python run.py check-env                              :: SEMPRE per primo
 python run.py fetch --area test -o dati/copernicus   :: DEM libero, 19 MB
 python run.py build -i "dati/copernicus/*.tif" -o dataset/test
 python run.py verify -o dataset/test
-python -m unittest discover -s tests                 :: 180 test
+python -m unittest discover -s tests                 :: 187 test
 
 :: Fase 8: strade su Torino (dettagli in docs/fase8-verifica.md)
 python run.py fetch-osm --area torino -o dati/osm
@@ -94,13 +95,14 @@ sta vincendo.
 ```bat
 cmake -S Plugins/GeoWorld/Tools/StandaloneTests -B build
 cmake --build build
-build\Debug\geocore_tests.exe                       :: 48 test
+build\Debug\geocore_tests.exe                       :: 49 test
 build\Debug\geotiles_tests.exe dataset\test         :: 22 test
 build\Debug\geoquadtree_tests.exe                   :: 84 test
 build\Debug\geomesh_tests.exe                       :: 41 test
 build\Debug\geoimagery_tests.exe                    :: 52 test
 build\Debug\georoads_tests.exe                      :: 80 test (dalla radice del repository)
-build\Debug\geowater_tests.exe Plugins\GeoWorld\Source\GeoTiles\TestData\water_fixture.gwa   :: 60 test (anche il Po vero)
+build\Debug\geowater_tests.exe Plugins\GeoWorld\Source\GeoTiles\TestData\water_fixture.gwa   :: 71 test (anche il Po vero e il mare aperto)
+build\Debug\geoweather_tests.exe                    :: 26 test (il vento)
 Plugins\GeoWorld\Tools\CheckSourceDiscipline.sh      :: serve bash (Git Bash)
 ```
 
@@ -359,7 +361,7 @@ Plugins/GeoWorld/Source/
     Public/Terrain/   IGeoTerrainMeshProvider, provider DynamicMesh, subsystem
     Public/Roads/     strade: rasterizzatore e strade 3D (puri) + subsystem [Fase 8]
     Public/Water/     acqua: scavo, mesh, onde, texture (puri) + subsystem [Fase 9]
-    Public/Weather/   il vento (puro) + UGeoWeatherSubsystem              [Fase 9]
+    Public/Weather/   il vento: WindField.h (puro) + UGeoWeatherSubsystem [vento]
     GeoPositionHudSubsystem   le stampe della posizione                   [Fase 9]
   GeoWorldEditor/ i materiali costruiti da codice (geo.Imagery.CreateMaterial)
 
@@ -530,7 +532,8 @@ Limitazioni note, lasciate aperte di proposito:
 | Design Fase 7 (entità, protocolli) | `docs/fase7-design.md` |
 | Design e motivazioni Fase 6 | `docs/fase6-design.md` |
 | Design e verifica Fase 8 (strade) | `docs/fase8-design.md`, `docs/fase8-verifica.md`, `docs/strade-3d.md` |
-| Design e verifica Fase 9 (acqua, vento, stampe della posizione) | `docs/fase9-design.md`, `docs/fase9-verifica.md` |
+| Design e verifica Fase 9 (acqua, mare aperto, stampe della posizione) | `docs/fase9-design.md`, `docs/fase9-verifica.md` |
+| Design e verifica del vento | `docs/vento-design.md`, `docs/vento-verifica.md` |
 | Issue aperte | `docs/issues-aperte.md` |
 | Uso della pipeline, installazione Windows | `Pipeline/README.md` |
 

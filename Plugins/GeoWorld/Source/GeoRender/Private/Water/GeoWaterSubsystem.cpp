@@ -8,6 +8,7 @@
 #include "Streaming/GeoWaterStreamingSubsystem.h"
 #include "Terrain/GeoTerrainSubsystem.h"
 #include "Tiles/ImageTileFormat.h"
+#include "Tiles/OpenSea.h"
 #include "Water/WaterMesh.h"
 #include "Water/WaterTextures.h"
 #include "Weather/GeoWeatherSubsystem.h"
@@ -110,6 +111,7 @@ void UGeoWaterSubsystem::Deinitialize()
 		Terrain->ClearDressPredicate(WaterDressOwnerName);
 		if (bCarvingInstalled) { Terrain->ClearHeightEditor(); }
 	}
+	if (bCarvingInstalled) { InstallOpenSea(false); }
 	bCarvingInstalled = false;
 
 	// I lavori in volo eseguono codice di questo modulo: si aspettano.
@@ -130,6 +132,29 @@ TStatId UGeoWaterSubsystem::GetStatId() const
 bool UGeoWaterSubsystem::GetGeoidUndulation(double LonDeg, double LatDeg, double& OutUndulation) const
 {
 	return Streaming && Streaming->IsDatasetOpen() && Streaming->GetDataset().SampleGeoid(LonDeg, LatDeg, OutUndulation);
+}
+
+bool UGeoWaterSubsystem::IsWaterAt(double LonDeg, double LatDeg) const
+{
+	if (!Streaming || !Streaming->IsDatasetOpen()) { return false; }
+	const FGeoWaterDataset& Dataset = Streaming->GetDataset();
+	for (int32 Level = Dataset.GetMaxLevel(); Level >= Dataset.GetMinLevel(); --Level)
+	{
+		uint32 X = 0, Y = 0;
+		Tiles::TileForLonLat(static_cast<uint32>(Level), LonDeg, LatDeg, X, Y);
+		const FTileKey Key{ static_cast<uint32>(Level), X, Y };
+		if (!Dataset.TileExists(Key))
+		{
+			if (Dataset.IsOpenSea(Key)) { return true; }
+			continue;
+		}
+		const UGeoWaterStreamingSubsystem::FWaterTilePtr Tile = Streaming->PeekLoadedTile(Key);
+		if (!Tile || !Tile->IsValid()) { continue; }
+		const Tiles::FTileBounds Bounds = Tiles::GetTileBounds(Key.Level, Key.X, Key.Y);
+		const double Span = Tiles::TileSpanDeg(Key.Level);
+		return Water::FWaterView::Make(*Tile, Key).SdfPixelsAt((LonDeg - Bounds.West) / Span, (Bounds.North - LatDeg) / Span) > 0.0f;
+	}
+	return false;
 }
 
 FString UGeoWaterSubsystem::GetMaterialProblem() const
@@ -182,6 +207,7 @@ void UGeoWaterSubsystem::InstallCarving(bool bInstall)
 {
 	if (!Terrain || bCarvingInstalled == bInstall) { return; }
 	bCarvingInstalled = bInstall;
+	InstallOpenSea(bInstall);
 	if (!bInstall)
 	{
 		Terrain->ClearHeightEditor();
@@ -214,6 +240,39 @@ void UGeoWaterSubsystem::InstallCarving(bool bInstall)
 		};
 		return EGeoHeightEdit::Ready;
 	});
+}
+
+void UGeoWaterSubsystem::InstallOpenSea(bool bInstall)
+{
+	UGeoTileStreamingSubsystem* Heights = GetWorld() ? GetWorld()->GetSubsystem<UGeoTileStreamingSubsystem>() : nullptr;
+	if (!Heights) { return; }
+
+	// ------------------------------------------------------------------
+	//  Il mare aperto: dove il terreno non ha tile (al largo) lo streaming
+	//  del terreno le costruisce dal dataset d'acqua: il fondale e, per
+	//  l'acqua, la superficie al geoide. Si accende e si spegne con lo
+	//  scavo: senza acqua il terreno torna quello del DEM, buchi compresi.
+	//  Le lambda catturano solo il TSharedPtr ai dati immutabili: Build gira
+	//  sui thread del pool, anche dopo una riapertura del dataset.
+	// ------------------------------------------------------------------
+	FGeoOpenSeaPtr OpenSea;
+	if (bInstall && Streaming && Streaming->IsDatasetOpen()) { OpenSea = Streaming->GetDataset().GetOpenSea(); }
+	if (!OpenSea.IsValid())
+	{
+		Heights->SetVirtualTerrain(nullptr);
+		return;
+	}
+	auto Virtual = MakeShared<FGeoVirtualTerrain, ESPMode::ThreadSafe>();
+	Virtual->Exists = [OpenSea](const FTileKey& Key) { return OpenSea->Sea.Covers(Key); };
+	Virtual->HeightRange = [OpenSea](const FTileKey& Key, float& OutMin, float& OutMax)
+	{
+		return Tiles::OpenSeaHeightRange(Key, OpenSea->Sea, OpenSea->Geoid, OutMin, OutMax);
+	};
+	Virtual->Build = [OpenSea](const FTileKey& Key, Tiles::FHeightTile& Out)
+	{
+		return Tiles::BuildOpenSeaHeightTile(Key, OpenSea->Sea, OpenSea->Geoid, Out);
+	};
+	Heights->SetVirtualTerrain(Virtual);
 }
 
 void UGeoWaterSubsystem::EnsureSharedTextures(IGeoTerrainMeshProvider* Provider)
@@ -478,9 +537,10 @@ void UGeoWaterSubsystem::UpdateWaves(float DeltaTime)
 {
 	UWorld* World = GetWorld();
 	const UGeoWeatherSubsystem* WeatherSubsystem = World ? World->GetSubsystem<UGeoWeatherSubsystem>() : nullptr;
-	// Le onde lunghe seguono il vento MEDIO; le raffiche muovono solo
-	// l'increspatura e la schiuma (vedi FWaveField: perche').
-	if (WeatherSubsystem) { Waves.SetTargetWind(WeatherSubsystem->GetMeanWind()); }
+	// Le onde lunghe seguono il vento MEDIO sul mare aperto (non quello della
+	// stazione a terra: sul mare, piu' liscio, arriva piu' forte); le raffiche
+	// muovono solo l'increspatura e la schiuma (vedi FWaveField: perche').
+	if (WeatherSubsystem) { Waves.SetTargetWind(WeatherSubsystem->GetSeaWind()); }
 	if (!bWavesStarted)
 	{
 		// Al primo frame il mare e' gia' quello del vento, non nasce piatto.
@@ -489,8 +549,9 @@ void UGeoWaterSubsystem::UpdateWaves(float DeltaTime)
 	}
 	Waves.Advance(DeltaTime);
 
-	// Il vento di adesso, CON le raffiche: per l'increspatura e la schiuma.
-	const Weather::FWind Wind = WeatherSubsystem ? WeatherSubsystem->GetWind() : Waves.GetWind();
+	// Il vento di adesso, CON la raffica che sta passando qui: per
+	// l'increspatura e la schiuma.
+	const Weather::FWind Wind = WeatherSubsystem ? WeatherSubsystem->GetSeaGust() : Waves.GetWind();
 	double TowardNorth = 0.0, TowardEast = 0.0;
 	Wind.Toward(TowardNorth, TowardEast);
 
@@ -594,6 +655,17 @@ void UGeoWaterSubsystem::DrawDebugOverlay()
 			static_cast<long long>(Dataset.GetIndexedTileCount()), Dataset.GetRulesVersion(),
 			Dataset.HasGeoid() ? TEXT("si'") : TEXT("no")));
 		Line(FColor::White, FString::Printf(TEXT("Cartella   : %s"), *Dataset.GetRootDirectory()));
+		if (const FGeoOpenSeaPtr OpenSea = Dataset.GetOpenSea())
+		{
+			const UGeoTileStreamingSubsystem* Heights = GetWorld()->GetSubsystem<UGeoTileStreamingSubsystem>();
+			Line(FColor::White, FString::Printf(TEXT("Mare aperto: %lld tile elencate, %d tile di terreno virtuali chieste%s"),
+				static_cast<long long>(OpenSea->Sea.Tiles.size()), Heights ? Heights->GetVirtualTileCount() : 0,
+				(Heights && Heights->HasVirtualTerrain()) ? TEXT("") : TEXT(" (spento: acqua spenta o materiale mancante)")));
+		}
+		else
+		{
+			Line(FColor::Yellow, TEXT("Mare aperto: no (dataset fatto senza --sea): al largo il terreno ha i buchi"));
+		}
 		const FString Stale = Dataset.GetStaleReason();
 		if (!Stale.IsEmpty()) { Line(FColor::Red, Stale); }
 	}

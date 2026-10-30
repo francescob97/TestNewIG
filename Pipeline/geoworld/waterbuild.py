@@ -1470,6 +1470,122 @@ def plan_tasks(terrain: TerrainSampler, levels: list[int], blocks: list[str], bb
 
 
 # =============================================================================
+#  Il mare aperto (opensea.bin)
+# =============================================================================
+
+#: La maschera del mare con cui si decide che una tile e' TUTTA in mare: celle
+#: di 1/16 del lato di una tile del livello piu' fine (a 45° col livello 13
+#: 200-300 m), meno fini se il riquadro e' grande (al massimo 64 milioni di celle).
+OPEN_SEA_MASK_PER_TILE = 16
+OPEN_SEA_MAX_MASK_CELLS = 64_000_000
+
+#: La griglia delle profondita' del fondale del mare aperto: 1/256 di grado
+#: (~430 m), meno fine se il riquadro e' grande (al massimo 16 milioni di celle:
+#: 32 MB in memoria nel runtime).
+OPEN_SEA_DEPTH_DEG = 1.0 / 256.0
+OPEN_SEA_MAX_DEPTH_CELLS = 16_000_000
+
+
+def _sea_raster(sea_path: str, region, west: float, north: float, cell: float,
+                columns: int, rows: int) -> np.ndarray:
+    """1 dove c'e' il mare (centro della cella dentro un poligono), 0 altrove."""
+    gdal, _, _ = _gdal()
+    datasource = _memory_vector()
+    layer = _layer(datasource, "mare", ())
+    for geometry in iter_sea(sea_path, region):
+        _add(layer, geometry)
+    raster = _mem_raster(columns, rows, (west, cell, 0.0, north, 0.0, -cell), gdal.GDT_Byte)
+    return _rasterize(raster, layer, burn=1).astype(np.uint8)
+
+
+def find_open_sea(terrain: TerrainSampler, sea_path: str, region, levels: list[int],
+                  bathymetry: str | None = None, report: Report = _null_report) -> waterformat.OpenSea:
+    """
+    Le tile senza terreno che stanno tutte in mare, e il fondale sotto di loro.
+
+    Il dataset del terreno non scrive le tile che non hanno nemmeno un post di
+    dato: al largo, a ogni livello oltre i primi, non c'e' niente. Il quadtree
+    raffina la tile costiera e al posto delle figlie in mare lascia un buco.
+    Qui si scende nel quadtree del terreno: una tile che c'e' si attraversa,
+    una che manca si guarda nella maschera del mare. Tutta in mare: si segna,
+    al livello piu' grossolano possibile (vale per tutte le sue discendenti);
+    in parte: si scende; per niente: e' terra fuori dal DEM, si lascia stare.
+    """
+    gdal, _, _ = _gdal()
+    finest = levels[-1]
+    margin = tiling.tile_span_deg(finest)
+    west, south = region[0] - margin, region[1] - margin
+    east, north = region[2] + margin, region[3] + margin
+    area = (east - west) * (north - south)
+
+    cell = max(margin / OPEN_SEA_MASK_PER_TILE, math.sqrt(area / OPEN_SEA_MAX_MASK_CELLS))
+    columns, rows = int(math.ceil((east - west) / cell)), int(math.ceil((north - south) / cell))
+    sea = _sea_raster(sea_path, region, west, north, cell, columns, rows)
+
+    def state(level: int, x: int, y: int) -> int:
+        """2 = tutta in mare, 1 = in parte, 0 = niente mare."""
+        bounds = tiling.tile_bounds(level, x, y)
+        # Una cella in piu' per lato: si giudica anche la riva appena fuori.
+        c0 = int(math.floor((bounds.west - west) / cell)) - 1
+        c1 = int(math.ceil((bounds.east - west) / cell)) + 1
+        r0 = int(math.floor((north - bounds.north) / cell)) - 1
+        r1 = int(math.ceil((north - bounds.south) / cell)) + 1
+        whole = c0 >= 0 and r0 >= 0 and c1 <= columns and r1 <= rows
+        window = sea[max(r0, 0):max(min(r1, rows), 0), max(c0, 0):max(min(c1, columns), 0)]
+        if window.size == 0 or not window.any():
+            return 0
+        return 2 if whole and window.all() else 1
+
+    def intersects(level: int, x: int, y: int) -> bool:
+        bounds = tiling.tile_bounds(level, x, y)
+        return not (bounds.east <= region[0] or bounds.west >= region[2]
+                    or bounds.north <= region[1] or bounds.south >= region[3])
+
+    tiles = []
+    top = levels[0]
+    x0, y0, x1, y1 = tiling.tile_range_for_bbox(top, *region)
+    stack = [(top, x, y) for y in range(y0, y1 + 1) for x in range(x0, x1 + 1)]
+    while stack:
+        level, x, y = stack.pop()
+        if not intersects(level, x, y):
+            continue
+        if (x, y) in terrain.tiles(level):
+            descend = level < finest
+        else:
+            found = state(level, x, y)
+            if found == 2:
+                tiles.append((level, x, y))
+            descend = found == 1 and level < finest
+        if descend:
+            stack.extend((level + 1, 2 * x + dx, 2 * y + dy) for dy in (0, 1) for dx in (0, 1))
+    tiles.sort()
+
+    # --- Il fondale: la rampa della riva (le regole del mare), o la batimetria --
+    depth_cell = max(OPEN_SEA_DEPTH_DEG, math.sqrt(area / OPEN_SEA_MAX_DEPTH_CELLS))
+    depth_columns = int(math.ceil((east - west) / depth_cell))
+    depth_rows = int(math.ceil((north - south) / depth_cell))
+    depth_sea = sea if depth_cell == cell else _sea_raster(sea_path, region, west, north, depth_cell,
+                                                           depth_columns, depth_rows)
+    middle = math.radians(0.5 * (south + north))
+    pixel_m = depth_cell * NOMINAL_METRES_PER_DEGREE * 0.5 * (1.0 + math.cos(middle))
+    # Dal centro della cella alla riva: mezza cella meno della distanza fra i centri.
+    distance = np.maximum(_proximity_m(depth_sea, 0, pixel_m) - 0.5 * pixel_m, 0.0)
+    shore_depth, slope = waterclasses.ramp(waterclasses.KIND_SEA)
+    depth = waterclasses.depth_at(distance, shore_depth, slope,
+                                  waterclasses.max_depth(waterclasses.KIND_SEA))
+    if bathymetry:
+        lons = west + (np.arange(depth_columns) + 0.5) * depth_cell
+        lats = north - (np.arange(depth_rows) + 0.5) * depth_cell
+        measured = BathymetrySampler(bathymetry).depth(lons[np.newaxis, :] + 0.0 * lats[:, np.newaxis],
+                                                        lats[:, np.newaxis] + 0.0 * lons[np.newaxis, :])
+        depth = np.where(np.isfinite(measured), measured, depth)
+    depth = np.where(depth_sea == 1, depth, np.nan).astype(np.float32)
+    report(f"      mare aperto: {len(tiles):,} tile senza terreno tutte in mare, "
+           f"fondale su {depth_columns} x {depth_rows} celle da {depth_cell * 3600:.0f}\"")
+    return waterformat.OpenSea(tiles, depth, west, north, depth_cell)
+
+
+# =============================================================================
 #  Tutto insieme
 # =============================================================================
 
@@ -1498,8 +1614,11 @@ def build(*, osm: list[str], terrain_root: str, output: str, sea: str | None = N
         # Su tutta l'area del terreno, non solo su quella dell'acqua: serve
         # anche a riconoscere i post riempiti col livello del mare lungo i
         # fiumi che escono dal riquadro (TerrainSampler.heights).
-        geoid_region = (min(region[0], terrain.bbox[0]), min(region[1], terrain.bbox[1]),
-                        max(region[2], terrain.bbox[2]), max(region[3], terrain.bbox[3]))
+        # Piu' una tile del livello piu' fine per lato: il mare aperto (vedi
+        # find_open_sea) arriva fin li', e il runtime ci appoggia l'acqua.
+        margin = tiling.tile_span_deg(levels[-1])
+        geoid_region = (min(region[0], terrain.bbox[0]) - margin, min(region[1], terrain.bbox[1]) - margin,
+                        max(region[2], terrain.bbox[2]) + margin, max(region[3], terrain.bbox[3]) + margin)
         grid, geotransform, _error, _spacing = geoid_module.build_aligned_undulation_grid(
             geoid_region, terrain.vertical_crs, max_error_m=0.01, log=report)
         geoid = GeoidSampler(grid, geotransform)
@@ -1595,6 +1714,30 @@ def build(*, osm: list[str], terrain_root: str, output: str, sea: str | None = N
         spacing = max(east - west, north - south)
         waterformat.write_geoid(output, constant, (west - spacing * 0.5, north + spacing * 0.5, spacing))
 
+    # Il mare aperto: solo con i poligoni del mare. Si rifa' solo se cambiano
+    # il mare, il terreno, il riquadro, i livelli o la batimetria.
+    open_sea_info = None
+    open_sea_path = os.path.join(output, waterformat.OPEN_SEA_FILENAME)
+    if sea:
+        open_sea_fp = PipelineState.fingerprint(
+            {"stage": "mare aperto", "rules": waterclasses.WATER_RULES_VERSION, "region": list(region),
+             "levels": levels, "terrain": os.path.abspath(terrain_root),
+             "format": waterformat.OPEN_SEA_VERSION}, [sea] + ([bathymetry] if bathymetry else []))
+        if state.is_complete("mare aperto", open_sea_fp) and os.path.exists(open_sea_path):
+            open_sea = waterformat.read_open_sea(output)
+            report(f"      mare aperto gia' fatto: {len(open_sea.tiles):,} tile")
+        else:
+            open_sea = find_open_sea(terrain, sea, region, levels, bathymetry, report)
+            waterformat.write_open_sea(output, open_sea)
+            state.mark_complete("mare aperto", open_sea_fp, [open_sea_path], {})
+        depth = open_sea.depth[np.isfinite(open_sea.depth)]
+        open_sea_info = {"path": waterformat.OPEN_SEA_FILENAME, "tiles": len(open_sea.tiles),
+                         "gridDeg": open_sea.spacing,
+                         "maxDepthM": float(depth.max()) if depth.size else 0.0,
+                         "headerBytes": waterformat.OPEN_SEA_HEADER.size}
+    elif os.path.exists(open_sea_path):
+        os.remove(open_sea_path)          # di un giro precedente con il mare
+
     extent = summary.get("estensione") or list(region)
     manifest = waterformat.build_manifest(
         dataset_name=name, bbox=tuple(extent), levels=level_info,
@@ -1605,7 +1748,7 @@ def build(*, osm: list[str], terrain_root: str, output: str, sea: str | None = N
                 "verticalCrs": terrain.vertical_crs,
                 "description": "OpenStreetMap (c) contributori OpenStreetMap, licenza ODbL",
                 "bbox": list(bbox) if bbox else None},
-        body_counts=summary["corpi"], pipeline_version=PIPELINE_VERSION)
+        body_counts=summary["corpi"], pipeline_version=PIPELINE_VERSION, open_sea=open_sea_info)
     waterformat.write_manifest(output, manifest)
     report(f"fatto in {time.time() - started:.0f} s: {output}")
     return manifest
@@ -1639,6 +1782,21 @@ def verify(root: str, report: Report = _null_report, sample_per_level: int = 16)
     except Exception as error:                          # noqa: BLE001
         report(f"geoide   : ILLEGGIBILE ({error})")
         problems += 1
+
+    open_sea = document.get("openSea")
+    if open_sea:
+        try:
+            sea = waterformat.read_open_sea(root)
+            depth = sea.depth[np.isfinite(sea.depth)]
+            report(f"mare     : {len(sea.tiles):,} tile di mare aperto, fondale su "
+                   f"{sea.depth.shape[1]} x {sea.depth.shape[0]} celle, fino a "
+                   f"{float(depth.max()) if depth.size else 0.0:.0f} m")
+            if len(sea.tiles) != open_sea.get("tiles"):
+                report(f"  mare aperto: {len(sea.tiles)} tile nel file, {open_sea.get('tiles')} nel manifest")
+                problems += 1
+        except Exception as error:                      # noqa: BLE001
+            report(f"mare     : opensea.bin ILLEGGIBILE ({error})")
+            problems += 1
 
     for info in document["levels"]:
         level = info["level"]

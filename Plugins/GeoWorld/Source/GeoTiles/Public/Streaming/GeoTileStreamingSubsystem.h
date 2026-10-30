@@ -15,6 +15,24 @@
 
 class FGeoTileLoadWork;
 
+/**
+ * Tile che il dataset del terreno NON ha ma che qualcuno sa costruire: oggi
+ * il mare aperto del dataset d'acqua (Tiles/OpenSea.h), dove tilecut non ha
+ * scritto niente perche' non c'era nemmeno un post di dato.
+ *
+ * Exists e HeightRange girano sul GAME THREAD per ogni nodo che il quadtree
+ * visita: niente disco, niente allocazioni. Build gira su un thread del pool,
+ * come una lettura: deve catturare solo dati IMMUTABILI (un TSharedPtr a
+ * dati costanti), perche' la sorgente puo' cambiare mentre lavora.
+ */
+struct FGeoVirtualTerrain
+{
+	TFunction<bool(const GeoWorld::Tiles::FTileKey&)> Exists;
+	TFunction<bool(const GeoWorld::Tiles::FTileKey&, float&, float&)> HeightRange;
+	TFunction<bool(const GeoWorld::Tiles::FTileKey&, GeoWorld::Tiles::FHeightTile&)> Build;
+};
+using FGeoVirtualTerrainPtr = TSharedPtr<const FGeoVirtualTerrain, ESPMode::ThreadSafe>;
+
 /** Stato di una tile dal punto di vista di chi la chiede. */
 UENUM()
 enum class EGeoTileState : uint8
@@ -106,6 +124,13 @@ public:
 	FTilePtr FindLoadedTile(const FTileKey& Key);
 
 	/**
+	 * Come FindLoadedTile, ma senza toccare la cache (ne' l'ordine LRU ne' le
+	 * statistiche): per chi interroga le quote centinaia di volte per frame,
+	 * come il vento, e non deve falsare il tasso di hit.
+	 */
+	FTilePtr PeekLoadedTile(const FTileKey& Key) const { return Cache.Peek(Key); }
+
+	/**
 	 * Chiede una tile. Ritorna subito.
 	 *
 	 * Priority: piu' ALTO viene servito prima. Il quadtree ci mettera' un
@@ -115,6 +140,29 @@ public:
 	EGeoTileState RequestTile(const FTileKey& Key, int32 Priority = 0);
 
 	EGeoTileState GetTileState(const FTileKey& Key) const;
+
+	// --- Tile virtuali (FGeoVirtualTerrain) --------------------------------
+
+	/**
+	 * La sorgente delle tile virtuali, o nessuna (nullptr). Le tile virtuali
+	 * gia' in cache si buttano: erano della sorgente di prima.
+	 */
+	void SetVirtualTerrain(FGeoVirtualTerrainPtr InVirtual);
+
+	/**
+	 * La tile esiste: nel dataset o virtuale. E' la domanda del quadtree.
+	 * Carica l'indice del livello se manca (una lettura la prima volta).
+	 */
+	bool TileExists(const FTileKey& Key);
+
+	/** Min/max quota senza leggere la tile: dall'indice, o dalla sorgente virtuale. */
+	bool GetTileHeightRange(const FTileKey& Key, float& OutMin, float& OutMax) const;
+
+	/** Il dataset non ce l'ha e la sorgente virtuale si'. Richiede l'indice del livello. */
+	bool IsVirtualTile(const FTileKey& Key) const;
+	bool HasVirtualTerrain() const { return Virtual.IsValid(); }
+	/** Tile virtuali chieste finora (in cache o in volo; alcune magari gia' sfrattate). */
+	int32 GetVirtualTileCount() const { return VirtualKeys.Num(); }
 
 	/** Annulla le richieste non ancora iniziate che non servono piu'. */
 	void CancelPendingRequests();
@@ -172,6 +220,8 @@ private:
 		TSharedPtr<GeoWorld::Tiles::FHeightTile> Tile;
 		FString Error;
 		double DurationSeconds = 0.0;
+		/** Tile virtuale: di quale sorgente (VirtualGeneration), -1 = dal disco. */
+		int32 VirtualGeneration = -1;
 	};
 
 	void DrainCompletedLoads();
@@ -194,6 +244,12 @@ private:
 
 	/** Tile per cui esiste una richiesta in volo: evita di chiederle due volte. */
 	TSet<uint64> InFlight;
+
+	/** Le tile virtuali e la loro sorgente: cambiata la sorgente, si buttano. */
+	FGeoVirtualTerrainPtr Virtual;
+	int32 VirtualGeneration = 0;
+	/** Chiave intera: Pack() non si inverte, e per toglierle dalla cache serve la tile. */
+	TMap<uint64, FTileKey> VirtualKeys;
 
 	FQueuedThreadPool* LoadPool = nullptr;
 	TArray<FGeoTileLoadWork*> PendingWork;

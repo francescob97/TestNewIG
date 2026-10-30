@@ -87,6 +87,13 @@ public:
 	/** N del geoide nel punto, se il dataset d'acqua lo porta (per la quota s.l.m.). */
 	bool GetGeoidUndulation(double LonDeg, double LatDeg, double& OutUndulation) const;
 
+	/**
+	 * C'e' acqua in questo punto? Dalle tile d'acqua in memoria (la riva
+	 * dell'SDF) e dal mare aperto. Falso se non si sa: per il vento, il suolo
+	 * sconosciuto e' terra.
+	 */
+	bool IsWaterAt(double LonDeg, double LatDeg) const;
+
 	void SetDebugOverlayEnabled(bool bInShow) { bShowDebugOverlay = bInShow; }
 	bool IsDebugOverlayEnabled() const { return bShowDebugOverlay; }
 
@@ -130,6 +137,8 @@ private:
 	bool LaunchJob(IGeoTerrainMeshProvider* Provider, const FTileKey& Key, const FTileKey& WaterKey, int32 Step);
 	void DrainFinished(IGeoTerrainMeshProvider* Provider, int32 Budget);
 	void InstallCarving(bool bInstall);
+	/** Le tile virtuali del mare aperto nello streaming del terreno (Tiles/OpenSea.h). */
+	void InstallOpenSea(bool bInstall);
 	void EnsureSharedTextures(IGeoTerrainMeshProvider* Provider);
 	void UpdateWaves(float DeltaTime);
 	void RemoveAllWater();

@@ -31,6 +31,8 @@ FORMAT_HEADER = os.path.join(REPO, "Plugins", "GeoWorld", "Source", "GeoTiles", 
                              "Tiles", "WaterTileFormat.h")
 FIXTURE = os.path.join(REPO, "Plugins", "GeoWorld", "Source", "GeoTiles", "TestData",
                        "water_fixture.gwa")
+OPEN_SEA_FIXTURE = os.path.join(REPO, "Plugins", "GeoWorld", "Source", "GeoTiles", "TestData",
+                                "opensea_fixture.bin")
 
 
 def _gdal_ready():
@@ -124,6 +126,9 @@ class ContractWithCpp(unittest.TestCase):
         self.assertEqual(self.constant("WaterSdfZero"), waterformat.SDF_ZERO)
         self.assertEqual(self.constant("WaterSdfScale"), waterformat.SDF_SCALE)
         self.assertEqual(self.constant("WaterFlowScale"), 100.0)
+        self.assertEqual(self.constant("OpenSeaHeaderBytes"), waterformat.OPEN_SEA_HEADER.size)
+        self.assertEqual(self.constant("OpenSeaRecordBytes"), waterformat.OPEN_SEA_RECORD.size)
+        self.assertEqual(self.constant("OpenSeaNoDepth"), waterformat.OPEN_SEA_NO_DEPTH)
         self.assertEqual(self.constant("WaterRulesVersion"), waterclasses.WATER_RULES_VERSION,
                          "WaterRulesVersion (C++) deve seguire WATER_RULES_VERSION: il motore "
                          "dice in rosso che un dataset e' vecchio confrontando i due")
@@ -134,8 +139,22 @@ class ContractWithCpp(unittest.TestCase):
                              "water_fixture.gwa non e' aggiornato: rigeneralo con "
                              "waterformat.fixture_bytes()")
 
+    def test_open_sea_fixture_is_up_to_date(self):
+        with open(OPEN_SEA_FIXTURE, "rb") as handle:
+            self.assertEqual(handle.read(), waterformat.open_sea_fixture_bytes(),
+                             "opensea_fixture.bin non e' aggiornato: rigeneralo con "
+                             "waterformat.open_sea_fixture_bytes()")
+
 
 class Format(unittest.TestCase):
+
+    def test_open_sea_round_trip(self):
+        sea = waterformat.open_sea_fixture()
+        decoded = waterformat.decode_open_sea(waterformat.encode_open_sea(sea))
+        self.assertEqual(decoded.tiles, sea.tiles)
+        self.assertEqual((decoded.west, decoded.north, decoded.spacing), (sea.west, sea.north, sea.spacing))
+        np.testing.assert_allclose(decoded.depth, sea.depth, atol=0.05)
+        self.assertTrue(np.isnan(decoded.depth[:, 0]).all(), "la terra resta terra")
 
     def test_round_trip(self):
         tile = waterformat.fixture_tile()
@@ -207,15 +226,21 @@ def terrain_height(lon, lat):
     return np.where(lat < SEA_NORTH, GEOID, height)
 
 
-def write_terrain(root, levels=(12, 13, 14)):
+def write_terrain(root, levels=(12, 13, 14), bbox=BBOX, skip_open_sea=False):
+    """
+    Il terreno sintetico. Con skip_open_sea le tile che stanno tutte in mare
+    non si scrivono, come fa tilecut.py al largo (nessun post di dato).
+    """
     summaries = []
     for level in levels:
-        x0, y0, x1, y1 = tiling.tile_range_for_bbox(level, *BBOX)
+        x0, y0, x1, y1 = tiling.tile_range_for_bbox(level, *bbox)
         entries = []
         span = tiling.tile_span_deg(level)
         for y in range(y0, y1 + 1):
             for x in range(x0, x1 + 1):
                 bounds = tiling.tile_bounds(level, x, y)
+                if skip_open_sea and bounds.north < SEA_NORTH:
+                    continue
                 lons = bounds.west + np.arange(tiling.TILE_POSTS) * span / tiling.TILE_CELLS
                 lats = bounds.north - np.arange(tiling.TILE_POSTS) * span / tiling.TILE_CELLS
                 heights = terrain_height(lons[np.newaxis, :], lats[:, np.newaxis]).astype(np.float32)
@@ -225,7 +250,7 @@ def write_terrain(root, levels=(12, 13, 14)):
         terrain_manifest.write_level_index(root, level, entries)
         summaries.append(terrain_manifest.LevelSummary(level, len(entries), x0, x1, y0, y1, 0.0, 0.0,
                                                        0.0, 0.0, 0.0))
-    document = terrain_manifest.build_manifest(dataset_name="sintetico", bbox=BBOX, levels=summaries,
+    document = terrain_manifest.build_manifest(dataset_name="sintetico", bbox=bbox, levels=summaries,
                                                source={}, vertical={"verticalCrs": "EPSG:3855"},
                                                pipeline_version="test")
     terrain_manifest.write_manifest(root, document)
@@ -557,6 +582,108 @@ class BuildOnSyntheticData(unittest.TestCase):
         self.assertLess(time.time() - started, max(5.0, self.seconds / 2))
         after = {e.x: e for e in waterformat.read_level_index(self.output, 14)}
         self.assertEqual(before.keys(), after.keys())
+
+
+#: Piu' a sud del terreno di BBOX: al largo le tile del terreno non ci sono.
+SEA_BBOX = (7.600, 44.940, 7.720, 45.100)
+
+
+@unittest.skipUnless(HAS_GDAL, "serve GDAL con i driver OSM e GPKG e GEOS")
+class OpenSeaOnSyntheticData(unittest.TestCase):
+    """Il mare aperto: dove il terreno non ha tile, ma i poligoni dicono mare."""
+
+    LEVELS = (12, 13, 14)
+
+    @classmethod
+    def setUpClass(cls):
+        from geoworld import waterbuild
+        cls.directory = tempfile.TemporaryDirectory()
+        root = cls.directory.name
+        cls.terrain = os.path.join(root, "terreno")
+        write_terrain(cls.terrain, levels=cls.LEVELS, bbox=SEA_BBOX, skip_open_sea=True)
+        cls.osm = os.path.join(root, "acqua.osm")
+        write_osm(cls.osm)
+        cls.sea = os.path.join(root, "mare.gpkg")
+        write_sea(cls.sea)
+        cls.output = os.path.join(root, "acqua")
+        cls.manifest = waterbuild.build(osm=[cls.osm], sea=cls.sea, terrain_root=cls.terrain,
+                                        output=cls.output, name="mare", bbox=SEA_BBOX,
+                                        geoid=waterbuild.GeoidSampler(constant=GEOID))
+        cls.waterbuild = waterbuild
+        cls.open_sea = waterformat.read_open_sea(cls.output)
+        cls.terrain_tiles = {level: {(e.x, e.y) for e in terrain_manifest.read_level_index(cls.terrain, level)}
+                             for level in cls.LEVELS}
+
+    @classmethod
+    def tearDownClass(cls):
+        cls.directory.cleanup()
+
+    def covered(self, level, x, y):
+        listed = set(map(tuple, self.open_sea.tiles))
+        for up in range(level, self.LEVELS[0] - 1, -1):
+            shift = level - up
+            if (up, x >> shift, y >> shift) in listed:
+                return True
+        return False
+
+    def test_open_sea_tiles_have_no_terrain_and_are_all_sea(self):
+        self.assertGreater(len(self.open_sea.tiles), 0)
+        for level, x, y in self.open_sea.tiles:
+            self.assertNotIn((x, y), self.terrain_tiles[level], f"{level}/{x}/{y} ha il terreno")
+            self.assertLessEqual(tiling.tile_bounds(level, x, y).north, SEA_NORTH, f"{level}/{x}/{y}")
+
+    def test_open_sea_is_listed_at_the_coarsest_level(self):
+        listed = set(map(tuple, self.open_sea.tiles))
+        for level, x, y in self.open_sea.tiles:
+            if level == self.LEVELS[0]:
+                continue
+            parent = (level - 1, x >> 1, y >> 1)
+            self.assertNotIn(parent, listed)
+            bounds = tiling.tile_bounds(*parent)
+            # Fuori dal riquadro (piu' una tile del livello piu' fine) la
+            # maschera non sa: il padre a cavallo del bordo si divide.
+            margin = tiling.tile_span_deg(self.LEVELS[-1])
+            known = (bounds.west >= SEA_BBOX[0] - margin and bounds.east <= SEA_BBOX[2] + margin
+                     and bounds.south >= SEA_BBOX[1] - margin)
+            whole_parent_at_sea = (known and parent[1:] not in self.terrain_tiles[parent[0]]
+                                   and bounds.north <= SEA_NORTH - 0.003)
+            self.assertFalse(whole_parent_at_sea, f"{level}/{x}/{y}: bastava il padre {parent}")
+
+    def test_every_hole_at_sea_is_covered(self):
+        level = self.LEVELS[-1]
+        x0, y0, x1, y1 = tiling.tile_range_for_bbox(level, *SEA_BBOX)
+        holes = 0
+        for y in range(y0, y1 + 1):
+            for x in range(x0, x1 + 1):
+                bounds = tiling.tile_bounds(level, x, y)
+                inside = (bounds.west >= SEA_BBOX[0] and bounds.east <= SEA_BBOX[2]
+                          and bounds.south >= SEA_BBOX[1])
+                # Una cella della maschera di margine dalla riva.
+                if (x, y) in self.terrain_tiles[level] or not inside or bounds.north > SEA_NORTH - 0.003:
+                    continue
+                holes += 1
+                self.assertTrue(self.covered(level, x, y), f"buco in mare: {level}/{x}/{y}")
+        self.assertGreater(holes, 0)
+
+    def test_seabed_deepens_away_from_the_shore(self):
+        sea = self.open_sea
+
+        def depth(lon, lat):
+            column = int((lon - sea.west) / sea.spacing)
+            row = int((sea.north - lat) / sea.spacing)
+            return float(sea.depth[row, column])
+
+        self.assertTrue(np.isnan(depth(7.66, 45.05)), "a terra niente fondale")
+        near, far = depth(7.66, SEA_NORTH - 0.006), depth(7.66, 44.945)
+        self.assertGreater(far, near)
+        self.assertLessEqual(float(np.nanmax(sea.depth)), waterclasses.max_depth(waterclasses.KIND_SEA) + 0.05)
+        self.assertLess(near, 50.0, f"vicino alla riva il fondale e' basso: {near:.1f} m")
+
+    def test_manifest_and_verify(self):
+        self.assertEqual(self.manifest["openSea"]["tiles"], len(self.open_sea.tiles))
+        messages = []
+        self.assertEqual(self.waterbuild.verify(self.output, report=messages.append), 0, messages)
+        self.assertTrue(any("mare aperto" in m for m in messages), messages)
 
 
 if __name__ == "__main__":

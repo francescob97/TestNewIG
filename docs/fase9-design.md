@@ -306,10 +306,11 @@ nella normale, che le disegna comunque.
 
 ## 8. Cosa non fa (ancora)
 
-- **Il mare aperto oltre il terreno.** L'acqua sta sulle tile di terreno; dove
-  il dataset del terreno non ha tile (mare aperto lontano dalla costa) non c'è
-  niente da scavare né da coprire. Rimedio: rifare il terreno con la batimetria
-  sotto (GEBCO), così le tile esistono anche al largo.
+- **Il mare aperto oltre il riquadro.** Dalla sezione 13 il mare aperto c'è,
+  ma solo dentro il riquadro di `build-water` (il terreno, o `--bbox`): fuori
+  dal dataset del terreno restano i buchi, in mare come in terra.
+- **Il fondale vero al largo**: senza `--bathymetry` è la rampa della riva,
+  fino a 60 m. Con la batimetria (EMODnet, GEBCO) è quella.
 - **Le onde che frangono** sulla riva come geometria: qui si spengono in secca e
   la schiuma le racconta.
 - **Sotto l'acqua** con la camera: nessun effetto di immersione.
@@ -446,4 +447,67 @@ legge benissimo ed è sbagliato in silenzio. Adesso no: il manifest porta
 nomina la cartella e il comando; `verify-water` lo conta come problema. Un
 test Python tiene allineati i due numeri. Il dataset vecchio si apre lo
 stesso: nasconderlo farebbe sparire il sintomo, non la causa.
+
+---
+
+## 13. Il mare aperto
+
+**Il buco.** Il dataset del terreno non scrive le tile senza nemmeno un post
+di dato (`tilecut.py`: per l'Italia il riquadro è cinque volte la terra
+emersa). Al largo, oltre i primi livelli, le tile non ci sono, e il quadtree,
+raffinando la tile costiera, disegna solo le figlie che esistono: al posto di
+quelle in mare, il vuoto. Da quota alta si vedeva il mare (le tile grossolane
+lo coprono, piatto al geoide); scendendo, si apriva un buco grande come il
+Tirreno.
+
+**I dati: `opensea.bin`.** `build-water`, quando ha i poligoni del mare
+(`--sea`), scende nel quadtree del terreno: una tile che c'è si attraversa,
+una che manca si guarda in una maschera del mare (celle di 1/16 del lato di
+una tile del livello più fine, ~200–300 m, una cella di margine per lato).
+Tutta mare: si segna, al livello **più grossolano** possibile (vale per tutte
+le discendenti); in parte: si scende; per niente: è terra fuori dal DEM, si
+lascia stare. Con le tile, una griglia della **profondità del fondale**
+(~430 m): la rampa della riva delle regole del mare (0,5 m + 5% della
+distanza, fino a 60 m), o la batimetria se c'è. Su disco è piccolo (la
+griglia compressa: decine o centinaia di kB, quasi tutta "60 m" o "terra");
+in memoria la griglia dell'Italia intera pesa ~18 MB.
+
+**Il runtime: tile virtuali.** Il dataset d'acqua carica `opensea.bin` e,
+quando l'acqua è accesa, lo streaming del terreno riceve una **sorgente di tile
+virtuali** (`FGeoVirtualTerrain`): per una tile che il dataset non ha e che il
+mare aperto copre, dice che esiste, dà il suo intervallo di quote (25 punti,
+senza costruirla) e la costruisce sul pool di thread come una lettura:
+il **fondale** al geoide meno la profondità della griglia. L'acqua fa lo stesso
+con la sua tile: superficie al geoide, niente scavo, tutta lontana dalla riva,
+onde piene. Il resto del runtime (quadtree, mesh, geomorphing, materiale) non
+sa che sono virtuali. Codice: `GeoTiles/Public/Tiles/OpenSea.h`.
+
+Tre dettagli:
+
+- **Si accende e si spegne con lo scavo.** Senza acqua (o senza il suo
+  materiale) il terreno torna quello del DEM, buchi compresi: un fondale a −60 m
+  senza acqua sopra sarebbe peggio del buco.
+- **I dati condivisi sono immutabili** (`TSharedPtr` a dati costanti): i
+  thread che costruiscono le tile possono finire dopo una riapertura del
+  dataset, e una tile della sorgente di prima si butta (contatore di
+  generazione).
+- **"Dal suolo", al largo, è dal mare**: le stampe e il vento usano il geoide,
+  non il fondale.
+
+**Fra la tile costiera e quella virtuale** il fondale non è identico: la prima
+ha la rampa calcolata sulla sua riva a 256 pixel, la seconda la griglia da
+~430 m. La differenza è di qualche metro sotto qualche metro d'acqua; più al
+largo, sotto 60 m d'acqua, non si vede.
+
+| | Prima | Adesso |
+|---|---|---|
+| Al largo, scendendo di quota | buco | mare, con le onde |
+| Dati in più | — | `opensea.bin`: piccolo su disco, ~18 MB in memoria per l'Italia |
+| Costo a runtime | — | una tile di terreno e una d'acqua costruite in memoria: ~0,8 ms la coppia, sui thread del pool (mai sul game thread) |
+
+Prove: Python (`OpenSeaOnSyntheticData`: le tile elencate non hanno terreno,
+stanno tutte in mare, al livello più grossolano, coprono ogni buco; il fondale
+scende allontanandosi dalla riva) e C++ (`geowater_tests`, sezione 9: il file
+scritto dalla pipeline, le discendenti, la griglia, le tile virtuali, tutta
+l'acqua visibile sopra il fondale).
 

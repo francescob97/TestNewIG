@@ -8,6 +8,7 @@
 //  due i casi.
 // =============================================================================
 #include "Mesh/TileMesh.h"
+#include "Tiles/OpenSea.h"
 #include "Tiles/WaterTileFormat.h"
 #include "Water/WaterMesh.h"
 #include "Water/WaterTextures.h"
@@ -624,6 +625,87 @@ static void TestRealPo(const std::string& Directory)
 	}
 }
 
+// ===========================================================================
+//  Il mare aperto: opensea.bin e le tile virtuali (OpenSea.h)
+// ===========================================================================
+
+static void TestOpenSea(const std::string& Directory)
+{
+	Section("9. Il mare aperto: le tile che il terreno non ha");
+
+	std::vector<uint8_t> Bytes;
+	if (!ReadFile(Directory + "/opensea_fixture.bin", Bytes))
+	{
+		++GSkipped;
+		std::printf("  [skip] opensea_fixture.bin non trovato in %s\n", Directory.c_str());
+		return;
+	}
+	Tiles::FOpenSeaHeader Header;
+	Tiles::FOpenSea Sea;
+	std::string Error;
+	bool bRead = Tiles::ParseOpenSeaHeader(Bytes.data(), Bytes.size(), Header, Error);
+	std::vector<uint8_t> Plain(Header.ExpectedPlainBytes());
+	uLongf PlainSize = static_cast<uLongf>(Plain.size());
+	bRead = bRead && uncompress(Plain.data(), &PlainSize, Bytes.data() + Tiles::OpenSeaHeaderBytes, Header.PayloadBytes) == Z_OK
+	     && Tiles::DecodeOpenSeaPayload(Header, Plain.data(), PlainSize, Sea, Error);
+	Check(bRead && Sea.Tiles.size() == 3 && Sea.MinLevel == 9 && Sea.Columns == 4 && Sea.Rows == 3,
+		"opensea_fixture.bin (scritto dalla pipeline) si legge", Error);
+	if (!bRead) { return; }
+
+	std::vector<uint8_t> Short(Bytes.begin(), Bytes.end() - 1);
+	Check(!Tiles::ParseOpenSeaHeader(Short.data(), Short.size(), Header, Error), "un file troncato si rifiuta", Error);
+
+	// Elencata a livello 9: vale per tutte le discendenti, non per il padre ne' per le vicine.
+	Check(Sea.Covers(FTileKey{ 9, 534, 130 }) && Sea.Covers(FTileKey{ 13, 534 * 16 + 5, 130 * 16 + 11 })
+		&& Sea.Covers(FTileKey{ 11, 2132, 521 }), "le tile elencate e le loro discendenti sono mare");
+	Check(!Sea.Covers(FTileKey{ 8, 267, 65 }) && !Sea.Covers(FTileKey{ 9, 535, 130 }) && !Sea.Covers(FTileKey{ 11, 2133, 521 }),
+		"il padre e le vicine no");
+
+	// La griglia: colonna 0 terra, poi 10 / 25,5 / 60 m; celle da 0,25 gradi da 7,5 E e 44,5 N.
+	Check(std::fabs(Sea.DepthAt(8.125, 44.375, -1.0) - 25.5) < 1e-6 && std::fabs(Sea.DepthAt(8.0, 44.375, -1.0) - 17.75) < 1e-6,
+		"fondale: il valore della cella, e fra due celle la media", Fmt("%.2f e %.2f m", Sea.DepthAt(8.125, 44.375, -1.0),
+		Sea.DepthAt(8.0, 44.375, -1.0)));
+	Check(std::fabs(Sea.DepthAt(7.75, 44.375, -1.0) - 10.0) < 1e-6 && Sea.DepthAt(7.6, 44.375, -1.0) == -1.0,
+		"vicino alla terra pesa solo il mare; tutta terra attorno: il ripiego",
+		Fmt("%.2f e %.2f m", Sea.DepthAt(7.75, 44.375, -1.0), Sea.DepthAt(7.6, 44.375, -1.0)));
+
+	// Le tile virtuali, con un geoide costante a 47 m.
+	Tiles::FGeoidGrid Geoid;
+	Geoid.OriginLon = 7.0; Geoid.OriginLat = 45.0; Geoid.Spacing = 1.0; Geoid.Columns = 3; Geoid.Rows = 3;
+	Geoid.Undulation.assign(9, 47.0f);
+	const FTileKey Key{ 10, 1068, 260 };      // dentro la tile elencata a livello 9, sopra le colonne 0 e 1
+	Tiles::FHeightTile Terrain;
+	FWaterTile Water;
+	const bool bTerrain = Tiles::BuildOpenSeaHeightTile(Key, Sea, Geoid, Terrain);
+	const bool bWater = Tiles::BuildOpenSeaWaterTile(Key, Geoid, Water);
+	Check(bTerrain && Terrain.IsValid() && Terrain.bHasFilledPosts && Terrain.MaxHeight <= 47.0f - 9.99f
+		&& Terrain.MinHeight >= 47.0f - 25.51f, "il fondale virtuale: geoide meno la profondita' della griglia",
+		Fmt("da %.2f a %.2f m", Terrain.MinHeight, Terrain.MaxHeight));
+	float RangeMin = 0.0f, RangeMax = 0.0f;
+	const bool bRange = Tiles::OpenSeaHeightRange(Key, Sea, Geoid, RangeMin, RangeMax);
+	Check(bRange && RangeMin <= Terrain.MinHeight
+		&& RangeMax >= 47.0f, "l'intervallo di quote (senza costruirla) contiene fondale e superficie",
+		Fmt("%.2f .. %.2f m", RangeMin, RangeMax));
+	bool bFlat = bWater && Water.IsValid() && !Water.HasFlow()
+	          && Water.Flags == (Tiles::WaterTileSea | Tiles::WaterTileAllWater);
+	for (size_t Index = 0; bFlat && Index < Water.Surface.size(); ++Index)
+	{
+		bFlat = Water.Surface[Index] == 47.0f && std::isnan(Water.Bed[Index]);
+	}
+	for (size_t Index = 0; bFlat && Index < Water.Sdf.size(); ++Index) { bFlat = Water.Sdf[Index] == 255 && Water.Wave[Index] == 255; }
+	Check(bFlat, "l'acqua virtuale: al geoide, niente scavo, lontana dalla riva, onde piene");
+
+	double DeepHidden = 1.0;
+	const double Visible = bTerrain && bWater ? VisibleWater(Terrain, Water, Key, 2, DeepHidden) : 0.0;
+	Check(Visible > 0.999 && DeepHidden == 0.0, "tutta la tile e' acqua che si vede, sopra il fondale",
+		Fmt("%.2f%% visibile", 100.0 * Visible));
+
+	Tiles::FGeoidGrid Far = Geoid;
+	Far.OriginLon = 100.0;
+	Check(!Tiles::BuildOpenSeaHeightTile(Key, Sea, Far, Terrain) && !Tiles::BuildOpenSeaWaterTile(Key, Far, Water)
+		&& !Tiles::OpenSeaHeightRange(Key, Sea, Far, RangeMin, RangeMax), "senza geoide sulla tile, niente tile virtuale");
+}
+
 int main(int ArgCount, char** Arguments)
 {
 	std::printf("=====================================================\n");
@@ -644,7 +726,9 @@ int main(int ArgCount, char** Arguments)
 	TestTextures();
 	{
 		const size_t Slash = Path.find_last_of("/\\");
-		TestRealPo(Slash == std::string::npos ? std::string(".") : Path.substr(0, Slash));
+		const std::string Directory = (Slash == std::string::npos) ? std::string(".") : Path.substr(0, Slash);
+		TestRealPo(Directory);
+		TestOpenSea(Directory);
 	}
 
 	std::printf("\n=====================================================\n");

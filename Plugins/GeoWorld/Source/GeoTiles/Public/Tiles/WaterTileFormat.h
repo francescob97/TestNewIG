@@ -27,6 +27,7 @@
 #include <cstring>
 #include <limits>
 #include <string>
+#include <unordered_set>
 #include <vector>
 
 #include "Tiles/TileKey.h"
@@ -360,6 +361,149 @@ namespace GeoWorld::Tiles
 		}
 		Out.Undulation.resize(Count);
 		for (size_t Index = 0; Index < Count; ++Index) { Out.Undulation[Index] = ReadF32(Data + GeoidHeaderBytes + Index * 4); }
+		return true;
+	}
+
+	// =========================================================================
+	//  Il mare aperto del dataset (opensea.bin)
+	// =========================================================================
+	//
+	//  Al largo il dataset del terreno non ha tile (non hanno nemmeno un post di
+	//  dato) e il quadtree lascerebbe un buco. La pipeline elenca le tile SENZA
+	//  terreno tutte in mare, al livello piu' grossolano possibile, e una
+	//  griglia della profondita' del fondale: il runtime ci costruisce tile di
+	//  terreno e d'acqua VIRTUALI (OpenSea.h). Formato in waterformat.py.
+
+	inline constexpr uint32_t OpenSeaMagic = 0x534F5747u;       // "GWOS"
+	inline constexpr uint16_t OpenSeaVersion = 1;
+	inline constexpr int32_t OpenSeaHeaderBytes = 48;
+	inline constexpr int32_t OpenSeaRecordBytes = 12;
+	/** Profondita' assente (terra, o fuori dalla griglia), in decimetri uint16. */
+	inline constexpr uint32_t OpenSeaNoDepth = 65535;          // 0xFFFF
+
+	struct FOpenSeaHeader
+	{
+		uint32_t TileCount = 0;
+		uint32_t Columns = 0, Rows = 0;
+		uint32_t PayloadBytes = 0;
+		double West = 0.0, North = 0.0, Spacing = 1.0;
+
+		size_t ExpectedPlainBytes() const
+		{
+			return static_cast<size_t>(TileCount) * OpenSeaRecordBytes + static_cast<size_t>(Columns) * Rows * 2;
+		}
+	};
+
+	struct FOpenSea
+	{
+		/** Le tile elencate (FTileKey::Pack): loro e tutte le loro discendenti sono mare. */
+		std::unordered_set<uint64_t> Tiles;
+		uint32_t MinLevel = 0xFFFFFFFFu;
+		/** Griglia per CELLE: la cella (c, r) copre [West + c * Spacing, West + (c + 1) * Spacing]. */
+		int32_t Columns = 0, Rows = 0;
+		double West = 0.0, North = 0.0, Spacing = 1.0;
+		std::vector<uint16_t> DepthDm;     // righe x colonne, riga 0 = NORD
+
+		bool IsEmpty() const { return Tiles.empty(); }
+
+		/** La tile, o un suo antenato, e' elencata: niente terreno, tutta mare. */
+		bool Covers(const FTileKey& Key) const
+		{
+			if (Tiles.empty()) { return false; }
+			for (uint32_t Up = 0; Up <= Key.Level; ++Up)
+			{
+				const uint32_t Level = Key.Level - Up;
+				if (Level < MinLevel) { break; }
+				if (Tiles.count(FTileKey{ Level, Key.X >> Up, Key.Y >> Up }.Pack()) != 0) { return true; }
+			}
+			return false;
+		}
+
+		/**
+		 * Profondita' del fondale in metri: bilineare sulle sole celle di mare
+		 * attorno al punto; `Fallback` se attorno e' tutto terra (succede: la
+		 * griglia e' piu' grossolana della maschera che ha deciso la tile).
+		 */
+		double DepthAt(double Lon, double Lat, double Fallback) const
+		{
+			if (Columns < 1 || Rows < 1 || DepthDm.size() != static_cast<size_t>(Columns) * Rows) { return Fallback; }
+			const double Fx = std::min(static_cast<double>(Columns) - 1.0, std::max(0.0, (Lon - West) / Spacing - 0.5));
+			const double Fy = std::min(static_cast<double>(Rows) - 1.0, std::max(0.0, (North - Lat) / Spacing - 0.5));
+			const int32_t X0 = static_cast<int32_t>(Fx), Y0 = static_cast<int32_t>(Fy);
+			const int32_t X1 = std::min(Columns - 1, X0 + 1), Y1 = std::min(Rows - 1, Y0 + 1);
+			const double Ax = Fx - X0, Ay = Fy - Y0;
+			const int32_t Xs[4] = { X0, X1, X0, X1 };
+			const int32_t Ys[4] = { Y0, Y0, Y1, Y1 };
+			const double Weights[4] = { (1 - Ax) * (1 - Ay), Ax * (1 - Ay), (1 - Ax) * Ay, Ax * Ay };
+			double Sum = 0.0, Weight = 0.0;
+			for (int Corner = 0; Corner < 4; ++Corner)
+			{
+				const uint16_t Value = DepthDm[static_cast<size_t>(Ys[Corner]) * Columns + Xs[Corner]];
+				if (Value == OpenSeaNoDepth) { continue; }
+				Sum += 0.1 * Value * Weights[Corner];
+				Weight += Weights[Corner];
+			}
+			return (Weight > 1.0e-9) ? Sum / Weight : Fallback;
+		}
+	};
+
+	inline bool ParseOpenSeaHeader(const uint8_t* Data, size_t Size, FOpenSeaHeader& Out, std::string& OutError)
+	{
+		using namespace WaterDetail;
+		if (!Data || Size < static_cast<size_t>(OpenSeaHeaderBytes) || ReadU32(Data) != OpenSeaMagic)
+		{
+			OutError = "opensea.bin non valido (magic)";
+			return false;
+		}
+		if (ReadU16(Data + 4) != OpenSeaVersion)
+		{
+			OutError = "opensea.bin: versione " + std::to_string(ReadU16(Data + 4)) + ", attesa "
+			         + std::to_string(OpenSeaVersion);
+			return false;
+		}
+		Out.TileCount = ReadU32(Data + 8);
+		Out.Columns = ReadU32(Data + 12);
+		Out.Rows = ReadU32(Data + 16);
+		Out.PayloadBytes = ReadU32(Data + 20);
+		Out.West = ReadF64(Data + 24);
+		Out.North = ReadF64(Data + 32);
+		Out.Spacing = ReadF64(Data + 40);
+		if (Size != static_cast<size_t>(OpenSeaHeaderBytes) + Out.PayloadBytes || !(Out.Spacing > 0.0))
+		{
+			OutError = "opensea.bin: dimensione incoerente con l'header (troncato?)";
+			return false;
+		}
+		return true;
+	}
+
+	/** Interpreta il payload GIA' DECOMPRESSO (zlib, come le tile). */
+	inline bool DecodeOpenSeaPayload(const FOpenSeaHeader& Header, const uint8_t* Plain, size_t Size,
+	                                 FOpenSea& Out, std::string& OutError)
+	{
+		using namespace WaterDetail;
+		if (!Plain || Size != Header.ExpectedPlainBytes())
+		{
+			OutError = "opensea.bin: payload di " + std::to_string(Size) + " byte, attesi "
+			         + std::to_string(Header.ExpectedPlainBytes());
+			return false;
+		}
+		Out = FOpenSea();
+		Out.Tiles.reserve(Header.TileCount);
+		for (uint32_t Index = 0; Index < Header.TileCount; ++Index)
+		{
+			const uint8_t* Record = Plain + static_cast<size_t>(Index) * OpenSeaRecordBytes;
+			const FTileKey Key{ ReadU32(Record), ReadU32(Record + 4), ReadU32(Record + 8) };
+			Out.Tiles.insert(Key.Pack());
+			Out.MinLevel = std::min(Out.MinLevel, Key.Level);
+		}
+		Out.Columns = static_cast<int32_t>(Header.Columns);
+		Out.Rows = static_cast<int32_t>(Header.Rows);
+		Out.West = Header.West;
+		Out.North = Header.North;
+		Out.Spacing = Header.Spacing;
+		const uint8_t* Grid = Plain + static_cast<size_t>(Header.TileCount) * OpenSeaRecordBytes;
+		Out.DepthDm.resize(static_cast<size_t>(Header.Columns) * Header.Rows);
+		for (size_t Index = 0; Index < Out.DepthDm.size(); ++Index) { Out.DepthDm[Index] = ReadU16(Grid + Index * 2); }
 		return true;
 	}
 }
