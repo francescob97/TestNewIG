@@ -4,7 +4,9 @@
 > **precipitazione**: dove cade, cosa cade (pioggia, neve, grandine o una
 > miscela, secondo la quota), quanto. E le sue conseguenze: le particelle
 > attorno alla camera, il suolo bagnato e la neve posata, la visibilità che
-> cala. E i **fulmini**, con il loro tuono (sezioni 2.8, 2.9 e 3.7).
+> cala. E i **fulmini**, con il loro tuono (sezioni 2.8, 2.9 e 3.7). E le
+> **nuvole**: i cumuli di bel tempo e le nubi di pioggia sopra i rovesci
+> (sezioni 2.10 e 3.8).
 >
 > Come provarlo: `docs/meteo-verifica.md`. Per chi impara: `docs/manuale/15-meteo.md`.
 
@@ -199,8 +201,10 @@ picco che si spegne in ~25 ms; fra un colpo e l'altro resta una luce debole
 (la corrente continua). È per questo che il lampo **sfarfalla**. Tutto dura
 ~0,3 s.
 
-**La forma.** Un canale dalla nube (2,2–3,5 km sopra il suolo, spostata di
-lato fino a un quinto dell'altezza) al punto colpito, con lo **spostamento del
+**La forma.** Un canale dalla nube al punto colpito. Parte dalla **base della
+nube di pioggia** (sezione 2.10), qualche centinaio di metri dentro, spostato
+di lato fino a un quinto dell'altezza; un lampo nella nube sta nel suo cuore,
+a metà fra la base e la cima. Il canale si costruisce con lo **spostamento del
 punto medio**: il segmento si spezza a metà, il punto medio si sposta di lato
 (fino a un quarto della lunghezza), e si ripete sulle due metà, sette volte:
 128 pezzi, zig-zag sempre più piccoli. Poi fino a 9 **rami**, più deboli
@@ -235,6 +239,73 @@ peggiore: un frame intero. Per questo lo fa un **thread di lavoro**; sul game
 thread si calcola solo quando arriva (le distanze del canale) e si costruisce
 il canale (8 microsecondi).
 
+### 2.10 Le nuvole
+
+Codice: `Plugins/GeoWorld/Source/GeoRender/Public/Weather/Clouds.h` (puro) e
+`Weather/CloudShader.inl` (lo shader: vedi 3.8). Provati da `geoweather_tests`,
+sezioni 14–15.
+
+**Due tipi di nuvole, due origini.**
+
+```
+nubi di PIOGGIA   dalla stessa mappa dei rovesci (2.1): dove piove c'e' sempre
+                  la nuvola sopra, e si allarga un po' oltre la pioggia
+cumuli di BEL     chiazze di ~1,5 km, base piatta, cima a cupola; quanti, lo dice
+TEMPO             la copertura impostata (geo.Weather.Clouds)
+```
+
+**Le nubi di pioggia.** La mappa della precipitazione è un rumore con
+deviazione ~1, e piove dove supera la soglia `T` che lascia sopra di sé la
+copertura chiesta. La nuvola usa **lo stesso rumore**: la sua copertura è
+`smoothstep(T − 0,9; T − 0,1; rumore)`, quindi è piena dove piove (il rumore
+è sopra `T`) e sfuma fino a 0,9 deviazioni sotto. Il test lo conta: dove
+piove la nuvola c'è sempre, piena; il cielo nuvoloso è più di 1,3 volte
+quello che piove. Le **cime**: nei rovesci `0,35 + 0,65 · smoothstep(0,15; 1;
+livello)` fra la base e la cima della precipitazione (10 km nei temporali),
+cioè torri alte nei nuclei e basse ai margini; attorno alla pioggia, un quarto
+della copertura. Una pioggia estesa (un fronte) è **cielo coperto**, con la
+cima fra il 55% e il 100% dei 6 km. La **base** è più bassa di quella dei
+cumuli: il 65%, mai sotto i 300 m (con la base dei cumuli a 1.500 m, a 975 m).
+
+**I cumuli di bel tempo.** Due ottave di rumore di valore (celle di 1,5 km e
+di ~520 m) fanno le **chiazze**; dove una chiazza supera la soglia, c'è un
+cumulo, tanto più alto quanto più la supera (la **cupola**, fino allo
+spessore impostato, 1.200 m di default). La **base è piatta**: lì l'aria che
+sale arriva a condensare, alla stessa quota per tutti. Un rumore più fine
+(~280 m) **mangia i bordi** dove la nuvola è sottile: sfrangiati, non tagliati
+con l'accetta. Le chiazze cambiano in mezz'ora e viaggiano con il vento in
+quota, come i rovesci.
+
+**La copertura giusta: una tabella misurata.** "Il 25% del cielo" vuol dire:
+il 25% delle colonne di cielo ha dentro un po' di nuvola, a qualunque quota
+(quello che si vede guardando in su). Il rumore non è uniforme e i bordi
+sfrangiati mangiano un po' di nuvola, quindi la soglia che dà il 25% non è una
+formula: si è **misurata** sullo shader stesso, compilato come C++, su 40.000
+colonne, per 18 soglie da 0 a 0,85 (`FairCloudThreshold`). Il test la riprova
+in un'altra zona: chiesti 10, 25, 50 e 75%, misurati 9, 24, 48 e 75%.
+
+**Niente salti.** Il disegno dei cumuli sta in metri verso nord e verso est,
+**ancorato a un punto fisso** (il primo posto visto). Con un'ancora mobile (il
+coseno della latitudine dell'origine) un rebase di 10 km verso nord spostava i
+cumuli di quasi un chilometro verso est. Perché i numeri restino piccoli per un
+float, l'origine del disegno si riporta dentro **1.500 km** e l'orologio dentro
+**un giorno**: il rumore dello shader è **periodico** con gli stessi passi
+(ogni ottava avvolge le sue celle: 1000, 2900, 5360), quindi il riporto non si
+vede. I test lo provano: un rebase cambia la densità di 2 decimillesimi; il
+disegno spostato di un periodo o di un giorno, di 6.
+
+**La mappa meteo.** Lo shader non può rifare il rumore della pioggia (hash a
+64 bit, decine di volte per pixel): gliela si dà come **texture**, come fanno
+i sistemi di nuvole dei giochi. **256 × 256** texel (625 m l'uno) su **160 km**
+attorno alla camera: copertura (R), cima (G), pioggia (B). Fra un ricalcolo e
+l'altro lo shader la **sposta di quanto ha soffiato il vento in quota** da
+quando è stata fatta: il test sposta il vento per 10 minuti a 15 m/s e trova
+la stessa nuvola 9 km più a nord.
+
+**Densità ed estinzione.** Una nuvola piena ha un'**estinzione** di 0,03 al
+metro (dentro si vede a ~130 m); le nubi di pioggia fino a 2,5 volte tanto
+(più acqua: più scure). `geo.Weather.CloudDensity` la scala.
+
 ---
 
 ## 3. In Unreal
@@ -250,6 +321,8 @@ il canale (8 microsecondi).
 4. visibilità: si smussa l'ESTINZIONE in 3 s (la nebbia non scatta; le estinzioni si sommano, le distanze no)
 5. particelle: avanzano con quella alla camera e il vento di adesso alla camera
 6. FGeoPrecipitationRenderer: particelle, MPC_GeoWeather, nebbia
+7. i fulmini nati in questo frame (FGeoLightningRenderer)
+8. FGeoCloudRenderer: la mappa meteo (su un thread di lavoro), i parametri, la VolumetricCloud
 ```
 
 ### 3.2 Le particelle: una mesh, nessuna simulazione sulla CPU
@@ -370,6 +443,18 @@ geo.Weather.Thunder <0..2>                     il volume del tuono
 `geo.Weather.Hail` accende anche i fulmini (la grandine viene dai temporali);
 `geo.Weather.Clear` li spegne.
 
+Le nuvole:
+
+```
+geo.Weather.Clouds [copertura] [base] [spessore]   i cumuli (default 0,25, base 1.500 m s.l.m., alti 1.200 m)
+geo.Weather.Clouds off | on                        niente nuvole GeoWorld (quella del livello torna) / di nuovo
+geo.Weather.CloudDensity <x>                       quanto sono fitte: 1 normale, 2 il doppio
+```
+
+Le nubi di pioggia non hanno un comando: vengono dalla precipitazione.
+`geo.Weather.Clear` non tocca i cumuli (il sereno ha i suoi);
+`geo.Weather.Clouds 0` li toglie.
+
 ### 3.7 I fulmini a schermo e il tuono
 
 `FGeoLightningRenderer` (`GeoRender/.../Weather/GeoLightningRenderer.*`). Ogni
@@ -385,7 +470,7 @@ fulmine è un **attore transient** che vive meno di un secondo:
 - **la luce**: una **point light** senza ombre, a un terzo dell'altezza del
   canale. Al suolo sotto di lei vale **una volta e mezza il sole del livello**
   (di notte, almeno qualche lux): si vede di giorno e acceca di notte. Un
-  lampo nella nube è solo la luce, a 5 km e più larga (25 km di raggio, 0,6
+  lampo nella nube è solo la luce, nel cuore della nube di pioggia e più larga (25 km di raggio, 0,6
   volte il sole). L'emissivo del canale si misura anche lui sul sole: con un
   sole fisico (100.000 lux) l'esposizione è molto più bassa;
 - **il tuono**: sintetizzato su un thread di lavoro quando il fulmine nasce, e
@@ -403,12 +488,91 @@ al secondo nel cerchio) il resto si vede solo come luce.
 **Nelle stampe**: la riga `Fulmine` (a che distanza, quanti secondi fa, fra
 quanto il tuono); nell'overlay quanti nell'ultimo minuto e l'attività.
 
+### 3.8 Le nuvole a schermo
+
+`FGeoCloudRenderer` (`GeoRender/.../Weather/GeoCloudRenderer.*`).
+
+**La VolumetricCloud di Unreal.** È un guscio sferico attorno al pianeta, fra
+due quote; la scheda video lo attraversa a passi e a ogni passo chiede al
+**materiale** com'è l'aria lì: quanto è densa (l'*estinzione*), di che colore
+diffonde la luce (l'*albedo*), se fa luce da sé (l'*emissivo*). La luce del
+sole, le ombre dentro la nuvola, il cielo che la illumina da sotto li fa il
+motore. Il nostro lavoro è il materiale, `M_GeoClouds`: dominio **Volume**,
+**Additive**, **Default Lit**; l'estinzione va nel pin che l'editor, in
+questo dominio, chiama *Extinction* (è il `SubsurfaceColor`).
+
+**Lo shader è provato.** La densità la calcola un nodo Custom, e il suo testo
+sta in `Weather/CloudShader.inl`, scritto in una sintassi che è **HLSL e C++
+insieme**: dentro `GEO_CLOUD_SHADER( ... )`. La factory dei materiali lo
+trasforma in una stringa con il preprocessore (`#__VA_ARGS__`) e la mette
+nel nodo; i test lo compilano come corpo di una funzione C++, con dei tipi
+che imitano quelli di HLSL (`Tools/StandaloneTests/HlslShim.h`: `float3`,
+`lerp`, `saturate`, la lettura bilineare di una texture). Quello che i test
+provano è **esattamente** quello che gira sulla scheda video. Le regole per
+scriverci: solo gli swizzle `.x .y .z .w`, nessun `#`, le funzioni d'aiuto in
+una `struct` (in un nodo Custom si scrive solo un corpo di funzione: è il
+trucco classico), da float a uint sempre passando per int.
+
+**La mappa sulla scheda video.** Ogni **8 secondi** (o subito se la camera si
+è spostata di 20 km, o il tempo è cambiato con un comando) un thread di
+lavoro rifà la mappa (`BuildCloudMap`); quando è pronta diventa una texture
+lineare (dati, non colori) e va all'istanza del materiale, parametro
+`CloudWeatherMap`. Le collezioni di parametri non portano texture; il resto
+sì, sei vettori in `MPC_GeoWeather`:
+
+| Parametro | Contenuto |
+|---|---|
+| `CloudMap` | il centro della mappa negli assi di Unreal (m: cambia con il rebase), il suo lato |
+| `CloudShift` | di quanto il vento in quota l'ha spostata da quando è stata fatta (m) |
+| `CloudLayer` | base dei cumuli, cima delle nubi di pioggia, soglia dei cumuli, loro spessore |
+| `CloudLook` | estinzione, geoide all'origine, base delle nubi di pioggia, orologio |
+| `CloudFlash` | il lampo dentro la nuvola: dove (m) e quanto |
+| `CloudFair` | dove sta l'origine nel disegno dei cumuli (m) |
+
+**Lo strato.** Il motore attraversa solo il guscio fra base e cima: lo si
+imposta (in km) da `CloudLayerBounds` — dalla base più bassa alla cima più
+alta, più il geoide all'origine (il guscio è sull'ellissoide, le nostre quote
+sul mare) e 100 m di margine. Si ridà solo quando cambia: ogni volta il
+motore rifà le nuvole nella scena. Quando non c'è niente da disegnare (cumuli
+a zero e nessuna pioggia) il componente si **nasconde**: non costa niente.
+
+**Quale VolumetricCloud.** Se ne vede una sola per volta, quindi se ne usa una
+**nostra**, transient. Se il livello ne ha già una, **in Play** la si nasconde
+finché le nuvole sono di GeoWorld (`geo.Weather.Clouds off` la fa tornare);
+**nell'editor non si tocca** — nascosta, si salverebbe nascosta — e
+l'overlay lo dice. Senza una SkyAtmosphere il guscio usa il raggio della
+Terra (6.371 km, lo stesso della curvatura dello shader) con la cima del
+pianeta nell'origine del mondo: lì dove il rebase tiene l'ellissoide.
+
+**La luce.** Le nuvole le illumina la luce direzionale con **Atmosphere Sun
+Light**; le ombre sul terreno le fa se ha **Cast Cloud Shadows**. Non si
+toccano le luci del livello: l'overlay e `geo.Weather.Clouds` dicono in giallo
+cosa manca.
+
+**Il lampo nella nuvola.** Il fulmine più forte del momento (il punto della
+sua luce e quanto è acceso, `FlashBrightness`) va in `CloudFlash`: la nuvola
+si accende in un raggio di qualche chilometro (`e^(−d/2,5 km)`). Quanto,
+è una **stima** (`CloudGlowPerLux` in `GeoCloudRenderer.cpp`): il cuore del
+lampo luminoso quanto la nuvola al sole. Di giorno si vede appena, di notte
+acceca, come quello vero.
+
+**Nelle stampe**: la riga `Nuvole` (i cumuli; la nube di pioggia sopra di te,
+dalla base alla cima). Nell'overlay: cumuli e nubi di pioggia, cosa c'è sopra
+di te, quale VolumetricCloud si usa, lo strato, quanti secondi ha la mappa; in
+giallo cosa manca.
+
 ---
 
 ## 4. Cosa non fa (ancora)
 
-- **Le nuvole e il cielo.** Piove da un cielo sereno, con il sole: la luce non
-  cala. Arriveranno con l'atmosfera (Fasi 10–12).
+- **Il cielo non si scurisce da solo.** Sotto un cielo coperto la luce cala
+  solo se la luce del sole fa le ombre delle nuvole (*Cast Cloud Shadows*), e
+  la luce del cielo (la SkyLight) resta quella del sereno se non si ricattura.
+  Niente nubi alte (cirri, altostrati): solo cumuli e nubi di pioggia.
+- **Le nuvole non vivono**: un cumulo non cresce fino a diventare un
+  temporale; i temporali sono dove li mette la mappa della precipitazione.
+- **Oltre 80 km dalla camera** le nubi di pioggia non ci sono (la mappa è di
+  160 km); i cumuli sì, dappertutto.
 - **Il suolo è uno per il mondo**: bagnato o no dappertutto, guidato da sotto
   la camera. Lontano, sotto un rovescio che non ti tocca, il suolo resta
   asciutto (e viceversa). La neve invece segue la quota, che è la cosa che
@@ -420,9 +584,8 @@ quanto il tuono); nell'overlay quanti nell'ultimo minuto e l'attività.
 - **Le particelle sono solo attorno alla camera** (50 m): oltre, la
   precipitazione è la nebbia. Da 2 km di quota non si vedono le colonne di
   pioggia sotto i temporali.
-- **I fulmini non hanno ancora le nuvole**: il canale parte da mezz'aria
-  (sfumando) e il lampo nella nube illumina un cielo sereno. E il fulmine non
-  sceglie i punti alti (campanili, creste): cade dove capita nel nucleo.
+- **Il fulmine non sceglie i punti alti** (campanili, creste): cade dove
+  capita nel nucleo.
 - **Il tuono è 2D e non conosce il terreno**: niente eco delle valli, niente
   ombra acustica dietro una montagna. E si sente solo il tuono: la pioggia non
   ha ancora un suono.
@@ -452,6 +615,19 @@ quanto il tuono); nell'overlay quanti nell'ultimo minuto e l'attività.
 - **Il fulmine come effetto Niagara (ribbon).** Stessa obiezione delle
   particelle: un asset da costruire nell'editor, per una geometria che il
   codice sa già calcolare (e i test provare).
+- **Il rumore della pioggia rifatto nello shader**, invece della mappa meteo.
+  Sarebbe esatto ovunque, senza texture né thread di lavoro; ma sono hash a
+  64 bit e quattro ottave, chiamati a ogni passo del motore dentro lo strato
+  (decine per pixel). La mappa costa una lettura di texture, e 625 m di
+  risoluzione bastano a nuvole larghe chilometri.
+- **Le nuvole di Unreal con le texture di rumore 3D** (come il materiale di
+  esempio del motore). Più belle da vicino, ma sono asset da costruire
+  nell'editor, e il risultato non si può provare nei test. Il rumore
+  procedurale nel nodo Custom costa di più alla scheda video, ma sta tutto nel
+  codice e i test lo compilano.
+- **Nuvole come sprite o impostori** (quadrati con un'immagine di nuvola).
+  Costano pochissimo, ma da un aereo ci si vola dentro: un volume è l'unica
+  cosa che regge l'attraversamento.
 - **Uno stato del suolo per punto** (una texture di bagnato e di neve attorno
   alla camera, aggiornata con la mappa). Più vero, ma serve una texture che
   segue la camera, con il suo rebase. Il bagnato globale e la neve per quota
@@ -467,9 +643,13 @@ quanto il tuono); nell'overlay quanti nell'ultimo minuto e l'attività.
 | `GeoRender/.../Weather/GeoPrecipitationRenderer.*` | in Unreal: l'attore delle particelle, `MPC_GeoWeather`, la nebbia |
 | `GeoRender/Public/Weather/Lightning.h` | i fulmini (puro): dove e quanti, i colpi di ritorno, il canale, il tuono |
 | `GeoRender/.../Weather/GeoLightningRenderer.*` | in Unreal: il canale, la luce, il tuono che suona |
+| `GeoRender/Public/Weather/Clouds.h` | le nuvole (puro): la colonna di cielo, la mappa meteo, i parametri dello shader, la tabella della copertura |
+| `GeoRender/Public/Weather/CloudShader.inl` | lo shader della densità, HLSL e C++ insieme |
+| `GeoRender/.../Weather/GeoCloudRenderer.*` | in Unreal: la VolumetricCloud, la mappa su un thread di lavoro, i parametri |
 | `GeoRender/.../Weather/GeoWeatherSubsystem.*` | il giro di un frame, il rebase, l'overlay, `GetPrecipitationAt`, `OnLightningStrike` |
-| `GeoRender/Private/GeoPositionHudSubsystem.cpp` | le righe `Meteo`, `Temperatura`, `Visibilita'`, `Suolo` |
+| `GeoRender/Private/GeoPositionHudSubsystem.cpp` | le righe `Meteo`, `Temperatura`, `Visibilita'`, `Suolo`, `Nuvole`, `Fulmine` |
 | `GeoRender/Private/GeoRenderModule.cpp` | i comandi `geo.Weather.*` |
-| `GeoWorldEditor/Private/GeoTerrainMaterialFactory.cpp` | `MPC_GeoWeather`, `M_GeoPrecipitation`, `M_GeoLightning`, il suolo in `M_GeoTerrain` e `M_GeoRoad` |
+| `GeoWorldEditor/Private/GeoTerrainMaterialFactory.cpp` | `MPC_GeoWeather`, `M_GeoPrecipitation`, `M_GeoLightning`, `M_GeoClouds` e `T_GeoCloudDefault`, il suolo in `M_GeoTerrain` e `M_GeoRoad` |
 | `GeoCore/Public/Geo/GeoFormat.h` | "pioggia 4,2 mm/h", "1,2 km" |
-| `Tools/StandaloneTests/geoweather_main.cpp` | i test (sezioni 6–10; i fulmini 11–13) |
+| `Tools/StandaloneTests/geoweather_main.cpp` | i test (sezioni 6–10; i fulmini 11–13; le nuvole 14–15) |
+| `Tools/StandaloneTests/HlslShim.h` | quel tanto di HLSL che serve a compilare lo shader delle nuvole come C++ |

@@ -38,11 +38,29 @@
   rombo dura quanto la differenza di distanza fra i pezzi del canale (8 s a
   300 m); il volume cala con la distanza, oltre 25 km silenzio.
 
+**Le nuvole** (sezioni 14–15, 15 test). La sezione 15 compila come C++ **lo
+stesso testo** dello shader che va nel materiale (`Weather/CloudShader.inl`):
+
+- la mappa: dove piove la nuvola c'è sempre, piena; il cielo nuvoloso è più
+  di 1,3 volte quello che piove; le cime alte nei nuclei, basse ai margini; un
+  fronte è tutto coperto; righe verso nord e colonne verso est, R copertura, G
+  cima, B pioggia;
+- sopra un temporale: nuvola piena fra la base (975 m) e la cima, niente sotto
+  la base e sopra i 10 km; le nubi di pioggia più scure; la cima che dicono le
+  stampe è quella che disegna lo shader;
+- il vento: 10 minuti a 15 m/s, la stessa nuvola 9 km più a nord;
+- niente salti: un rebase di 10 km cambia la densità di 2 decimillesimi; il
+  disegno riportato di 1.500 km o di un giorno, di 6;
+- i cumuli: chiesti 10, 25, 50, 75% del cielo, misurati 9, 24, 48, 75%; base
+  piatta (niente sotto), cima entro lo spessore;
+- il lampo accende la nuvola attorno, non quella a 12 km.
+
 Più i formati delle stampe (`geocore_tests`, sezione 10): "pioggia 4,2 mm/h",
 "neve e pioggia 1,0 mm/h", "350 m", "1,2 km".
 
 **Cosa non ho potuto provare:** la compilazione in Unreal, i materiali, le
-particelle, la nebbia, i fulmini a schermo e il suono del tuono. I controlli statici (sezione 4 di
+particelle, la nebbia, i fulmini a schermo, il suono del tuono e le nuvole a
+schermo (la VolumetricCloud, `M_GeoClouds`). I controlli statici (sezione 4 di
 `docs/consegna.md`) sono verdi.
 
 ---
@@ -55,7 +73,8 @@ particelle, la nebbia, i fulmini a schermo e il suono del tuono. I controlli sta
 geo.Imagery.CreateMaterial
 ```
 
-Crea `MPC_GeoWeather`, `M_GeoPrecipitation` e `M_GeoLightning` in `/GeoWorld/Materials`, e
+Crea `MPC_GeoWeather`, `M_GeoPrecipitation`, `M_GeoLightning`, `M_GeoClouds` e
+`T_GeoCloudDefault` in `/GeoWorld/Materials`, e
 **rifà** `M_GeoTerrain` e `M_GeoRoad` con il nodo "Meteo sul suolo". Deve
 dire in verde tutti i materiali; un giallo "manca MPC_GeoWeather" vuol dire
 che la collezione non si è creata (mandami il log).
@@ -73,8 +92,10 @@ nuove:
 | Meteo | `niente` | cosa cade alla tua quota |
 | Temperatura | `13,4 °C, zero termico 2.308 m` | l'aria alla tua quota, e dove fa 0 °C |
 
-Con il sereno **non cambia niente** rispetto a prima: nessun attore nuovo,
-nessuna nebbia toccata.
+Con il sereno non cade niente e la nebbia non si tocca. **Le nuvole sì**: di
+default ci sono i cumuli di bel tempo, un quarto del cielo, con la base a
+1.500 m (sezione 7). `geo.Weather.Clouds 0` li toglie, `geo.Weather.Clouds off`
+spegne del tutto le nuvole di GeoWorld.
 
 ## 3. La pioggia
 
@@ -170,7 +191,8 @@ geo.Weather.Strike 1500
 Un fulmine nube-suolo a 1,5 km davanti alla camera:
 
 1. **il canale**: un filo bianco-azzurro, tortuoso, con qualche ramo che si
-   ferma a mezz'aria; in alto sfuma nel nulla (lì ci sarebbe la nube);
+   ferma a mezz'aria; in alto entra nella base della nuvola (con
+   `geo.Weather.Storm` la nube di pioggia c'è; con il sereno sfuma nel nulla);
 2. **sfarfalla**: due, tre, quattro lampi in un terzo di secondo (i colpi di
    ritorno), poi buio;
 3. **il paesaggio si illumina** attorno al punto colpito, per un attimo;
@@ -200,7 +222,48 @@ Sotto un nucleo, fulmini vicini e tuoni forti; ai margini, lampi lontani.
 `geo.Weather.Lightning 3` per un temporale forte; `geo.Weather.Thunder 0.5`
 per abbassare il tuono; `geo.Weather.Clear` per finire.
 
-## 7. Da Blueprint
+## 7. Le nuvole
+
+Dopo `geo.Imagery.CreateMaterial`, in **Play**, con il sereno:
+
+```
+geo.Weather.Debug 1
+```
+
+1. **i cumuli**: un quarto del cielo, chiazze di un chilometro e mezzo con la
+   **base piatta** (tutte alla stessa quota, 1.500 m) e la cima a cupola, i
+   bordi sfrangiati. Si muovono piano con il vento in quota e in mezz'ora
+   cambiano forma;
+2. **l'overlay**, nella parte "le nuvole": i cumuli impostati, la
+   VolumetricCloud usata ("nostra"), lo strato, e quanti secondi ha la mappa
+   meteo (si rifà ogni 8 s);
+3. **in giallo, se c'è**: cosa manca nella scena. "Atmosphere Sun Light"
+   spenta sulla luce del sole vuol dire nuvole scure; "Cast Cloud Shadows"
+   spenta vuol dire niente ombre sul terreno. Sono due caselle della
+   *Directional Light* del livello, nella categoria *Atmosphere and Cloud*.
+
+Poi:
+
+- `geo.Weather.Clouds 0.6`: più cumuli; `geo.Weather.Clouds 0.6 800 2500`:
+  bassi e alti (cumuli congesti);
+- **volaci dentro**: sali a 1.800 m sopra un cumulo e scendi. Dentro si vede
+  a ~130 m; sotto la base il cielo è libero;
+- `geo.Weather.Rain`: un fronte, **cielo coperto** dalla base delle nubi di
+  pioggia (975 m) fino a 3–6 km, più scuro dei cumuli;
+- `geo.Weather.Storm`: le **torri** sopra i rovesci, alte fino a 10 km nei
+  nuclei; dove piove la nuvola c'è sempre. Da 3 km di quota, guardando
+  lontano, si vedono le torri isolate;
+- `geo.Weather.Strike 3000 nube`, **di sera** (abbassa il sole): la nuvola si
+  accende da dentro, per un attimo;
+- `geo.Weather.Strike 1500`: il canale esce dalla **base** della nuvola;
+- `geo.Weather.CloudDensity 2`: più fitte e più scure; `0.5`, più leggere;
+- `geo.Weather.Clouds off`: niente nuvole (se il livello ha una sua
+  VolumetricCloud, torna quella).
+
+Nelle stampe a destra c'è la riga **Nuvole**: i cumuli e, se c'è, la nube di
+pioggia sopra di te, dalla base alla cima.
+
+## 8. Da Blueprint
 
 Nel Level Blueprint: *Get GeoWeatherSubsystem* → *Get Precipitation At* con una
 posizione (es. quella del pawn) → *Break GeoPrecipitationInfo*: mm/h, le tre
@@ -210,7 +273,7 @@ I fulmini: *Get GeoWeatherSubsystem* → *Bind Event to On Lightning Strike*: a
 ogni fulmine arrivano la posizione, se è arrivato al suolo e la distanza (m).
 Per un effetto in più, un suono tuo, una camera che trema da vicino.
 
-## 8. Se qualcosa non va
+## 9. Se qualcosa non va
 
 | Sintomo | Causa probabile | Cosa fare |
 |---|---|---|
@@ -229,3 +292,13 @@ Per un effetto in più, un suono tuo, una camera che trema da vicino.
 | Il fulmine c'è ma il tuono no | fuori dal Play l'audio del mondo dell'editor può essere spento; o il volume (`geo.Weather.Thunder`) | prova in Play; `geo.Weather.Thunder 1` |
 | `geo.Weather.Storm` ma nessun fulmine per minuti | nessun nucleo entro 30 km (i temporali sono sparsi) | aspetta, `geo.Weather.Lightning 3`, o `geo.Weather.Strike` |
 | Con `geo.Weather.Rain` e `geo.Weather.Lightning 1` quasi nessun fulmine | voluto: la pioggia estesa (un fronte) ha pochi temporali | `geo.Weather.Storm` |
+| Errore di compilazione in `GeoCloudRenderer.cpp` | codice mai compilato in Unreal (le API della VolumetricCloud e della luce direzionale cambiano fra versioni) | mandami le righe dell'Output Log |
+| In giallo "manca M_GeoClouds", o "MPC_GeoWeather non ha i parametri delle nuvole" | i materiali non sono stati rifatti dopo l'aggiornamento | `geo.Imagery.CreateMaterial` |
+| `geo.Imagery.CreateMaterial` dice "M_GeoClouds non fatto" | il nodo Custom delle nuvole non compila | apri `M_GeoClouds`: se "Nuvole (densita')" è rosso, mandami l'errore |
+| Nessuna nuvola, e l'overlay dice "quella del livello non si tocca nell'editor" | voluto: il livello ha una sua VolumetricCloud, e nell'editor non la si nasconde | prova in Play, o togli quella del livello |
+| Le nuvole sono nere o grigio scuro | la luce del sole non ha *Atmosphere Sun Light* (l'overlay lo dice in giallo) | accendila sulla *Directional Light* |
+| Le nuvole ci sono ma il terreno sotto non è in ombra | la luce del sole non ha *Cast Cloud Shadows* | accendila sulla *Directional Light* |
+| Nuvole velate, quasi trasparenti, o blocchi compatti senza forma | l'estinzione per metro del motore diversa da quella che ho stimato | `geo.Weather.CloudDensity 2` o `0.5`, e dimmi quale va |
+| Il lampo nella nuvola non si vede, o la nuvola diventa bianca accecante | la forza del bagliore è una stima (`CloudGlowPerLux` in `GeoCloudRenderer.cpp`) | dimmi com'è, di giorno e di notte |
+| Le nubi di pioggia finiscono di colpo lontano | voluto: la mappa meteo copre 160 km attorno alla camera | oltre, i rovesci non hanno nuvole (sezione 4 del design) |
+| Il frame rate cala molto con le nuvole | la VolumetricCloud costa sulla scheda video, e il rumore è procedurale | `geo.Weather.Clouds off` per confrontare; dimmi quanti ms (`stat gpu`) |

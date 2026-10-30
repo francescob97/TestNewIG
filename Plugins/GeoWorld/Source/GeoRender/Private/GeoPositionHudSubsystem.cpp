@@ -171,6 +171,21 @@ void UGeoPositionHudSubsystem::Draw(UCanvas* Canvas, APlayerController* /*Contro
 			if (Soil.HasSnow()) { Text += ", neve sopra " + Format::Metres(Soil.GetSnowCoverM()); }
 			Add(TEXT("Suolo"), Text);
 		}
+		// Le nuvole: i cumuli che ci sono, e la nube di pioggia sopra di te.
+		if (WeatherSubsystem->AreCloudsEnabled())
+		{
+			const Weather::FCloudSettings& Clouds = WeatherSubsystem->GetCloudSettings();
+			std::string Text = Clouds.Cover > 0.0
+				? "cumuli " + Format::Number(100.0 * Clouds.Cover, 0) + "%, base " + Format::Metres(Clouds.BaseM) /* percentuale, non-unita */
+				: std::string("niente cumuli");
+			const Weather::FCloudColumn Above = Weather::CloudColumn(Sky, LatDeg, LonDeg);
+			if (Above.Cover > 0.05)
+			{
+				Text += "; sopra: nube di pioggia " + Format::Metres(Weather::RainCloudBaseM(Clouds)) + " - "
+					+ Format::Metres(Weather::RainCloudTopM(Clouds, Sky, Above.TopFraction));
+			}
+			Add(TEXT("Nuvole"), Text);
+		}
 		// L'ultimo fulmine, e quando arriva il suo tuono: "tre secondi per chilometro".
 		const UGeoWeatherSubsystem::FLightningReport Flashes = WeatherSubsystem->GetLightningReport();
 		if (Flashes.bAny && Flashes.AgeSeconds < 120.0)

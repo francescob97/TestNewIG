@@ -1889,6 +1889,39 @@ namespace GeoWeatherConsole
 		}
 	}
 
+	/** Il riassunto delle nuvole: i cumuli, le nubi di pioggia, cosa manca. */
+	static void ReportClouds(const UGeoWeatherSubsystem* Weather)
+	{
+		if (!Weather->AreCloudsEnabled())
+		{
+			GeoTerrainConsole::Report(TEXT("Nuvole: spente (la VolumetricCloud del livello, se c'e', torna com'era). geo.Weather.Clouds on per riaccenderle"));
+			return;
+		}
+		const GeoWorld::Weather::FCloudSettings& Clouds = Weather->GetCloudSettings();
+		if (Clouds.Cover > 0.0)
+		{
+			GeoTerrainConsole::Report(FString::Printf(TEXT("Nuvole: cumuli su %.0f%% del cielo, base %s, alti fino a %s; densita' x%.2f"),
+				100.0 * Clouds.Cover, *Text(GeoWorld::Format::Metres(Clouds.BaseM)), *Text(GeoWorld::Format::Metres(Clouds.FairThicknessM)),   /* percentuale, non-unita */
+				Clouds.ExtinctionPerM / GeoWorld::Weather::FCloudSettings().ExtinctionPerM));
+		}
+		else
+		{
+			GeoTerrainConsole::Report(TEXT("Nuvole: niente cumuli"));
+		}
+		const GeoWorld::Weather::FPrecipitationField& Precipitation = Weather->GetPrecipitationField();
+		const GeoWorld::Weather::FPrecipitationSettings& Rain = Precipitation.GetSettings();
+		if (Rain.RateMmH > 0.0 && Rain.Coverage > 0.0)
+		{
+			GeoTerrainConsole::Report(FString::Printf(TEXT("  nubi di pioggia sopra la precipitazione: base %s, cime fino a %s"),
+				*Text(GeoWorld::Format::Metres(GeoWorld::Weather::RainCloudBaseM(Clouds))),
+				*Text(GeoWorld::Format::Metres(Precipitation.CloudTopM()))), FColor::White);
+		}
+		const FString Problem = Weather->GetCloudProblem();
+		if (!Problem.IsEmpty()) { GeoTerrainConsole::Report(Problem, FColor::Yellow); }
+		const FString Advice = Weather->GetCloudAdvice();
+		if (!Advice.IsEmpty()) { GeoTerrainConsole::Report(Advice, FColor::Yellow); }
+	}
+
 	/** Rain, Snow, Hail, Precipitation: [mm/h] [copertura 0..1] [km dei rovesci]. */
 	static void SetPrecipitation(UWorld* World, const TArray<FString>& Args, GeoWorld::Weather::EPrecipitationKind Kind,
 	                             double DefaultRateMmH, double DefaultCoverage, double DefaultCellKm)
@@ -2127,6 +2160,42 @@ static FAutoConsoleCommandWithWorldAndArgs GeoWeatherClearCommand(
 		Weather->SetLightningActivity(0.0);
 		GeoWeatherConsole::ReportPrecipitation(Weather);
 		GeoTerrainConsole::Report(TEXT("  Per asciugare subito: geo.Weather.Wetness 0 e geo.Weather.SnowCover off"), FColor::White);
+	}));
+
+static FAutoConsoleCommandWithWorldAndArgs GeoWeatherCloudsCommand(
+	TEXT("geo.Weather.Clouds"),
+	TEXT("geo.Weather.Clouds [copertura 0..1 | on | off] [base m s.l.m.] [spessore m] - i cumuli di bel tempo (default 0,25, base 1500 m, alti 1200 m). Le nubi di pioggia vengono dalla precipitazione. \"off\": niente nuvole."),
+	FConsoleCommandWithWorldAndArgsDelegate::CreateStatic(
+		[](const TArray<FString>& Args, UWorld* World)
+	{
+		UGeoWeatherSubsystem* Weather = GeoWeatherConsole::Get(World);
+		if (!Weather) { return; }
+		if (Args.Num() >= 1)
+		{
+			if (Args[0].Equals(TEXT("off"), ESearchCase::IgnoreCase)) { Weather->SetCloudsEnabled(false); }
+			else if (Args[0].Equals(TEXT("on"), ESearchCase::IgnoreCase)) { Weather->SetCloudsEnabled(true); }
+			else
+			{
+				const GeoWorld::Weather::FCloudSettings& Current = Weather->GetCloudSettings();
+				Weather->SetCloudsEnabled(true);
+				Weather->SetClouds(FCString::Atod(*Args[0]),
+					Args.Num() >= 2 ? FCString::Atod(*Args[1]) : Current.BaseM,
+					Args.Num() >= 3 ? FCString::Atod(*Args[2]) : Current.FairThicknessM);
+			}
+		}
+		GeoWeatherConsole::ReportClouds(Weather);
+	}));
+
+static FAutoConsoleCommandWithWorldAndArgs GeoWeatherCloudDensityCommand(
+	TEXT("geo.Weather.CloudDensity"),
+	TEXT("geo.Weather.CloudDensity <x> - quanto sono fitte le nuvole: 1 normale (dentro si vede a ~130 m), 2 il doppio, 0,5 la meta'."),
+	FConsoleCommandWithWorldAndArgsDelegate::CreateStatic(
+		[](const TArray<FString>& Args, UWorld* World)
+	{
+		UGeoWeatherSubsystem* Weather = GeoWeatherConsole::Get(World);
+		if (!Weather) { return; }
+		if (Args.Num() >= 1) { Weather->SetCloudDensity(FCString::Atod(*Args[0])); }
+		GeoWeatherConsole::ReportClouds(Weather);
 	}));
 
 static FAutoConsoleCommandWithWorldAndArgs GeoWeatherTemperatureCommand(

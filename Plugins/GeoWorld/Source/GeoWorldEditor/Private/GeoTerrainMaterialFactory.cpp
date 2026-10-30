@@ -78,6 +78,7 @@
 #include "Materials/MaterialExpressionComponentMask.h"
 #include "Materials/MaterialExpressionConstant.h"
 #include "Materials/MaterialExpressionConstant2Vector.h"
+#include "Materials/MaterialExpressionConstant3Vector.h"
 #include "Materials/MaterialExpressionCustom.h"
 #include "Materials/MaterialExpressionLinearInterpolate.h"
 #include "Materials/MaterialExpressionMultiply.h"
@@ -486,8 +487,11 @@ namespace
 	 *   PrecipRainVel/SnowVel/HailVel = (velocita' nord, est, su in m/s, dimensione m)
 	 *   PrecipBox     = (scatola nord, est, su in m, luminosita')
 	 *   PrecipMix     = (frazione pioggia, neve, grandine, 0)
+	 *   CloudMap, CloudShift, CloudLayer, CloudLook, CloudFlash, CloudFair =
+	 *                   le nuvole: Weather/Clouds.h, FCloudShaderParameters
 	 *
-	 * I valori di riposo non fanno niente: suolo asciutto, neve a 100 km, nessuna particella.
+	 * I valori di riposo non fanno niente: suolo asciutto, neve a 100 km,
+	 * nessuna particella, nessuna nuvola (la soglia dei cumuli a 2: mai).
 	 */
 	UMaterialParameterCollection* CreateOrUpdateWeatherCollection()
 	{
@@ -503,6 +507,12 @@ namespace
 		Wanted.Emplace(FName(TEXT("PrecipHailVel")), FLinearColor(0.0f, 0.0f, -14.0f, 0.008f));
 		Wanted.Emplace(FName(TEXT("PrecipBox")), FLinearColor(50.0f, 50.0f, 30.0f, 1.0f));
 		Wanted.Emplace(FName(TEXT("PrecipMix")), FLinearColor(1.0f, 0.0f, 0.0f, 0.0f));
+		Wanted.Emplace(FName(TEXT("CloudMap")), FLinearColor(0.0f, 0.0f, 1.0f, 0.0f));
+		Wanted.Emplace(FName(TEXT("CloudShift")), FLinearColor(0.0f, 0.0f, 0.0f, 0.0f));
+		Wanted.Emplace(FName(TEXT("CloudLayer")), FLinearColor(1500.0f, 6000.0f, 2.0f, 1200.0f));
+		Wanted.Emplace(FName(TEXT("CloudLook")), FLinearColor(0.03f, 47.0f, 975.0f, 0.0f));
+		Wanted.Emplace(FName(TEXT("CloudFlash")), FLinearColor(0.0f, 0.0f, 0.0f, 0.0f));
+		Wanted.Emplace(FName(TEXT("CloudFair")), FLinearColor(0.0f, 0.0f, 0.0f, 0.0f));
 		return CreateOrUpdateCollection(WeatherCollectionPackagePath, WeatherCollectionAssetName, Wanted);
 	}
 
@@ -832,36 +842,32 @@ namespace
 	}
 
 	/**
-	 * T_GeoWaterDefault: 4x4 pixel LINEARI (non sRGB). Serve solo come valore
-	 * di riposo dei parametri texture di M_GeoWater, che leggono DATI: il
+	 * Una texture di DATI di 4x4 pixel tutti uguali, LINEARI (non sRGB): il
+	 * valore di riposo dei parametri texture che leggono numeri. Il
 	 * campionatore "Linear Color" esige una texture lineare anche come
 	 * default, e quella di default del motore e' sRGB (il materiale non
-	 * compilerebbe). A runtime ogni tile riceve le sue texture vere.
-	 *
-	 * BGRA = (255, 128, 128, 128): come normale e' "piatta", come raster
-	 * d'acqua e' "sulla riva, onde a meta'".
+	 * compilerebbe). A runtime ognuno riceve le sue texture vere.
 	 */
-	UTexture2D* CreateOrLoadWaterDefaultTexture()
+	UTexture2D* CreateOrLoadFlatDataTexture(const TCHAR* PackagePath, const TCHAR* AssetName, uint8 B, uint8 G, uint8 R, uint8 A)
 	{
 		UTexture2D* Texture = LoadObject<UTexture2D>(nullptr,
-			*FString::Printf(TEXT("%s.%s"), WaterDefaultTexturePackagePath, WaterDefaultTextureAssetName), nullptr,
-			LOAD_NoWarn | LOAD_Quiet);
+			*FString::Printf(TEXT("%s.%s"), PackagePath, AssetName), nullptr, LOAD_NoWarn | LOAD_Quiet);
 		if (Texture) { return Texture; }
 
-		UPackage* Package = CreatePackage(WaterDefaultTexturePackagePath);
-		if (!Package) { Report(TEXT("T_GeoWaterDefault: non riesco a creare il package."), FColor::Red); return nullptr; }
-		Texture = NewObject<UTexture2D>(Package, WaterDefaultTextureAssetName, RF_Public | RF_Standalone);
-		if (!Texture) { Report(TEXT("T_GeoWaterDefault: non riesco a crearla."), FColor::Red); return nullptr; }
+		UPackage* Package = CreatePackage(PackagePath);
+		if (!Package) { Report(FString::Printf(TEXT("%s: non riesco a creare il package."), AssetName), FColor::Red); return nullptr; }
+		Texture = NewObject<UTexture2D>(Package, AssetName, RF_Public | RF_Standalone);
+		if (!Texture) { Report(FString::Printf(TEXT("%s: non riesco a crearla."), AssetName), FColor::Red); return nullptr; }
 
 		constexpr int32 Side = 4;
 		TArray<uint8> Pixels;
 		Pixels.Reserve(Side * Side * 4);
 		for (int32 Index = 0; Index < Side * Side; ++Index)
 		{
-			Pixels.Add(255);   // B
-			Pixels.Add(128);   // G
-			Pixels.Add(128);   // R
-			Pixels.Add(128);   // A
+			Pixels.Add(B);
+			Pixels.Add(G);
+			Pixels.Add(R);
+			Pixels.Add(A);
 		}
 		Texture->Source.Init(Side, Side, 1, 1, TSF_BGRA8, Pixels.GetData());
 		Texture->SRGB = false;
@@ -871,15 +877,25 @@ namespace
 		Texture->VirtualTextureStreaming = false;
 		Texture->PostEditChange();
 
-		if (!SaveAssetPackage(Package, Texture, /*bIsNew=*/true, WaterDefaultTexturePackagePath))
+		if (!SaveAssetPackage(Package, Texture, /*bIsNew=*/true, PackagePath))
 		{
-			Report(TEXT("T_GeoWaterDefault creata ma NON salvata: salvala tu dal Content Browser."), FColor::Yellow);
+			Report(FString::Printf(TEXT("%s creata ma NON salvata: salvala tu dal Content Browser."), AssetName), FColor::Yellow);
 		}
 		else
 		{
-			Report(TEXT("T_GeoWaterDefault creata in /GeoWorld/Materials."));
+			Report(FString::Printf(TEXT("%s creata in /GeoWorld/Materials."), AssetName));
 		}
 		return Texture;
+	}
+
+	/**
+	 * T_GeoWaterDefault, il riposo dei parametri texture di M_GeoWater. BGRA =
+	 * (255, 128, 128, 128): come normale e' "piatta", come raster d'acqua e'
+	 * "sulla riva, onde a meta'".
+	 */
+	UTexture2D* CreateOrLoadWaterDefaultTexture()
+	{
+		return CreateOrLoadFlatDataTexture(WaterDefaultTexturePackagePath, WaterDefaultTextureAssetName, 255, 128, 128, 128);
 	}
 
 
@@ -1517,9 +1533,134 @@ return colour * (core * 80.0 + halo * 4.0) * Weight.x * Flash;
 	}
 }
 
+// ============================================================================
+//  LE NUVOLE: T_GeoCloudDefault e M_GeoClouds
+// ============================================================================
+
+namespace
+{
+	const TCHAR* CloudMaterialPackagePath = TEXT("/GeoWorld/Materials/M_GeoClouds");
+	const TCHAR* CloudMaterialAssetName = TEXT("M_GeoClouds");
+	const TCHAR* CloudDefaultTexturePackagePath = TEXT("/GeoWorld/Materials/T_GeoCloudDefault");
+	const TCHAR* CloudDefaultTextureAssetName = TEXT("T_GeoCloudDefault");
+
+	/**
+	 * Il corpo del nodo Custom: il testo di Weather/CloudShader.inl, che il
+	 * preprocessore trasforma in una stringa (#__VA_ARGS__). E' lo stesso testo
+	 * che i test compilano come C++ (geoweather_main.cpp, sezione 15): quello
+	 * che si e' provato e' quello che gira. I commenti spariscono e le righe
+	 * diventano una sola: per HLSL non fa differenza.
+	 */
+#define GEO_CLOUD_SHADER(...) #__VA_ARGS__
+	const char* CloudShaderCode =
+#include "Weather/CloudShader.inl"
+		;
+#undef GEO_CLOUD_SHADER
+
+	/** La mappa meteo di riposo: nessuna nube di pioggia (tutto zero, alfa pieno). */
+	UTexture2D* CreateOrLoadCloudDefaultTexture()
+	{
+		return CreateOrLoadFlatDataTexture(CloudDefaultTexturePackagePath, CloudDefaultTextureAssetName, 0, 0, 0, 255);
+	}
+
+	/**
+	 * M_GeoClouds: il materiale di una VolumetricCloud. Dominio Volume,
+	 * Additive, Default Lit: il motore attraversa lo strato a passi e a ogni
+	 * passo chiede al materiale com'e' l'aria li'.
+	 *
+	 *   WorldPosition (TruncateLWC), MPC_GeoWeather (6 vettori), CloudWeatherMap
+	 *       --> Custom "Nuvole (densita')" = float4(estinzione, lampo, densita', pioggia)
+	 *            \--R--> Extinction (il pin SubsurfaceColor, nel dominio Volume)
+	 *            \--G--> x colore del lampo --> Emissive
+	 *   Constant 0,9 --> Base Color (l'albedo: quanta luce la nuvola diffonde invece di assorbire)
+	 *
+	 * NOTA UE: l'estinzione e' "per metro", come nei materiali delle nuvole
+	 * del motore. Se le nuvole sembrano troppo trasparenti o troppo dense,
+	 * geo.Weather.CloudDensity la scala senza rifare il materiale.
+	 */
+	bool BuildCloudGraph(UMaterial* Material)
+	{
+		UMaterialParameterCollection* Collection = LoadObject<UMaterialParameterCollection>(nullptr,
+			*FString::Printf(TEXT("%s.%s"), WeatherCollectionPackagePath, WeatherCollectionAssetName), nullptr,
+			LOAD_NoWarn | LOAD_Quiet);
+		UTexture2D* DefaultTexture = LoadObject<UTexture2D>(nullptr,
+			*FString::Printf(TEXT("%s.%s"), CloudDefaultTexturePackagePath, CloudDefaultTextureAssetName), nullptr,
+			LOAD_NoWarn | LOAD_Quiet);
+		if (!Collection || !DefaultTexture)
+		{
+			Report(TEXT("M_GeoClouds: mancano MPC_GeoWeather o T_GeoCloudDefault."), FColor::Red);
+			return false;
+		}
+
+		Material->MaterialDomain = MD_Volume;
+		Material->BlendMode = BLEND_Additive;
+		Material->SetShadingModel(MSM_DefaultLit);
+
+		FGraph G{ Material };
+		// La posizione del campione: senza offset (un volume non ne ha), in float normale.
+		const FPin Position = TruncatedWorldPosition(G, false, -1500, -500);
+		const FPin Map = CollectionParameter(G, Collection, TEXT("CloudMap"), -1500, -350);
+		const FPin Shift = CollectionParameter(G, Collection, TEXT("CloudShift"), -1500, -250);
+		const FPin Layer = CollectionParameter(G, Collection, TEXT("CloudLayer"), -1500, -150);
+		const FPin Look = CollectionParameter(G, Collection, TEXT("CloudLook"), -1500, -50);
+		const FPin Flash = CollectionParameter(G, Collection, TEXT("CloudFlash"), -1500, 50);
+		const FPin Fair = CollectionParameter(G, Collection, TEXT("CloudFair"), -1500, 150);
+		UMaterialExpressionTextureObjectParameter* WeatherMap = G.Make<UMaterialExpressionTextureObjectParameter>(-1500, 300);
+		if (!G.bOk) { return false; }
+		WeatherMap->ParameterName = TEXT("CloudWeatherMap");
+		WeatherMap->Texture = DefaultTexture;
+		// Dati, non colori: lineare. Il default deve essere lineare anche lui.
+		WeatherMap->SamplerType = SAMPLERTYPE_LinearColor;
+
+		// Nel nodo Custom una texture si chiama come l'ingresso ("Weather") e
+		// il suo campionatore "WeatherSampler": i nomi che usa CloudShader.inl.
+		TArray<FNamedPin> Inputs;
+		Inputs.Add(FNamedPin{ TEXT("Pos"), Position });
+		Inputs.Add(FNamedPin{ TEXT("Map"), Map });
+		Inputs.Add(FNamedPin{ TEXT("Shift"), Shift });
+		Inputs.Add(FNamedPin{ TEXT("Layer"), Layer });
+		Inputs.Add(FNamedPin{ TEXT("Look"), Look });
+		Inputs.Add(FNamedPin{ TEXT("Flash"), Flash });
+		Inputs.Add(FNamedPin{ TEXT("Fair"), Fair });
+		Inputs.Add(FNamedPin{ TEXT("Weather"), FPin{ WeatherMap, 0 } });
+		const FString Code(ANSI_TO_TCHAR(CloudShaderCode));
+		UMaterialExpressionCustom* Density = MakeCustom(G, TEXT("Nuvole (densita')"), *Code, CMOT_Float4, Inputs, -900, -100);
+
+		UMaterialExpressionComponentMask* Extinction = G.Make<UMaterialExpressionComponentMask>(-500, -200);
+		UMaterialExpressionComponentMask* Glow = G.Make<UMaterialExpressionComponentMask>(-500, 0);
+		UMaterialExpressionConstant3Vector* FlashColour = G.Make<UMaterialExpressionConstant3Vector>(-500, 120);
+		UMaterialExpressionMultiply* Emissive = G.Make<UMaterialExpressionMultiply>(-300, 50);
+		UMaterialExpressionConstant* Albedo = G.Make<UMaterialExpressionConstant>(-300, -350);
+		if (!G.bOk) { return false; }
+		Extinction->R = true;
+		Extinction->G = false;
+		Extinction->B = false;
+		Extinction->A = false;
+		Glow->R = false;
+		Glow->G = true;
+		Glow->B = false;
+		Glow->A = false;
+		FlashColour->Constant = FLinearColor(0.75f, 0.82f, 1.0f);
+		Albedo->R = 0.9f;
+
+		G.Connect(Density, TEXT(""), Extinction, TEXT(""));
+		G.Connect(Density, TEXT(""), Glow, TEXT(""));
+		G.Connect(Glow, TEXT(""), Emissive, TEXT("A"));
+		G.Connect(FlashColour, TEXT(""), Emissive, TEXT("B"));
+		// Nel dominio Volume il pin SubsurfaceColor e' l'estinzione (l'editor lo chiama "Extinction").
+		G.Connect(Extinction, TEXT(""), MP_SubsurfaceColor);
+		G.Connect(Emissive, TEXT(""), MP_EmissiveColor);
+		G.Connect(Albedo, TEXT(""), MP_BaseColor);
+
+		if (!G.bOk) { return false; }
+		UMaterialEditingLibrary::RecompileMaterial(Material);
+		return true;
+	}
+}
+
 static FAutoConsoleCommand GeoImageryCreateMaterialCommand(
 	TEXT("geo.Imagery.CreateMaterial"),
-	TEXT("Costruisce (o RIFA') in /GeoWorld/Materials: M_GeoTerrain (foto e strade dipinte), M_GeoRoad (strade 3D), M_GeoWater e MPC_GeoWater (acqua), MPC_GeoWeather, M_GeoPrecipitation e M_GeoLightning (meteo)."),
+	TEXT("Costruisce (o RIFA') in /GeoWorld/Materials: M_GeoTerrain (foto e strade dipinte), M_GeoRoad (strade 3D), M_GeoWater e MPC_GeoWater (acqua), MPC_GeoWeather, M_GeoPrecipitation, M_GeoLightning e M_GeoClouds (meteo)."),
 	FConsoleCommandDelegate::CreateStatic([]()
 	{
 		// Il meteo per primo: terreno e strade leggono MPC_GeoWeather (suolo
@@ -1538,8 +1679,10 @@ static FAutoConsoleCommand GeoImageryCreateMaterialCommand(
 		const bool bPrecipitation = bWeatherCollection
 			&& CreateOrRebuildMaterial(PrecipitationMaterialPackagePath, PrecipitationMaterialAssetName, &BuildPrecipitationGraph);
 		const bool bLightning = CreateOrRebuildMaterial(LightningMaterialPackagePath, LightningMaterialAssetName, &BuildLightningGraph);
+		const bool bClouds = bWeatherCollection && CreateOrLoadCloudDefaultTexture() != nullptr
+			&& CreateOrRebuildMaterial(CloudMaterialPackagePath, CloudMaterialAssetName, &BuildCloudGraph);
 
-		if (bTerrain && bRoad && bWater && bPrecipitation && bLightning)
+		if (bTerrain && bRoad && bWater && bPrecipitation && bLightning && bClouds)
 		{
 			Report(TEXT("Materiali pronti. Riavvia il Play (o rilancia geo.Roads.Demo / geo.Water.Demo)."));
 		}
@@ -1552,6 +1695,10 @@ static FAutoConsoleCommand GeoImageryCreateMaterialCommand(
 		{
 			Report(TEXT("M_GeoLightning non fatto: i fulmini illuminano, ma il canale non si vede. Output Log (LogGeoWorld)"),
 				FColor::Red);
+		}
+		if (!bClouds)
+		{
+			Report(TEXT("M_GeoClouds non fatto: niente nuvole. Output Log (LogGeoWorld) e docs/meteo-verifica.md"), FColor::Red);
 		}
 		if (!bTerrain)
 		{

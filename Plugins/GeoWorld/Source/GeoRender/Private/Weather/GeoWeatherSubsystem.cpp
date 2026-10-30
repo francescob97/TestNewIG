@@ -85,6 +85,7 @@ void UGeoWeatherSubsystem::Initialize(FSubsystemCollectionBase& Collection)
 	}
 	Renderer = MakeUnique<FGeoPrecipitationRenderer>();
 	LightningRenderer = MakeUnique<FGeoLightningRenderer>();
+	CloudRenderer = MakeUnique<FGeoCloudRenderer>();
 }
 
 void UGeoWeatherSubsystem::Deinitialize()
@@ -101,6 +102,9 @@ void UGeoWeatherSubsystem::Deinitialize()
 	Renderer.Reset();
 	if (LightningRenderer) { LightningRenderer->Shutdown(); }
 	LightningRenderer.Reset();
+	// Via le nostre nuvole, e quelle del livello tornano com'erano.
+	if (CloudRenderer) { CloudRenderer->Shutdown(); }
+	CloudRenderer.Reset();
 	Super::Deinitialize();
 }
 
@@ -173,6 +177,18 @@ void UGeoWeatherSubsystem::ClearPrecipitation()
 	Weather::FPrecipitationSettings Settings = Precipitation.GetSettings();
 	Settings.RateMmH = 0.0;
 	Precipitation.SetSettings(Settings);
+}
+
+void UGeoWeatherSubsystem::SetClouds(double Cover, double BaseM, double ThicknessM)
+{
+	CloudSettings.Cover = FMath::Clamp(Cover, 0.0, 1.0);
+	CloudSettings.BaseM = FMath::Clamp(BaseM, 100.0, 8000.0);
+	CloudSettings.FairThicknessM = FMath::Clamp(ThicknessM, 100.0, 8000.0);
+}
+
+void UGeoWeatherSubsystem::SetCloudDensity(double Scale)
+{
+	CloudSettings.ExtinctionPerM = Weather::FCloudSettings().ExtinctionPerM * FMath::Clamp(Scale, 0.05, 10.0);
 }
 
 void UGeoWeatherSubsystem::SetTemperature(double SeaLevelC, double LapseRateCPerKm)
@@ -301,10 +317,12 @@ void UGeoWeatherSubsystem::Tick(float DeltaTime)
 	UpdateObserver();
 	UpdatePrecipitation(Step);
 	UpdateLightning(Step);
+	UpdateClouds(Step);
 	if (bShowDebugOverlay)
 	{
 		DrawDebugOverlay();
 		DrawPrecipitationOverlay();
+		DrawCloudOverlay();
 	}
 	if (ArrowHeightM > 0.0) { DrawArrows(); }
 }
@@ -406,7 +424,8 @@ void UGeoWeatherSubsystem::UpdatePrecipitation(double DeltaSeconds)
 	if (bHaveSnapshot)
 	{
 		const Core::FGeodetic Origin = LastSnapshot.Georeference.GetOriginGeodetic();
-		Parameters.GeoidAtOriginM = GeoidAt(Origin.LonRad / Core::DegToRad, Origin.LatRad / Core::DegToRad);
+		GeoidAtOriginM = GeoidAt(Origin.LonRad / Core::DegToRad, Origin.LatRad / Core::DegToRad);
+		Parameters.GeoidAtOriginM = GeoidAtOriginM;
 	}
 	const double GroundZ = (Observer.GroundHeightM - Observer.HeightM) * Units::MetersToUu + ViewLocation.Z;
 	Renderer->Update(GetWorld(), ViewLocation, Particles, Parameters, Here.VisibilityM, bDriveFog && Observer.bValid, GroundZ);
@@ -450,8 +469,15 @@ void UGeoWeatherSubsystem::FireStrike(const Weather::FLightningStrike& Strike)
 	double GroundHeight = 0.0;
 	if (!TerrainHeightAt(Strike.LonDeg, Strike.LatDeg, true, GroundHeight)) { GroundHeight = Geoid; }
 	const double TemperatureC = Precipitation.TemperatureAt(GroundHeight - Geoid);
+	// Il canale nasce nella base della nube di pioggia, il lampo nella nube
+	// sta nel suo cuore: le stesse quote che disegnano le nuvole (Clouds.h),
+	// qui sopra il suolo del punto.
+	const double RainBase = Weather::RainCloudBaseM(CloudSettings);
+	const double CloudBase = RainBase + Geoid - GroundHeight;
+	const double CloudMiddle = 0.5 * (RainBase + Precipitation.CloudTopM()) + Geoid - GroundHeight;
 
-	const double Distance = LightningRenderer->AddStrike(World, Snapshot, Strike, GroundHeight, ViewLocation, TemperatureC, Lightning.GetTime());
+	const double Distance = LightningRenderer->AddStrike(World, Snapshot, Strike, GroundHeight, CloudBase, CloudMiddle,
+		ViewLocation, TemperatureC, Lightning.GetTime());
 	RecentStrikeTimes.Add(Strike.TimeSeconds);
 	LatestStrike = Strike;
 	bHaveLatestStrike = true;
@@ -473,6 +499,40 @@ bool UGeoWeatherSubsystem::ForceStrike(double DistanceM, bool bCloudToGround)
 	const double LonDeg = Observer.LonDeg + DistanceM * FMath::Sin(Heading) / (111320.0 * FMath::Cos(FMath::DegreesToRadians(Observer.LatDeg)));
 	FireStrike(Lightning.Strike(bCloudToGround ? Weather::ELightningKind::CloudToGround : Weather::ELightningKind::IntraCloud, LatDeg, LonDeg));
 	return true;
+}
+
+// ---------------------------------------------------------------------------
+//  Le nuvole
+// ---------------------------------------------------------------------------
+
+void UGeoWeatherSubsystem::UpdateClouds(double DeltaSeconds)
+{
+	CloudClock += DeltaSeconds;
+	if (!CloudRenderer) { return; }
+	if (!bCloudsEnabled)
+	{
+		// Spente: niente VolumetricCloud nostra, quella del livello torna com'era.
+		CloudRenderer->Shutdown();
+		return;
+	}
+	UWorld* World = GetWorld();
+	const UGeoreferenceSubsystem* Georeference = World ? World->GetSubsystem<UGeoreferenceSubsystem>() : nullptr;
+	if (!Georeference) { return; }
+	const FGeoreferenceSnapshot Snapshot = Georeference->GetSnapshot();
+
+	FGeoCloudRenderer::FInputs Inputs;
+	Inputs.Settings = CloudSettings;
+	Inputs.Field = &Precipitation;
+	Inputs.bHaveCamera = Observer.bValid;
+	Inputs.CameraLatDeg = Observer.LatDeg;
+	Inputs.CameraLonDeg = Observer.LonDeg;
+	Inputs.GeoidAtOriginM = GeoidAtOriginM;
+	Inputs.TimeSeconds = CloudClock;
+	if (LightningRenderer)
+	{
+		Inputs.bFlash = LightningRenderer->GetBrightestFlash(Snapshot, Lightning.GetTime(), Inputs.FlashLocation, Inputs.FlashBrightness);
+	}
+	CloudRenderer->Update(World, Snapshot, Inputs);
 }
 
 UGeoWeatherSubsystem::FLightningReport UGeoWeatherSubsystem::GetLightningReport() const
@@ -626,6 +686,53 @@ void UGeoWeatherSubsystem::DrawPrecipitationOverlay() const
 		Line(FColor::Yellow, TEXT("Con la pioggia estesa i fulmini sono rari: i temporali sono rovesci (geo.Weather.Storm)"));
 	}
 	if (LightningRenderer && !LightningRenderer->GetProblem().IsEmpty()) { Line(FColor::Yellow, LightningRenderer->GetProblem()); }
+}
+
+void UGeoWeatherSubsystem::DrawCloudOverlay() const
+{
+	if (!GEngine) { return; }
+	int32 Key = 0x6FA0;
+	auto Line = [&Key](const FColor& Colour, const FString& Text)
+	{
+		GEngine->AddOnScreenDebugMessage(Key++, 0.0f, Colour, Text);
+	};
+	Line(FColor::Cyan, TEXT("--- GeoWorld | Meteo: le nuvole ---"));
+	if (!bCloudsEnabled)
+	{
+		Line(FColor::White, TEXT("Nuvole        : spente (geo.Weather.Clouds on)"));
+		return;
+	}
+	const Weather::FCloudSettings& Sky = CloudSettings;
+	Line(FColor::White, FString::Printf(TEXT("Cumuli        : %.0f%% del cielo, base %s, alti fino a %s; densita' x%.2f"),
+		100.0 * Sky.Cover, *Utf8(Format::Metres(Sky.BaseM)), *Utf8(Format::Metres(Sky.FairThicknessM)),   /* percentuale, non-unita */
+		Sky.ExtinctionPerM / Weather::FCloudSettings().ExtinctionPerM));
+	const Weather::FPrecipitationSettings& Rain = Precipitation.GetSettings();
+	if (Rain.RateMmH > 0.0 && Rain.Coverage > 0.0)
+	{
+		Line(FColor::White, FString::Printf(TEXT("Nubi di pioggia: base %s, cime fino a %s (%s)"),
+			*Utf8(Format::Metres(Weather::RainCloudBaseM(Sky))), *Utf8(Format::Metres(Precipitation.CloudTopM())),
+			Rain.Coverage >= 0.999 ? TEXT("cielo coperto") : TEXT("torri sui rovesci")));
+	}
+	if (Observer.bValid)
+	{
+		const Weather::FCloudColumn Above = Weather::CloudColumn(Precipitation, Observer.LatDeg, Observer.LonDeg);
+		if (Above.Cover > 0.05)
+		{
+			Line(FColor::Green, FString::Printf(TEXT("Sopra di te   : nube di pioggia (%.0f%%) fino a %s"), 100.0 * Above.Cover,   /* percentuale, non-unita */
+				*Utf8(Format::Metres(Weather::RainCloudTopM(Sky, Precipitation, Above.TopFraction)))));
+		}
+	}
+	if (CloudRenderer)
+	{
+		double Bottom = 0.0, Top = 0.0;
+		CloudRenderer->GetLayer(Bottom, Top);
+		const double Age = CloudRenderer->GetMapAge(CloudClock);
+		Line(FColor::Green, FString::Printf(TEXT("VolumetricCloud: %s; strato %s - %s; mappa meteo %s"),
+			CloudRenderer->GetState(), *Utf8(Format::Metres(Bottom)), *Utf8(Format::Metres(Top)),
+			Age >= 0.0 ? *FString::Printf(TEXT("di %.0f s fa"), Age) : TEXT("in arrivo")));
+		if (!CloudRenderer->GetProblem().IsEmpty()) { Line(FColor::Yellow, CloudRenderer->GetProblem()); }
+		if (!CloudRenderer->GetAdvice().IsEmpty()) { Line(FColor::Yellow, CloudRenderer->GetAdvice()); }
+	}
 }
 
 void UGeoWeatherSubsystem::DrawArrows() const

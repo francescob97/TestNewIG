@@ -4,7 +4,7 @@
 > Non modificarlo a mano: i controlli statici (`CheckSourceDiscipline.sh`, regola 7)
 > dicono quando e' indietro. In Unreal lo stesso elenco lo da' `geo.Help`.
 
-**100 comandi** in 9 gruppi.
+**102 comandi** in 9 gruppi.
 
 ## Come si usano
 
@@ -47,7 +47,7 @@
 - [Le ortofoto](#le-ortofoto) — `geo.Imagery.*`, 8 comandi
 - [Strade, ferrovie, piste](#strade-ferrovie-piste) — `geo.Roads.*`, 11 comandi
 - [L'acqua](#lacqua) — `geo.Water.*`, 5 comandi
-- [Il meteo](#il-meteo) — `geo.Weather.*`, 20 comandi
+- [Il meteo](#il-meteo) — `geo.Weather.*`, 22 comandi
 - [La camera di volo](#la-camera-di-volo) — `geo.Fly.*`, 2 comandi
 
 ## Generale
@@ -145,7 +145,7 @@ Le foto sul terreno, e i materiali di tutto il progetto (Fase 6).
 | `geo.Imagery.Budget <N>` | texture create per frame (default 4). |
 | `geo.Imagery.Stats` | Statistiche del drappeggio e dello streaming delle ortofoto. |
 | `geo.Imagery.Demo <cartella_terreno> <cartella_ortofoto>` | apre tutto e accende. |
-| `geo.Imagery.CreateMaterial` | Costruisce (o RIFA') in /GeoWorld/Materials: M_GeoTerrain (foto e strade dipinte), M_GeoRoad (strade 3D), M_GeoWater e MPC_GeoWater (acqua), MPC_GeoWeather, M_GeoPrecipitation e M_GeoLightning (meteo). *(solo nell'editor)* |
+| `geo.Imagery.CreateMaterial` | Costruisce (o RIFA') in /GeoWorld/Materials: M_GeoTerrain (foto e strade dipinte), M_GeoRoad (strade 3D), M_GeoWater e MPC_GeoWater (acqua), MPC_GeoWeather, M_GeoPrecipitation, M_GeoLightning e M_GeoClouds (meteo). *(solo nell'editor)* |
 
 ## Strade, ferrovie, piste
 
@@ -199,6 +199,8 @@ Vento, pioggia, neve, grandine, fulmini e tuono.
 | `geo.Weather.Strike [distanza m] [nube]` | un fulmine adesso, davanti alla camera (default 1500 m; "nube": un lampo dentro la nube). Il tuono arriva dopo 3 s per km. |
 | `geo.Weather.Thunder <0..2>` | il volume del tuono (0 = muto, 1 = normale). |
 | `geo.Weather.Clear` | torna il sereno, e niente fulmini. Il suolo si asciuga e la neve fonde da soli (in decine di minuti). |
+| `geo.Weather.Clouds [copertura 0..1 \| on \| off] [base m s.l.m.] [spessore m]` | i cumuli di bel tempo (default 0,25, base 1500 m, alti 1200 m). Le nubi di pioggia vengono dalla precipitazione. "off": niente nuvole. |
+| `geo.Weather.CloudDensity <x>` | quanto sono fitte le nuvole: 1 normale (dentro si vede a ~130 m), 2 il doppio, 0,5 la meta'. |
 | `geo.Weather.Temperature <gradi C al livello del mare> [gradi C per km]` | decide dove la pioggia diventa neve (default 15 e 6,5). |
 | `geo.Weather.Wetness <0..1>` | quanto e' bagnato il suolo, adesso (poi segue la pioggia da solo). |
 | `geo.Weather.SnowCover <quota s.l.m. m> \| off` | neve sul suolo sopra quella quota, adesso (poi scende con le nevicate e risale con il caldo). |
@@ -232,6 +234,6 @@ Non sono di GeoWorld, ma la documentazione li usa spesso.
 | File | Comandi |
 |---|---|
 | `Plugins/GeoWorld/Source/GeoCore/Private/GeoCoreModule.cpp` | 10 |
-| `Plugins/GeoWorld/Source/GeoRender/Private/GeoRenderModule.cpp` | 79 |
+| `Plugins/GeoWorld/Source/GeoRender/Private/GeoRenderModule.cpp` | 81 |
 | `Plugins/GeoWorld/Source/GeoTiles/Private/GeoTilesModule.cpp` | 10 |
 | `Plugins/GeoWorld/Source/GeoWorldEditor/Private/GeoTerrainMaterialFactory.cpp` | 1 |

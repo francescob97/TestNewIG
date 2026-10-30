@@ -9,6 +9,8 @@
 //  velocita' di caduta, suolo bagnato e neve, particelle, mesh.
 // =============================================================================
 
+#include "HlslShim.h"
+#include "Weather/Clouds.h"
 #include "Weather/Lightning.h"
 #include "Weather/Precipitation.h"
 #include "Weather/WindField.h"
@@ -833,6 +835,260 @@ static void TestThunder()
 		"la velocita' del suono cresce con la temperatura (340 m/s a 15 °C)");
 }
 
+// ===========================================================================
+//  14-15. Le nuvole
+// ===========================================================================
+
+static void TestCloudMap()
+{
+	Section("14. Le nuvole: la mappa meteo");
+	const FPrecipitationField Storms = MakeWeather(EPrecipitationKind::Auto, 30.0, 0.35, 15.0, 6.0);
+	int Raining = 0, Cloudy = 0, Total = 0, CoverWhereRain = 0, Cores = 0, Margins = 0;
+	double CoreTop = 0.0, MarginTop = 0.0;
+	for (int Index = 0; Index < 20000; ++Index)
+	{
+		const double LatDeg = Lat + 0.004 * (Index % 160), LonDeg = Lon + 0.005 * (Index / 160);
+		const FCloudColumn Sky = CloudColumn(Storms, LatDeg, LonDeg);
+		const double Level = Storms.Intensity(LatDeg, LonDeg);
+		++Total;
+		Cloudy += Sky.Cover > 0.5 ? 1 : 0;
+		if (Level > 0.0) { ++Raining; CoverWhereRain += Sky.Cover == 1.0 ? 1 : 0; }
+		if (Level > 0.8) { ++Cores; CoreTop += Sky.TopFraction; }
+		if (Level > 0.0 && Level < 0.3) { ++Margins; MarginTop += Sky.TopFraction; }
+	}
+	Check(Raining > 0 && CoverWhereRain == Raining, "dove piove la nuvola c'e' sempre, piena",
+		Fmt("%.0f punti con la pioggia", Raining));
+	Check(Cloudy > Raining * 1.3, "la nuvola si allarga oltre la pioggia",
+		Fmt("nuvoloso %.0f%%, piove sul %.0f%%", 100.0 * Cloudy / Total, 100.0 * Raining / Total)); /* percentuale, non-unita */
+	Check(Cores > 0 && Margins > 0 && CoreTop / Cores > MarginTop / Margins + 0.3,
+		"le torri: cime alte nei nuclei (i temporali), basse ai margini",
+		Fmt("cima nei nuclei %.2f, ai margini %.2f", CoreTop / Cores, MarginTop / Margins));
+
+	const FPrecipitationField Front = MakeWeather(EPrecipitationKind::Auto, 3.0, 1.0);
+	const FCloudColumn Overcast = CloudColumn(Front, Lat, Lon);
+	const FCloudColumn Clear = CloudColumn(MakeWeather(EPrecipitationKind::Auto, 0.0), Lat, Lon);
+	Check(Overcast.Cover == 1.0 && Overcast.TopFraction >= 0.55 && Clear.Cover == 0.0 && Clear.Rain == 0.0,
+		"un fronte e' tutto coperto; senza pioggia niente nubi di pioggia");
+
+	FCloudMap Map;
+	BuildCloudMap(Storms, Lat, Lon, 160000.0, 64, Map);
+	double North = 0.0, East = 0.0;
+	CloudMapTexelOffset(Map, 40, 10, North, East);
+	const FCloudColumn Texel = CloudColumn(Storms, Lat + North / 111132.0, Lon + East / (111320.0 * std::cos(Lat * WindDegToRad)));
+	const uint8_t* Pixel = &Map.Bgra[(static_cast<size_t>(40) * 64 + 10) * 4];
+	Check(Map.Bgra.size() == 64u * 64u * 4u && North > 0.0 && East < 0.0
+		&& Pixel[2] == static_cast<uint8_t>(std::lround(Texel.Cover * 255.0))
+		&& Pixel[1] == static_cast<uint8_t>(std::lround(Texel.TopFraction * 255.0))
+		&& Pixel[0] == static_cast<uint8_t>(std::lround(Texel.Rain * 255.0)) && Pixel[3] == 255,
+		"la mappa: righe verso nord, colonne verso est; R copertura, G cima, B pioggia");
+
+	FCloudSettings Fair;
+	double Bottom = 0.0, Top = 0.0;
+	CloudLayerBounds(Fair, MakeWeather(EPrecipitationKind::Auto, 0.0), Bottom, Top);
+	const bool bFairLayer = Bottom == 1500.0 && Top == 2700.0;
+	CloudLayerBounds(Fair, Storms, Bottom, Top);
+	Fair.Cover = 0.0;
+	Check(bFairLayer && Bottom == RainCloudBaseM(Fair) && Top == 10000.0
+		&& !HasClouds(Fair, MakeWeather(EPrecipitationKind::Auto, 0.0)) && HasClouds(Fair, Storms),
+		"lo strato: i cumuli fra la base e il loro spessore; con i temporali dalla base bassa a 10 km");
+}
+
+/** Lo shader di M_GeoClouds, compilato come C++ (vedi CloudShader.inl). */
+static HlslShim::float4 RunCloudShader(HlslShim::float3 Pos, HlslShim::float4 Map, HlslShim::float4 Shift, HlslShim::float4 Layer,
+                                       HlslShim::float4 Look, HlslShim::float4 Flash, HlslShim::float4 Fair,
+                                       const HlslShim::FTexture& Weather, const HlslShim::FSampler& WeatherSampler)
+{
+	using namespace HlslShim;
+#define GEO_CLOUD_SHADER(...) __VA_ARGS__
+#include "Weather/CloudShader.inl"
+#undef GEO_CLOUD_SHADER
+}
+
+/** Lo shader in un punto: (nord, est) in metri dall'origine, a una quota sul mare. */
+struct FCloudProbe
+{
+	FCloudShaderParameters Parameters;
+	HlslShim::FTexture Texture;
+
+	HlslShim::float4 At(double NorthM, double EastM, double AltitudeM, double ShiftNorthM = 0.0, double ShiftEastM = 0.0) const
+	{
+		using HlslShim::float4;
+		const FCloudShaderParameters& P = Parameters;
+		const double Z = AltitudeM - (NorthM * NorthM + EastM * EastM) / 12742000.0 + P.Look[1];
+		return RunCloudShader(HlslShim::float3((NorthM + ShiftNorthM) * 100.0, (EastM + ShiftEastM) * 100.0, Z * 100.0),
+			float4(P.Map[0], P.Map[1], P.Map[2], P.Map[3]), float4(P.Shift[0], P.Shift[1], P.Shift[2], P.Shift[3]),
+			float4(P.Layer[0], P.Layer[1], P.Layer[2], P.Layer[3]), float4(P.Look[0], P.Look[1], P.Look[2], P.Look[3]),
+			float4(P.Flash[0], P.Flash[1], P.Flash[2], P.Flash[3]), float4(P.Fair[0], P.Fair[1], P.Fair[2], P.Fair[3]),
+			Texture, HlslShim::FSampler{});
+	}
+};
+
+static void TestCloudShader()
+{
+	Section("15. Lo shader delle nuvole (lo stesso testo del materiale, compilato come C++)");
+	FPrecipitationField Storms = MakeWeather(EPrecipitationKind::Auto, 30.0, 0.35, 15.0, 6.0);
+	FCloudSettings Settings;
+	Settings.Cover = 0.0;
+	FCloudMap Map;
+	BuildCloudMap(Storms, Lat, Lon, 160000.0, 256, Map);
+	FCloudProbe Probe;
+	Probe.Texture.Size = Map.Size;
+	Probe.Texture.Bgra = &Map.Bgra;
+	Probe.Parameters = MakeCloudShaderParameters(Settings, Storms, Map, 0.0, 0.0, Lat, Lon, Lat, Lon, 47.0, 0.0);
+
+	// Un punto dove piove forte, vicino all'origine.
+	double CoreNorth = 0.0, CoreEast = 0.0, Best = 0.0;
+	for (int Row = 0; Row < 80; ++Row)
+	{
+		for (int Column = 0; Column < 80; ++Column)
+		{
+			const double North = -20000.0 + Row * 500.0, East = -20000.0 + Column * 500.0;
+			const double Level = Storms.Intensity(Lat + North / 111132.0, Lon + East / (111320.0 * std::cos(Lat * WindDegToRad)));
+			if (Level > Best) { Best = Level; CoreNorth = North; CoreEast = East; }
+		}
+	}
+	const double RainBase = RainCloudBaseM(Settings);
+	const HlslShim::float4 Inside = Probe.At(CoreNorth, CoreEast, RainBase + 3000.0);
+	const HlslShim::float4 Below = Probe.At(CoreNorth, CoreEast, RainBase - 50.0);
+	const HlslShim::float4 Above = Probe.At(CoreNorth, CoreEast, 10050.0);
+	Check(Best > 0.8 && Inside.z > 0.5 && Inside.w > 0.95 && Below.z == 0.0f && Above.z == 0.0f,
+		"sopra un temporale: nuvola piena fra la base e la cima, niente sotto la base e sopra i 10 km",
+		Fmt("densita' %.2f a %.0f m, %.2f sotto la base", Inside.z, RainBase + 3000.0, Below.z));
+	Check(Inside.x > Inside.z * 0.03f * 1.5f, "le nubi di pioggia sono piu' scure (piu' estinzione per la stessa densita')",
+		Fmt("estinzione %.4f al metro con densita' %.2f", Inside.x, Inside.z));
+
+	// La cima delle nubi di pioggia che dicono l'HUD e l'overlay (RainCloudTopM) e' quella dello shader.
+	double MarginNorth = 0.0, MarginEast = 0.0;
+	bool bMargin = false;
+	for (int Index = 0; Index < 6400 && !bMargin; ++Index)
+	{
+		const double North = -20000.0 + (Index / 80) * 500.0, East = -20000.0 + (Index % 80) * 500.0;
+		const double LatDeg = Lat + North / 111132.0, LonDeg = Lon + East / (111320.0 * std::cos(Lat * WindDegToRad));
+		const double Level = Storms.Intensity(LatDeg, LonDeg);
+		const FCloudColumn Sky = CloudColumn(Storms, LatDeg, LonDeg);
+		if (Level > 0.25 && Level < 0.45 && Sky.Cover == 1.0) { bMargin = true; MarginNorth = North; MarginEast = East; }
+	}
+	const FCloudColumn MarginSky = CloudColumn(Storms, Lat + MarginNorth / 111132.0,
+		Lon + MarginEast / (111320.0 * std::cos(Lat * WindDegToRad)));
+	const double MarginTop = RainCloudTopM(Settings, Storms, MarginSky.TopFraction);
+	const float InsideTop = Probe.At(MarginNorth, MarginEast, MarginTop - 0.25 * (MarginTop - RainBase)).z;
+	const float AboveTop = Probe.At(MarginNorth, MarginEast, MarginTop + 300.0).z;
+	Check(bMargin && InsideTop > 0.0f && AboveTop == 0.0f && MarginTop < 9000.0,
+		"la cima delle nubi di pioggia che dice l'HUD e' quella che disegna lo shader (una torre al margine)",
+		Fmt("cima %.0f m: densita' %.2f sotto, %.2f sopra", MarginTop, InsideTop, AboveTop));
+
+	// Il vento in quota sposta le nuvole: cio' che era in P ora e' in P + spostamento.
+	const HlslShim::float4 Before = Probe.At(CoreNorth, CoreEast, RainBase + 2000.0);
+	for (int Step = 0; Step < 600; ++Step) { Storms.Advance(1.0, 15.0, 0.0); }
+	FCloudProbe Later = Probe;
+	Later.Parameters = MakeCloudShaderParameters(Settings, Storms, Map, 0.0, 0.0, Lat, Lon, Lat, Lon, 47.0, 0.0);
+	const HlslShim::float4 After = Later.At(CoreNorth, CoreEast, RainBase + 2000.0, 9000.0, 0.0);
+	Check(Later.Parameters.Shift[0] == 9000.0f && std::fabs(After.z - Before.z) < 2e-3f && std::fabs(After.w - Before.w) < 2e-3f,
+		"le nuvole viaggiano con il vento in quota: 10 minuti a 15 m/s, 9 km piu' a nord, uguali",
+		Fmt("densita' %.4f prima, %.4f dopo", Before.z, After.z));
+
+	// Il rebase: l'origine si sposta di 10 km a nord, tutte le posizioni di -10 km.
+	FCloudSettings Cumulus;
+	Cumulus.Cover = 0.4;
+	FCloudProbe Here = Probe, Rebased = Probe;
+	Here.Parameters = MakeCloudShaderParameters(Cumulus, Storms, Map, 0.0, 0.0, Lat, Lon, Lat, Lon, 47.0, 0.0);
+	const double NewOriginLat = Lat + 10000.0 / 111132.0;
+	Rebased.Parameters = MakeCloudShaderParameters(Cumulus, Storms, Map, -10000.0, 0.0, NewOriginLat, Lon, Lat, Lon, 47.0, 0.0);
+	double Largest = 0.0;
+	for (int Index = 0; Index < 400; ++Index)
+	{
+		const double North = 12000.0 + 37.0 * Index, East = -3000.0 + 53.0 * Index;
+		const double Altitude = (Index % 2) ? RainBase + 1500.0 : Cumulus.BaseM + 300.0;
+		const HlslShim::float4 A = Here.At(North, East, Altitude);
+		const HlslShim::float4 B = Rebased.At(North - 10000.0, East, Altitude);
+		Largest = std::max(Largest, static_cast<double>(std::fabs(A.z - B.z)));
+	}
+	Check(Largest < 0.02, "un rebase non fa saltare ne' le nubi di pioggia ne' i cumuli",
+		Fmt("la differenza piu' grande: %.4f", Largest));
+
+	// Il disegno dei cumuli e l'orologio si riportano dentro il loro periodo: non si deve vedere.
+	FCloudProbe Wrapped = Here;
+	Wrapped.Parameters.Fair[0] = static_cast<float>(Here.Parameters.Fair[0] + FairPatternPeriodM);
+	Wrapped.Parameters.Fair[1] = static_cast<float>(Here.Parameters.Fair[1] - FairPatternPeriodM);
+	FCloudProbe Tomorrow = Here;
+	Tomorrow.Parameters.Look[3] = static_cast<float>(Here.Parameters.Look[3] + CloudTimePeriodS);
+	double LargestWrap = 0.0;
+	for (int Index = 0; Index < 400; ++Index)
+	{
+		const double North = -30000.0 + 151.0 * Index, East = 25000.0 - 113.0 * Index;
+		const double Altitude = Cumulus.BaseM + 5.0 * (Index % 200);
+		const float Reference = Here.At(North, East, Altitude).z;
+		LargestWrap = std::max(LargestWrap, static_cast<double>(std::fabs(Wrapped.At(North, East, Altitude).z - Reference)));
+		LargestWrap = std::max(LargestWrap, static_cast<double>(std::fabs(Tomorrow.At(North, East, Altitude).z - Reference)));
+	}
+	const FCloudShaderParameters Late = MakeCloudShaderParameters(Cumulus, Storms, Map, 0.0, 0.0, Lat, Lon, Lat, Lon, 47.0,
+		3.0 * CloudTimePeriodS + 100.0);
+	Check(LargestWrap < 0.02 && std::fabs(Late.Look[3] - 100.0f) < 0.01f,
+		"il disegno dei cumuli si ripete ogni 1500 km e ogni giorno: riportarlo nel periodo non si vede",
+		Fmt("la differenza piu' grande: %.4f", LargestWrap));
+
+	// La copertura dei cumuli: quella chiesta (fuori dalla zona usata per tarare la tabella).
+	// Senza pioggia la mappa meteo e' vuota: si vedono solo i cumuli.
+	FPrecipitationField Dry = MakeWeather(EPrecipitationKind::Auto, 0.0);
+	FCloudMap DryMap;
+	BuildCloudMap(Dry, Lat, Lon, 160000.0, 16, DryMap);
+	FCloudProbe Clear = Probe;
+	Clear.Texture.Size = DryMap.Size;
+	Clear.Texture.Bgra = &DryMap.Bgra;
+	std::string Measured;
+	bool bAllClose = true;
+	for (const double Cover : { 0.1, 0.25, 0.5, 0.75 })
+	{
+		FCloudSettings Sky;
+		Sky.Cover = Cover;
+		Clear.Parameters = MakeCloudShaderParameters(Sky, Dry, DryMap, 0.0, 0.0, Lat + 0.3, Lon - 0.4, Lat, Lon, 47.0, 0.0);
+		int Covered = 0, Count = 0;
+		for (int Row = 0; Row < 100; ++Row)
+		{
+			for (int Column = 0; Column < 100; ++Column, ++Count)
+			{
+				// Una colonna e' coperta se c'e' nuvola a qualunque quota: quello che si vede guardando in su.
+				bool bCloud = false;
+				for (int Step = 0; Step < 60 && !bCloud; ++Step)
+				{
+					bCloud = Clear.At(Row * 211.0, Column * 197.0, Sky.BaseM + 2.5 + 20.0 * Step).z > 0.0f;
+				}
+				Covered += bCloud ? 1 : 0;
+			}
+		}
+		const double Fraction = static_cast<double>(Covered) / Count;
+		bAllClose = bAllClose && std::fabs(Fraction - Cover) < 0.04;
+		Measured += Fmt(" %.2f", Fraction);
+	}
+	Check(bAllClose, "i cumuli coprono la parte di cielo chiesta (10, 25, 50, 75%)", "misurato" + Measured);
+
+	// Base piatta, cima a cupola: niente sotto la base, niente sopra lo spessore.
+	FCloudSettings Tall;
+	Tall.Cover = 0.5;
+	Clear.Parameters = MakeCloudShaderParameters(Tall, Dry, DryMap, 0.0, 0.0, Lat, Lon, Lat, Lon, 47.0, 0.0);
+	int UnderBase = 0, OverTop = 0, JustAbove = 0;
+	for (int Index = 0; Index < 3000; ++Index)
+	{
+		const double North = 211.0 * (Index % 60), East = 197.0 * (Index / 60);
+		UnderBase += Clear.At(North, East, Tall.BaseM - 20.0).z > 0.0f ? 1 : 0;
+		OverTop += Clear.At(North, East, Tall.BaseM + Tall.FairThicknessM + 20.0).z > 0.0f ? 1 : 0;
+		JustAbove += Clear.At(North, East, Tall.BaseM + 60.0).z > 0.0f ? 1 : 0;
+	}
+	Check(UnderBase == 0 && OverTop == 0 && JustAbove > 1000, "i cumuli: base piatta, cima entro lo spessore",
+		Fmt("%.0f colonne con la nuvola appena sopra la base", JustAbove));
+
+	// Il lampo accende la nuvola attorno, non quella lontana.
+	FCloudProbe Lit = Probe;
+	Lit.Parameters.Flash[0] = static_cast<float>(CoreNorth);
+	Lit.Parameters.Flash[1] = static_cast<float>(CoreEast);
+	Lit.Parameters.Flash[2] = static_cast<float>(RainBase + 2500.0 - 47.0);
+	Lit.Parameters.Flash[3] = 10.0f;
+	const float Near = Lit.At(CoreNorth, CoreEast, RainBase + 2500.0).y;
+	const float Far = Lit.At(CoreNorth + 12000.0, CoreEast, RainBase + 2500.0).y;
+	Check(Near > 5.0f && Far < 0.1f, "il lampo accende la nuvola attorno (2,5 km), non quella lontana",
+		Fmt("vicino %.2f, a 12 km %.3f", Near, Far));
+}
+
 int main()
 {
 	std::printf("=====================================================\n");
@@ -851,6 +1107,8 @@ int main()
 	TestLightningWhere();
 	TestLightningFlashAndShape();
 	TestThunder();
+	TestCloudMap();
+	TestCloudShader();
 	std::printf("\n=====================================================\n");
 	std::printf(" RISULTATO: %d passati, %d falliti\n", GPassed, GFailed);
 	std::printf("=====================================================\n");

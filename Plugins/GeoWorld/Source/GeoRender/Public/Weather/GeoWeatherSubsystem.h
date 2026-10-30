@@ -18,7 +18,11 @@
 //  dentro la nube, con il lampo che sfarfalla, la luce sul paesaggio e il
 //  tuono che arriva dopo (GeoLightningRenderer).
 //
-//  Le nuvole si aggiungeranno qui.
+//  LE NUVOLE (Weather/Clouds.h): i cumuli di bel tempo, quanti ne vuoi, e le
+//  nubi di pioggia, che vengono dalla stessa mappa dei rovesci -- dove piove
+//  c'e' sempre la nuvola sopra. Le disegna la VolumetricCloud di Unreal con
+//  il materiale M_GeoClouds (GeoCloudRenderer); i fulmini nascono nella loro
+//  base e le accendono da dentro.
 //
 //  geo.Weather.Wind 8 270           8 m/s da ovest (a 10 m su un prato, come un METAR)
 //  geo.Weather.Turbulence 1.5       raffiche piu' forti del normale
@@ -28,6 +32,7 @@
 //  geo.Weather.Temperature 2        2 °C al livello del mare: neve dai ~0 m
 //  geo.Weather.Storm                temporali: rovesci con fulmini
 //  geo.Weather.Strike 1500          un fulmine a 1,5 km davanti alla camera
+//  geo.Weather.Clouds 0.5 1200      cumuli su meta' del cielo, base a 1200 m ("off": niente nuvole)
 //  geo.Weather.Clear                torna il sereno
 //  geo.Weather.Debug 1              overlay; geo.Weather.Arrows 50: frecce a 50 m dal suolo
 // =============================================================================
@@ -37,6 +42,8 @@
 #include "Subsystems/WorldSubsystem.h"
 
 #include "Georeference/GeoreferenceSnapshot.h"
+#include "Weather/Clouds.h"
+#include "Weather/GeoCloudRenderer.h"
 #include "Weather/GeoLightningRenderer.h"
 #include "Weather/GeoPrecipitationRenderer.h"
 #include "Weather/Lightning.h"
@@ -205,6 +212,25 @@ public:
 	};
 	FLightningReport GetLightningReport() const;
 
+	// --- Le nuvole -----------------------------------------------------------
+
+	/**
+	 * I cumuli di bel tempo: quanta parte del cielo coprono (0..1), la base
+	 * (m s.l.m.) e quanto sono alti i piu' grossi (m). Le nubi di pioggia non
+	 * si impostano: vengono dalla precipitazione.
+	 */
+	void SetClouds(double Cover, double BaseM, double ThicknessM);
+	/** Quanto sono fitte le nuvole: 1 normale, 2 il doppio (piu' scure, piu' opache). */
+	void SetCloudDensity(double Scale);
+	/** Spente: GeoWorld non disegna nuvole, e la VolumetricCloud del livello torna com'era. */
+	void SetCloudsEnabled(bool bInEnabled) { bCloudsEnabled = bInEnabled; }
+	bool AreCloudsEnabled() const { return bCloudsEnabled; }
+	const GeoWorld::Weather::FCloudSettings& GetCloudSettings() const { return CloudSettings; }
+	/** Vuoto se le nuvole si vedono; altrimenti cosa manca. */
+	FString GetCloudProblem() const { return CloudRenderer ? CloudRenderer->GetProblem() : FString(); }
+	/** Un consiglio sulla scena (la luce del sole, le ombre delle nuvole), se c'e'. */
+	FString GetCloudAdvice() const { return CloudRenderer ? CloudRenderer->GetAdvice() : FString(); }
+
 	// --- Debug --------------------------------------------------------------
 
 	void SetDebugOverlayEnabled(bool bInEnabled) { bShowDebugOverlay = bInEnabled; }
@@ -231,9 +257,12 @@ private:
 	/** I fulmini nati in questo frame, e la loro luce: dopo UpdatePrecipitation. */
 	void UpdateLightning(double DeltaSeconds);
 	void FireStrike(const GeoWorld::Weather::FLightningStrike& Strike);
+	/** Le nuvole: dopo UpdateLightning (il lampo dentro la nuvola e' di questo frame). */
+	void UpdateClouds(double DeltaSeconds);
 	void OnGeoreferenceRebased(const FGeoreferenceSnapshot& Snapshot);
 	void DrawDebugOverlay() const;
 	void DrawPrecipitationOverlay() const;
+	void DrawCloudOverlay() const;
 	void DrawArrows() const;
 
 	GeoWorld::Weather::FWindField Field;
@@ -255,6 +284,8 @@ private:
 	double SmoothedExtinction = 0.0;
 	bool bDriveFog = true;
 	TUniquePtr<FGeoPrecipitationRenderer> Renderer;
+	/** Il geoide all'origine del mondo: la quota sul mare nei materiali (suolo, nuvole). */
+	double GeoidAtOriginM = 0.0;
 
 	FGeoreferenceSnapshot LastSnapshot;
 	bool bHaveSnapshot = false;
@@ -267,4 +298,10 @@ private:
 	GeoWorld::Weather::FLightningStrike LatestStrike;
 	bool bHaveLatestStrike = false;
 	double LatestStrikeDistanceM = 0.0;
+
+	GeoWorld::Weather::FCloudSettings CloudSettings;
+	bool bCloudsEnabled = true;
+	TUniquePtr<FGeoCloudRenderer> CloudRenderer;
+	/** L'orologio delle nuvole (s): i cumuli nascono e si disfano. */
+	double CloudClock = 0.0;
 };

@@ -263,19 +263,38 @@ namespace GeoWorld::Weather
 		 */
 		double Intensity(double LatDeg, double LonDeg) const
 		{
-			using namespace PrecipitationDetail;
 			if (Settings.RateMmH <= 0.0 || Settings.Coverage <= 0.0) { return 0.0; }
+			return LevelFromNoise(MapNoise(LatDeg, LonDeg));
+		}
+
+		/**
+		 * Il rumore della mappa in un punto (deviazione ~1): da qui escono sia
+		 * la pioggia (LevelFromNoise) sia le nuvole (Clouds.h), cosi' le
+		 * nuvole stanno sopra la pioggia per costruzione.
+		 */
+		double MapNoise(double LatDeg, double LonDeg) const
+		{
 			const double Scale = Settings.CellSizeKm * 1000.0;
 			const double X = (LatDeg * 111132.0 - DriftNorth) / Scale;
 			const double Y = (LonDeg * 111320.0 * std::cos(LatDeg * WindDegToRad) - DriftEast) / Scale;
 			// Un rovescio vive ~40 minuti: in quel tempo il disegno cambia di un'unita' del rumore.
-			const double Noise = CellNoise(X, Y, Seconds / 2400.0, Settings.Seed + 5000u);
+			return PrecipitationDetail::CellNoise(X, Y, Seconds / 2400.0, Settings.Seed + 5000u);
+		}
+
+		/** La soglia del rumore sopra cui piove: lascia sopra di se' la copertura chiesta. */
+		double NoiseThreshold() const { return PrecipitationDetail::InverseNormal(1.0 - Settings.Coverage); }
+
+		/** Quanto del massimo cade, dato il rumore della mappa (vedi Intensity). */
+		double LevelFromNoise(double Noise) const
+		{
+			using namespace PrecipitationDetail;
+			if (Settings.RateMmH <= 0.0 || Settings.Coverage <= 0.0) { return 0.0; }
 			if (Settings.Coverage >= 0.999)
 			{
 				// Dappertutto, con un'ondulazione del 15% (non e' mai uniforme).
 				return Clamp(0.85 + 0.15 * Noise, 0.5, 1.0);
 			}
-			const double Threshold = InverseNormal(1.0 - Settings.Coverage);
+			const double Threshold = NoiseThreshold();
 			const double Core = Clamp((Noise - Threshold) / 1.2, 0.0, 1.0);
 			return Core > 0.0 ? Clamp(0.15 + 0.85 * Core, 0.0, 1.0) : 0.0;
 		}
@@ -300,6 +319,9 @@ namespace GeoWorld::Weather
 		}
 
 		double GetTime() const { return Seconds; }
+		/** Quanto il vento in quota ha spostato la mappa finora (m): le nuvole lo seguono. */
+		double GetDriftNorth() const { return DriftNorth; }
+		double GetDriftEast() const { return DriftEast; }
 
 	private:
 		FPrecipitationSettings Settings;

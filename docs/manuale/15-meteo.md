@@ -1,9 +1,9 @@
-# Capitolo 15 — Il meteo: pioggia, neve, grandine
+# Capitolo 15 — Il meteo: pioggia, neve, grandine, fulmini, nuvole
 
 > Come si simula la precipitazione e come la si mette a schermo: dove cade,
 > cosa cade a ogni quota, quanto toglie la vista, il suolo che si bagna e
 > s'imbianca, e le particelle che cadono attorno alla camera. Poi i fulmini e
-> il tuono (sezione 15.7). Il documento di
+> il tuono (sezione 15.7) e le nuvole (sezione 15.8). Il documento di
 > progetto con tutti i numeri è `docs/meteo-design.md`; come provarlo è in
 > `docs/meteo-verifica.md`.
 
@@ -195,6 +195,61 @@ acuti), messo nel tempo al suo istante d'arrivo. Nessun file audio.
 > piccolo scatto. Lo fa un thread di lavoro; sul game thread resta solo il
 > conto di **quando** arriva.
 
+## 15.8 Le nuvole
+
+Le nuvole sono di due tipi, e vengono da due posti diversi.
+
+**Le nubi di pioggia** vengono dalla **stessa mappa** dei rovesci. La pioggia
+cade dove il rumore della mappa supera una soglia; la nuvola sta dove il
+rumore ci arriva *quasi*: piena dove piove, e sfuma un po' più in là. Così è
+impossibile che piova da un cielo sereno, per costruzione: è la stessa mappa.
+Sopra un temporale la nuvola è una **torre** fino a 10 km; sopra un fronte
+il cielo è **coperto**.
+
+**I cumuli di bel tempo** sono chiazze di un chilometro e mezzo, quante ne
+chiedi (`geo.Weather.Clouds 0.4`: il 40% del cielo). Hanno la **base
+piatta** — l'aria che sale si raffredda e condensa tutta alla stessa quota —
+e la cima a **cupola**, più alta dove la chiazza è più forte. Un rumore fine
+mangia i bordi: sfrangiati, come quelli veri.
+
+> 💡 **Esempio: la tabella misurata.** Quale soglia del rumore dà "il 40% del
+> cielo"? Se il rumore fosse uniforme sarebbe 0,6. Non lo è, e i bordi
+> sfrangiati mangiano un po' di nuvola. Allora si **misura**: si fa girare lo
+> shader su 40.000 colonne di cielo per 18 soglie diverse e si scrive una
+> tabella (`FairCloudThreshold`). Quando una formula non c'è, una misura
+> fatta bene vale quanto una formula.
+
+**Come arrivano alla scheda video.** Le nuvole le disegna la
+**VolumetricCloud** di Unreal: un guscio attorno al pianeta, fra due quote,
+che la scheda video attraversa a piccoli passi chiedendo a ogni passo "quanto
+è densa l'aria qui?". La risposta la dà il nostro materiale. Ma la mappa della
+pioggia usa conti troppo pesanti per farli decine di volte per pixel: allora il
+C++ la calcola in una **texture** (256 × 256, 160 km attorno alla camera) su
+un thread di lavoro ogni 8 secondi, e fra un ricalcolo e l'altro lo shader la
+**sposta** di quanto ha soffiato il vento. I cumuli invece sono calcolati
+direttamente nello shader: sono un rumore leggero.
+
+> ⚠️ **Trappola: il numero che cresce.** Il disegno dei cumuli sta in metri
+> dal punto di partenza, e il vento lo sposta sempre: dopo ore sono centinaia
+> di chilometri. Un `float` della scheda video ha 7 cifre: a 1.000 km la sua
+> precisione è di 6 cm, a 100.000 km di 8 m, e le nuvole tremolano. La
+> soluzione è riportare il numero dentro un **periodo** (1.500 km), e fare il
+> rumore **periodico** con lo stesso passo: le celle che escono da una parte
+> rientrano dall'altra identiche. Il riporto c'è, ma non si vede. Lo stesso per
+> l'orologio, ogni giorno.
+
+**Lo shader è provato dai test.** Il codice della densità sta in un file
+(`CloudShader.inl`) scritto in modo da essere **HLSL e C++ insieme**. La
+factory dei materiali lo trasforma in una stringa e lo mette nel materiale; i
+test lo compilano come C++, con dei tipi finti che imitano quelli della scheda
+video (`float3`, `lerp`, `saturate`...). Così la misura della copertura, la
+base piatta, il rebase senza salti sono provati **sullo stesso codice** che
+girerà sulla scheda video.
+
+**I fulmini nelle nuvole.** Il canale di un fulmine parte dalla base della
+nube di pioggia; il lampo dentro la nube accende la nuvola attorno a sé, per
+qualche chilometro.
+
 ---
 
 ## Alternative considerate
@@ -206,6 +261,10 @@ acuti), messo nel tempo al suo istante d'arrivo. Nessun file audio.
   test.
 - **La pioggia disegnata sullo schermo** (strisce in post-processo). Costa
   poco, ma non ha profondità: girando la camera la pioggia gira con lei.
+- **Il rumore della pioggia rifatto nello shader**, invece della texture: esatto
+  ovunque, ma troppo caro a ogni passo dentro le nuvole.
+- **Nuvole fatte di immagini** (sprite): costano poco, ma da un aereo ci si
+  vola dentro, e un'immagine piatta non regge.
 - **Il suolo bagnato punto per punto** (una texture attorno alla camera).
   Più vero (il suolo asciutto fuori dal rovescio), ma una texture che segue la
   camera ha il suo rebase, la sua risoluzione, il suo streaming. Un passo
@@ -286,6 +345,37 @@ Con un emissivo molto alto, il **bloom** di Unreal fa l'alone attorno al filo.
 salvato". L'attore delle particelle e la nebbia creata da noi la portano:
 esistono finché il mondo è aperto, e non finiscono mai in un file.
 
+### La VolumetricCloud e i materiali di dominio Volume
+
+Un materiale normale colora una **superficie**. Uno di dominio **Volume**
+descrive l'aria in un punto: quanta luce toglie per metro (l'**estinzione**),
+che colore ha la luce che diffonde (l'**albedo**), se fa luce da sé
+(l'**emissivo**). La `UVolumetricCloudComponent` attraversa il suo guscio a
+passi e chiede il materiale a ogni passo; la luce del sole dentro la nuvola,
+le ombre, il cielo che la illumina da sotto li calcola il motore. In questo
+dominio l'editor rinomina il pin *Subsurface Color* in *Extinction*: da codice
+si collega `MP_SubsurfaceColor`.
+
+> ⚠️ **Trappola.** Nella scena si vede **una sola** VolumetricCloud. Se il
+> livello ne ha una, in Play la si nasconde (`SetVisibility(false)`: un
+> componente nascosto non entra nella scena); nell'editor no, perché
+> nascosta si salverebbe nascosta.
+
+### Il nodo Custom con le funzioni
+
+Un nodo Custom contiene il **corpo** di una funzione HLSL, non un file: non ci
+si possono definire altre funzioni. Il trucco classico è una `struct` con le
+funzioni dentro, dichiarata nel corpo, e un'istanza per chiamarle
+(`CloudNoise.Value(...)`). HLSL lo permette; il C++ anche, e per questo lo
+stesso testo compila nei test.
+
+### Una texture nell'istanza, i numeri nella collezione
+
+Una Material Parameter Collection porta solo **numeri** (scalari e vettori).
+La mappa meteo è una texture: va in un'**istanza dinamica** del materiale
+(`UMaterialInstanceDynamic`, parametro `CloudWeatherMap`). I sei vettori delle
+nuvole invece stanno in `MPC_GeoWeather`, con quelli della pioggia.
+
 ---
 
 ## Dove sta nel codice
@@ -298,8 +388,12 @@ esistono finché il mondo è aperto, e non finiscono mai in un file.
 | `GeoRender/.../Weather/GeoLightningRenderer.*` | il canale, la luce, il tuono che suona |
 | `GeoRender/.../Weather/GeoWeatherSubsystem.*` | il giro di un frame, il rebase, l'overlay, `GetPrecipitationAt`, `OnLightningStrike` |
 | `GeoRender/Private/GeoRenderModule.cpp` | i comandi `geo.Weather.Rain`, `Snow`, `Hail`, `Storm`, `Strike`, ... |
-| `GeoWorldEditor/Private/GeoTerrainMaterialFactory.cpp` | `M_GeoPrecipitation`, `M_GeoLightning` e il suolo bagnato/innevato |
-| `Tools/StandaloneTests/geoweather_main.cpp` | i test (sezioni 6–13) |
+| `GeoRender/Public/Weather/Clouds.h` | le nuvole (puro): la colonna di cielo, la mappa meteo, la tabella della copertura |
+| `GeoRender/Public/Weather/CloudShader.inl` | lo shader delle nuvole, HLSL e C++ insieme |
+| `GeoRender/.../Weather/GeoCloudRenderer.*` | la VolumetricCloud, la mappa su un thread di lavoro |
+| `GeoWorldEditor/Private/GeoTerrainMaterialFactory.cpp` | `M_GeoPrecipitation`, `M_GeoLightning`, `M_GeoClouds` e il suolo bagnato/innevato |
+| `Tools/StandaloneTests/geoweather_main.cpp` | i test (sezioni 6–15) |
+| `Tools/StandaloneTests/HlslShim.h` | i tipi finti di HLSL per compilare lo shader come C++ |
 
 ---
 
@@ -320,3 +414,8 @@ esistono finché il mondo è aperto, e non finiscono mai in un file.
   sfarfallano (i colpi di ritorno), hanno un canale frattale; il **tuono**
   arriva dopo tre secondi per chilometro e brontola perché i pezzi del canale
   sono a distanze diverse. Sintetizzato, su un thread di lavoro.
+- Le **nubi di pioggia** vengono dalla stessa mappa dei rovesci (piove solo
+  sotto una nuvola, per costruzione); i **cumuli** sono un rumore con una
+  soglia **misurata**. Li disegna la VolumetricCloud, con uno shader che i
+  test compilano come C++; il rumore è **periodico** perché i numeri restino
+  piccoli senza salti.

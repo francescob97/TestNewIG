@@ -10,6 +10,8 @@ Termini in ordine alfabetico. Tra parentesi, il capitolo dove sono spiegati.
 
 **Acqua risolta** — un'acqua larga almeno 4 post al livello della tile: si scava, con la sponda a V, e la superficie è piana. (13)
 
+**Albedo** — in un materiale di dominio Volume, quanta della luce che una nuvola intercetta viene diffusa invece che assorbita. Le nuvole sono quasi bianche: 0,9. (15)
+
 **Alfa premoltiplicato** — un'immagine trasparente il cui colore è già moltiplicato per la
 copertura. Le medie fra pixel (mipmap, filtro bilineare) vengono giuste; in alfa normale i
 bordi si scurirebbero. Le strade sono così. (12)
@@ -65,6 +67,8 @@ dall'ortofoto. (7)
 
 **COG** (*Cloud Optimized GeoTIFF*) — un GeoTIFF organizzato in modo che se ne
 possano leggere pezzi via rete senza scaricarlo tutto. (7)
+
+**Cumulo** — la nuvola di bel tempo: una chiazza con la base piatta (dove l'aria che sale condensa, alla stessa quota per tutte) e la cima a cupola. Quanti, lo dice la copertura (`geo.Weather.Clouds`). (15)
 
 **Delegato** — un meccanismo di Unreal per "avvisami quando succede X".
 `OnGeoreferenceRebased` è un delegato. (2)
@@ -149,6 +153,8 @@ materiali la posizione nel mondo è LWC (due float): un nodo Custom la vuole com
 float normale, e per questo passa da un nodo `TruncateLWC`. (1, 2, 13)
 
 **Manifest** — il file `manifest.json` che descrive un dataset. (3)
+
+**Mappa meteo** — la texture di 256 × 256 texel (160 km attorno alla camera) con le nubi di pioggia, calcolata dal C++ su un thread di lavoro ogni 8 s e spostata dallo shader con il vento fra un ricalcolo e l'altro. (15)
 
 **Mare aperto** — il mare lontano dalla costa, dove il dataset del terreno non ha tile (nemmeno un post di dato). `build-water` annota le tile che mancano e sono tutte mare (`opensea.bin`), e il runtime ci costruisce terreno e acqua virtuali. (13)
 
@@ -244,11 +250,15 @@ quote) o un'area (i pixel). Decide se il bordo è condiviso. (3, 7)
 
 **Rugosità** (`z0`) — quanto il suolo è ruvido per il vento, in metri: 0,2 mm il mare, 3 cm un prato, 1 m una città. Decide quanto lo strato limite frena il vento al suolo e quanto è rafficato. (14)
 
+**Rumore periodico** — un rumore che si ripete identico dopo un certo passo (le celle che escono da una parte rientrano dall'altra). Permette di riportare un numero che cresce dentro il periodo, per la precisione dei `float`, senza che si veda: così il disegno dei cumuli ogni 1.500 km e il loro orologio ogni giorno. (15)
+
 **Scavo** — abbassare le quote del terreno sotto l'acqua fino al fondale prima di costruirne la mesh, così l'acqua ha una profondità vera. Lo fa il terreno, con la funzione che gli consegna l'acqua (`SetHeightEditor`). (13)
 
 **SCL** (*Scene Classification Layer*) — il file di Sentinel-2 L2A che classifica ogni pixel da 20 m: nuvole, ombre di nuvole, cirri, neve, acqua... Serve a togliere le nuvole dalle ortofoto. (7)
 
 **SDF** (*signed distance field*) — un'immagine in cui ogni pixel dice quanto si è lontani da un bordo, con il segno (positivo in acqua, negativo a terra). Filtrata, dà un bordo nitido a ogni ingrandimento. È la riva dell'acqua. (13)
+
+**Shader a doppia sintassi** — un testo che è HLSL e C++ insieme (`CloudShader.inl`): la factory lo trasforma in una stringa per il nodo Custom, i test lo compilano come C++ con dei tipi finti (`HlslShim.h`). Quello che si prova è quello che gira sulla scheda video. (15)
 
 **Single Layer Water** — il modello d'ombreggiatura di Unreal per l'acqua: il colore viene da assorbimento e diffusione nello spessore d'acqua letto dal depth buffer, non da un BaseColor. (13)
 
@@ -304,6 +314,8 @@ collector. (1)
 mostrare: le ortofoto e le strade. Il terreno ne accetta più d'uno, per nome. (11, 12)
 
 **Vista-indipendente** — selezione che dipende solo dalla posizione della camera, non dalla direzione: il frustum lo applica il renderer di Unreal. È il default. (11)
+
+**VolumetricCloud** — il componente di Unreal che disegna le nuvole: un guscio attorno al pianeta, fra due quote, attraversato a passi chiedendo a ogni passo il materiale (dominio **Volume**: estinzione, albedo, emissivo). Se ne vede una sola per volta. (15)
 
 **VRT** — un raster virtuale di GDAL: un file XML che fa apparire più file come
 uno solo. (3, 7)
@@ -403,6 +415,7 @@ il primo comando da provare quando non si vede niente. (6)
 | `Public/Weather/Wind.h`, `WindField.h`, `GeoWeatherSubsystem.h` | il vento (il campo e' puro) |
 | `Public/Weather/Precipitation.h`, `GeoPrecipitationRenderer.h` | pioggia, neve, grandine: il modello (puro) e il disegno (particelle, suolo, nebbia) |
 | `Public/Weather/Lightning.h`, `GeoLightningRenderer.h` | fulmini e tuono: il modello (puro) e il disegno (canale, luce, suono) |
+| `Public/Weather/Clouds.h`, `CloudShader.inl`, `GeoCloudRenderer.h` | le nuvole: il modello (puro), lo shader (HLSL e C++ insieme) e il disegno (VolumetricCloud, mappa meteo) |
 | `Public/GeoPositionHudSubsystem.h` | le stampe della posizione |
 | `Private/GeoRenderModule.cpp` | comandi `geo.Lod.*`, `geo.Terrain.*`, `geo.Imagery.*`, `geo.Roads.*`, `geo.Water.*`, `geo.Weather.*`, `geo.Hud`, `geo.Fly*` |
 | `Private/**/*.cpp` | le implementazioni |
@@ -413,13 +426,14 @@ il primo comando da provare quando non si vede niente. (6)
 |---|---|
 | `GeoWorldEditor.Build.cs` | `MaterialEditor`, `AssetTools` |
 | `Private/GeoWorldEditorModule.cpp` | il modulo |
-| `Private/GeoTerrainMaterialFactory.cpp` | `geo.Imagery.CreateMaterial`: `M_GeoTerrain`, `M_GeoRoad`, `M_GeoWater`, `MPC_GeoWater`, `MPC_GeoWeather`, `M_GeoPrecipitation`, `M_GeoLightning` |
+| `Private/GeoTerrainMaterialFactory.cpp` | `geo.Imagery.CreateMaterial`: `M_GeoTerrain`, `M_GeoRoad`, `M_GeoWater`, `MPC_GeoWater`, `MPC_GeoWeather`, `M_GeoPrecipitation`, `M_GeoLightning`, `M_GeoClouds` |
 
 ### Strumenti
 
 | File | Contenuto |
 |---|---|
 | `Tools/StandaloneTests/*` | i cinque eseguibili di test senza Unreal |
+| `Tools/StandaloneTests/HlslShim.h` | quel tanto di HLSL che serve a compilare lo shader delle nuvole come C++ |
 | `Tools/CheckSourceDiscipline.sh` | cinque regole di disciplina |
 | `Tools/CheckShadowedParameters.py` | parametri che nascondono campi |
 | `Tools/CheckModuleExports.py` | simboli invisibili fra moduli |

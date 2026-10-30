@@ -4,7 +4,8 @@
 //  Ogni fulmine e' un attore transient che vive meno di un secondo:
 //
 //   - IL CANALE: una mesh di nastri, uno per pezzo di canale
-//     (Weather/Lightning.h, BuildLightningChannel), girati verso la camera
+//     (Weather/Lightning.h, BuildLightningChannel), dalla base della nube di
+//     pioggia (Weather/Clouds.h) al suolo, girati verso la camera
 //     quando il fulmine nasce (in mezzo secondo la camera non si sposta
 //     abbastanza da accorgersene). Materiale M_GeoLightning: additivo,
 //     emissivo, un filo accecante dentro un alone. La luce di ogni istante
@@ -51,12 +52,22 @@ public:
 
 	/**
 	 * Un fulmine nuovo. GroundHeightM: la quota ellissoidica del suolo nel
-	 * punto (colpito, o sotto il lampo nella nube); CameraLocation in unita'
-	 * Unreal; Now l'orologio dello scheduler. Ritorna la distanza dalla
-	 * camera, m.
+	 * punto (colpito, o sotto il lampo nella nube); CloudBaseM e CloudMiddleM:
+	 * la base della nube di pioggia e il suo cuore, m SOPRA IL SUOLO li' (il
+	 * canale nasce nella base, il lampo nella nube sta nel cuore);
+	 * CameraLocation in unita' Unreal; Now l'orologio dello scheduler.
+	 * Ritorna la distanza dalla camera, m.
 	 */
 	double AddStrike(UWorld* World, const FGeoreferenceSnapshot& Snapshot, const GeoWorld::Weather::FLightningStrike& Strike,
-	                 double GroundHeightM, const FVector& CameraLocation, double TemperatureC, double Now);
+	                 double GroundHeightM, double CloudBaseM, double CloudMiddleM,
+	                 const FVector& CameraLocation, double TemperatureC, double Now);
+
+	/**
+	 * Il lampo piu' forte adesso, per accendere le nuvole attorno: dove
+	 * (unita' Unreal: il punto della luce) e quanto (FlashBrightness, 0..1).
+	 * False se non ce n'e' nessuno acceso.
+	 */
+	bool GetBrightestFlash(const FGeoreferenceSnapshot& Snapshot, double Now, FVector& OutLocation, double& OutBrightness) const;
 
 	/** Una volta per frame: luce dei fulmini, posizione (rebase), tuoni che arrivano, pulizia. */
 	void Update(UWorld* World, const FGeoreferenceSnapshot& Snapshot, double Now);
@@ -71,6 +82,8 @@ public:
 	int32 GetActiveBolts() const { return Bolts.Num(); }
 	/** Fra quanto arriva il prossimo tuono (s); negativo se non ce ne sono in arrivo. */
 	double NextThunderIn(double Now) const;
+	/** Quanta luce c'e' nel livello (il sole, lux): il fulmine si misura su quella (anche nelle nuvole). */
+	static double ReferenceLux(UWorld* World);
 
 private:
 	struct FBolt
@@ -80,6 +93,8 @@ private:
 		TWeakObjectPtr<UPointLightComponent> Light;
 		GeoWorld::Weather::FLightningStrike Strike;
 		GeoWorld::Core::FGeodetic Where;
+		/** Quanto sopra il suolo sta la luce, m. */
+		double LightHeightM = 0.0;
 		/** La luce al primo colpo (cd), e quanto si moltiplica l'emissivo del canale. */
 		double Candela = 0.0;
 		double Emissive = 1.0;
@@ -110,8 +125,6 @@ private:
 	};
 
 	bool EnsureMaterial();
-	/** Quanta luce c'e' nel livello (il sole, lux): il fulmine si misura su quella. */
-	static double ReferenceLux(UWorld* World);
 	void PlayThunder(UWorld* World, const FThunderSamples& Samples, double Now);
 
 	TStrongObjectPtr<UMaterialInterface> Material;
