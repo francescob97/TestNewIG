@@ -82,3 +82,6 @@ _work/
 
 # Test standalone (cmake -S Plugins/GeoWorld/Tools/StandaloneTests -B build)
 /build/
+
+# L'ambiente privato della pipeline, preparato da geoworld.bat / geoworld.sh
+Pipeline/ambiente/

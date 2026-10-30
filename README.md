@@ -108,38 +108,43 @@ le classi di errore di compilazione gia' incontrate su Windows -- shadowing,
 simboli non esportati fra moduli, tipi di comando console inesistenti,
 collisioni da build unity, metodi inesistenti chiamati sulle nostre classi.
 
-451 test C++ in totale, piu' 187 test Python della pipeline.
+451 test C++ in totale, piu' 188 test Python della pipeline.
 
 **Dopo la prima prova su Torino** (materiale, scene Sentinel, prestazioni): `docs/prova-torino.md`.
 **Dopo la seconda** (troppi triangoli, RAM): `docs/prova-torino-2.md`.
 
 ## Pipeline dati
 
+Niente da installare: `Pipeline\geoworld.bat` (Windows) o `Pipeline/geoworld.sh`
+(Linux, macOS) la prima volta prepara da solo un ambiente privato con GDAL,
+PROJ e il resto, in `Pipeline/ambiente/`; le volte dopo parte subito.
+`geoworld <comando>` e' `python run.py <comando>` con l'ambiente giusto.
+
 ```bat
 cd Pipeline
-python run.py check-env                            :: diagnosi: GDAL, PROJ, griglie
-python run.py fetch --area test -o dati/copernicus :: scarica un DEM libero
-python run.py build -i "dati/copernicus/*.tif" -o dataset/test
-python run.py verify -o dataset/test
+geoworld check-env                            :: diagnosi: GDAL, PROJ, griglie
+geoworld fetch --area test -o dati/copernicus :: scarica un DEM libero
+geoworld build -i "dati/copernicus/*.tif" -o dataset/test
+geoworld verify -o dataset/test
 
 :: ortofoto (Fase 6): stessa struttura, dataset separato
-python run.py fetch-imagery --area roma -o dati/sentinel
-python run.py build-imagery -i @dati/sentinel/ordine_scene.txt -o dataset/ortofoto
-python run.py verify-imagery -o dataset/ortofoto
+geoworld fetch-imagery --area roma -o dati/sentinel
+geoworld build-imagery -i @dati/sentinel/ordine_scene.txt -o dataset/ortofoto
+geoworld verify-imagery -o dataset/ortofoto
 
 :: tutta Italia: quote 30 m e ortofoto (96 scene, ~25 GB: prima guarda il --dry-run)
-python run.py fetch --area italia -o dati/copernicus_italia
-python run.py fetch-imagery --area italia -o dati/sentinel_italia --dry-run
+geoworld fetch --area italia -o dati/copernicus_italia
+geoworld fetch-imagery --area italia -o dati/sentinel_italia --dry-run
 
 :: acqua (Fase 9): i poligoni del mare una volta, poi OSM + terreno
-python run.py fetch-water -o dati/acqua
-python run.py build-water --osm dati/osm/nord-ovest-latest.osm.pbf --sea dati/acqua/water-polygons-split-4326.zip --terrain dataset/terreno -o dataset/acqua
-python run.py verify-water -o dataset/acqua
+geoworld fetch-water -o dati/acqua
+geoworld build-water --osm dati/osm/nord-ovest-latest.osm.pbf --sea dati/acqua/water-polygons-split-4326.zip --terrain dataset/terreno -o dataset/acqua
+geoworld verify-water -o dataset/acqua
 
-python -m unittest discover -s tests               :: 187 test, sorgente sintetico
+geoworld test                                      :: 188 test, sorgente sintetico
 ```
 
-Su Windows serve conda: vedi `Pipeline/README.md`.
+Installazione, opzioni e conda a mano (se lo preferisci): `Pipeline/README.md`.
 Da dove vengono i dati (DEM e ortofoto): `docs/dati.md`.
 Quadro d'insieme delle sei fasi: `docs/programma.md`.
 **Per riprendere il lavoro: `docs/consegna.md`.**

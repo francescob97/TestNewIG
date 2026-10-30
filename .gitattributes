@@ -1,0 +1,4 @@
+# Gli script di cmd vogliono gli a-capo di Windows: con i soli LF, cmd puo'
+# sbagliare le etichette dei goto. Quelli di bash vogliono i soli LF.
+*.bat text eol=crlf
+*.sh  text eol=lf

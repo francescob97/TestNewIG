@@ -462,6 +462,31 @@ L'unico caso in cui serve aiutarla: i file **ESRI ASCII** (`.asc`) di TINITALY
 non contengono il sistema di riferimento. Lo si dichiara con
 `--source-crs EPSG:32632`.
 
+### Senza installare niente: `geoworld`
+
+La pipeline usa GDAL e PROJ, due librerie C/C++ enormi (leggono centinaia di
+formati, conoscono ogni sistema di riferimento). Python le usa, ma non le
+porta con sé: su Windows `pip install gdal` non funziona, e la via classica è
+un ambiente conda.
+
+`Pipeline/geoworld.bat` fa quel lavoro da solo: la prima volta scarica
+**micromamba** (un gestore di pacchetti conda in un solo eseguibile) e prepara
+in `Pipeline/ambiente/` un ambiente con le versioni scritte in
+`environment.yml`; poi lancia `run.py` dentro quell'ambiente. Ogni
+`python run.py ...` della documentazione si scrive `geoworld ...`.
+
+> ⚠️ **Trappola.** "L'ultima versione" di una libreria cambia da sola. Le
+> versioni in `environment.yml` sono fissate (quelle dei test): l'ambiente di
+> oggi e quello di fra sei mesi sono lo stesso. Quando le cambia un
+> aggiornamento del progetto, `geoworld` se ne accorge (confronta il file con
+> la copia salvata nell'ambiente) e rifà l'ambiente.
+
+**Alternativa considerata: riscrivere la pipeline in C++.** Non toglierebbe il
+problema: GDAL e PROJ servirebbero lo stesso, e compilarli per Windows (con
+vcpkg, una quarantina di dipendenze, un'ora di compilazione) è più scomodo che
+installarli già compilati. In più, diecimila righe e 188 test da riscrivere.
+Il problema era l'installazione, ed è quella che si è sistemata.
+
 ### La diagnosi dell'ambiente
 
 ```bat

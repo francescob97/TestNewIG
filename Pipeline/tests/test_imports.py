@@ -148,6 +148,22 @@ class TestCliRunsWithoutOptionalLibraries(unittest.TestCase):
                       "mancando Pillow le istruzioni devono dirlo anche quando "
                       "GDAL e pyproj ci sono")
 
+    def test_instructions_point_to_geoworld_when_gdal_is_missing(self):
+        """Senza GDAL la prima cosa da dire e' la via che non chiede di installare niente."""
+        from geoworld import environment
+
+        report = environment.Report(
+            python=environment._python_info(),
+            gdal={"available": False, "error": "finto"},
+            pyproj={"available": False, "error": "finto"},
+            imaging={"numpy": "1.26.0", "pillow": "10.0.0"},
+            grids={}, vertical={})
+
+        text = environment._install_instructions(report)
+        self.assertIn("geoworld", text)
+        self.assertLess(text.index("geoworld"), text.index("conda"),
+                        "geoworld va proposto prima di conda")
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)

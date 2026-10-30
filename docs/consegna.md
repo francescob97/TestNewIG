@@ -47,7 +47,7 @@ gia' incontrati e corretti, per riconoscerli se tornano:
 | `cannot open source file "Unreal/..."` | tre moduli avevano tutti una cartella `Public/Unreal`. Ora si chiamano `Georeference`, `Streaming`, `Lod`. Se compare su file nuovi: **rigenera i project file di Visual Studio** |
 | errore su un parametro chiamato come un membro | Unreal tratta lo shadowing come ERRORE. Convenzione: prefisso `In` (`bInEnabled`). Lo intercetta `Tools/CheckShadowedParameters.py` |
 | errori di `std::max`, `std::numeric_limits` | include della standard library che gcc tira dentro da solo e MSVC no |
-| `ModuleNotFoundError: No module named 'PIL'` lanciando un comando Python | manca Pillow, che serve solo alle ortofoto: `conda install -c conda-forge pillow`. `check-env` lo dice, e ora **parte anche senza** |
+| `ModuleNotFoundError: No module named 'PIL'` lanciando un comando Python | manca Pillow, che serve solo alle ortofoto. Con `geoworld` non succede (c'e' in `environment.yml`); con un ambiente conda fatto a mano: `conda install -c conda-forge pillow` |
 | `C2084: function 'X' already has a body` su una funzione in un namespace anonimo | **build unity**: Unreal incolla piu' .cpp dello stesso modulo in una sola unita' di traduzione, e due namespace anonimi diventano lo stesso namespace. Non rinominare: metti la funzione in un header condiviso. Lo intercetta `Tools/CheckUnityCollisions.py` |
 | `C2039: 'X' is not a member of Y` su una classe nostra | nome di metodo sbagliato. Lo intercetta `Tools/CheckOwnApiCalls.py`, che suggerisce anche il nome giusto |
 | `missing type specifier` su una riga `static FAutoConsoleCommand...` | il tipo non esiste. **`FAutoConsoleCommandWithArgs` NON esiste**: i validi sono `FAutoConsoleCommand` (che accetta anche un delegato con argomenti), `...WithWorld`, `...WithWorldAndArgs`, `...WithOutputDevice`, `...WithArgsAndOutputDevice`, `...WithWorldArgsAndOutputDevice`. Lo intercetta la regola 5 di `CheckSourceDiscipline.sh` |
@@ -66,25 +66,30 @@ lo fai, e segnala include inesistenti che il compilatore invece risolve.
 
 ## 2. Comandi, in ordine di utilita'
 
-### Pipeline dati (Windows, ambiente conda `geoworld`)
+### Pipeline dati (Windows: `geoworld.bat`, niente da installare)
+
+La prima volta `geoworld` scarica micromamba e prepara in `Pipeline\ambiente\`
+un Python con GDAL e PROJ (~1 GB, 5-15 minuti); poi parte subito. Si puo'
+anche fare doppio clic su `geoworld.bat`: prepara e lancia `check-env`.
+In PowerShell si scrive `.\geoworld`.
 
 ```bat
 cd Pipeline
-python run.py check-env                              :: SEMPRE per primo
-python run.py fetch --area test -o dati/copernicus   :: DEM libero, 19 MB
-python run.py build -i "dati/copernicus/*.tif" -o dataset/test
-python run.py verify -o dataset/test
-python -m unittest discover -s tests                 :: 187 test
+geoworld check-env                              :: SEMPRE per primo
+geoworld fetch --area test -o dati/copernicus   :: DEM libero, 19 MB
+geoworld build -i "dati/copernicus/*.tif" -o dataset/test
+geoworld verify -o dataset/test
+geoworld test                                        :: 188 test
 
 :: Fase 8: strade su Torino (dettagli in docs/fase8-verifica.md)
-python run.py fetch-osm --area torino -o dati/osm
-python run.py build-roads -i dati/osm/nord-ovest-latest.osm.pbf -o dataset/strade_torino --bbox 7.55 45.00 7.80 45.15
-python run.py verify-roads -o dataset/strade_torino
+geoworld fetch-osm --area torino -o dati/osm
+geoworld build-roads -i dati/osm/nord-ovest-latest.osm.pbf -o dataset/strade_torino --bbox 7.55 45.00 7.80 45.15
+geoworld verify-roads -o dataset/strade_torino
 
 :: Fase 9: acqua (dettagli in docs/fase9-verifica.md)
-python run.py fetch-water -o dati/acqua
-python run.py build-water --osm dati/osm/nord-ovest-latest.osm.pbf --sea dati/acqua/water-polygons-split-4326.zip --terrain dataset/terreno -o dataset/acqua_torino --bbox 7.55 45.00 7.80 45.15
-python run.py verify-water -o dataset/acqua_torino
+geoworld fetch-water -o dati/acqua
+geoworld build-water --osm dati/osm/nord-ovest-latest.osm.pbf --sea dati/acqua/water-polygons-split-4326.zip --terrain dataset/terreno -o dataset/acqua_torino --bbox 7.55 45.00 7.80 45.15
+geoworld verify-water -o dataset/acqua_torino
 ```
 
 `check-env` e' l'unico comando che sta fra te e un dataset sbagliato di 48

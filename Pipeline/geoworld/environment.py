@@ -358,8 +358,13 @@ def _install_instructions(report: Report) -> str:
     if not report.gdal.get("available") or not report.pyproj.get("available"):
         lines.append("")
         lines.append("  Mancano GDAL e/o pyproj.")
+        lines.append("  La via piu' semplice: lancia la pipeline con geoworld, che prepara")
+        lines.append("  da solo un ambiente con tutto (Pipeline/README.md):")
+        lines.append("")
+        lines.append("      geoworld check-env" if windows else "      ./geoworld.sh check-env")
+        lines.append("")
         if windows:
-            lines.append("  Su Windows la via che funziona senza sorprese e' conda (Miniforge):")
+            lines.append("  Oppure, a mano, conda (Miniforge):")
             lines.append("")
             lines.append("      conda create -n geoworld python=3.11")
             lines.append("      conda activate geoworld")

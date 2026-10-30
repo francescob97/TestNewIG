@@ -155,6 +155,8 @@ il proxy di scena va rifatto. (6)
 
 **Material Parameter Collection** (MPC) — un insieme di parametri globali condiviso da tutti i materiali che lo usano. Le onde stanno in `MPC_GeoWater`: una scrittura per frame per tutto il mondo. (13)
 
+**micromamba** — un gestore di pacchetti conda in un solo eseguibile, senza installazione. `geoworld.bat` lo scarica (versione e impronta SHA-256 fissate) e ci prepara l'ambiente della pipeline in `Pipeline/ambiente/`. (3)
+
 **MGRS** — il sistema di quadrati da 100 km usato per organizzare le scene
 Sentinel-2. (7)
 

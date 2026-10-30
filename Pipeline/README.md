@@ -1,41 +1,74 @@
 # Pipeline dati di GeoWorld
 
-Da GeoTIFF TINITALY 1.1 a piramide di tile di quote, pronta per il runtime.
+Da GeoTIFF TINITALY 1.1 (o DTED, Copernicus, qualunque DEM che GDAL legge) a
+piramide di tile di quote, pronta per il runtime. E poi ortofoto, strade, acqua.
 
-## Installazione su Windows
-
-Su Windows **usa conda** (Miniforge o Miniconda). Non e' preferenza stilistica:
-`pip install gdal` non ha rotelle ufficiali su PyPI per Windows, quindi
-proverebbe a compilare GDAL da sorgente, cosa che richiede il toolchain C++ e le
-librerie di sistema. Con conda arriva tutto compilato e, soprattutto, con le
-variabili `GDAL_DATA` e `PROJ_DATA` gia' impostate correttamente.
-
-```bat
-conda create -n geoworld python=3.11
-conda activate geoworld
-conda install -c conda-forge gdal pyproj numpy pillow proj-data
-```
-
-`proj-data` e' il pacchetto che contiene la griglia geoidica EGM2008. Senza,
-la pipeline si ferma allo stadio 2.
-
-**Prima cosa da lanciare, sempre:**
+## Installazione: nessuna
 
 ```bat
 cd Pipeline
+geoworld
+```
+
+(o doppio clic su `geoworld.bat`; su Linux e macOS `./geoworld.sh`)
+
+La **prima volta** `geoworld`:
+
+1. scarica **micromamba** (un solo eseguibile, ~15 MB, versione fissata e
+   controllata con la sua impronta SHA-256: se il file non e' quello
+   pubblicato, non lo usa);
+2. prepara in `Pipeline/ambiente/` un Python con GDAL, PROJ, le griglie del
+   geoide, numpy e Pillow, presi da `environment.yml` (~1 GB, da 5 a 15
+   minuti secondo la rete);
+3. lancia `check-env`.
+
+Le volte dopo parte subito. Niente Miniforge, niente `conda activate`, niente
+pip, niente PATH di sistema toccato: tutto sta in `Pipeline/ambiente/`.
+
+| Comando | Cosa fa |
+|---|---|
+| `geoworld <comando> ...` | e' `python run.py <comando> ...` con l'ambiente giusto: **ogni comando di questa guida e della documentazione** si scrive cosi' |
+| `geoworld test` | i test della pipeline |
+| `geoworld ambiente rifai` | cancella e ricrea l'ambiente |
+| cancellare `Pipeline/ambiente/` | toglie tutto; il prossimo `geoworld` lo rifa' |
+
+Le versioni in `environment.yml` sono **fissate** (GDAL 3.8.5, PROJ 9.4,
+numpy 1.26: quelle dei test). Se un aggiornamento del progetto le cambia,
+`geoworld` se ne accorge e rifa' l'ambiente da solo.
+
+In **PowerShell** la cartella corrente non e' nel PATH: si scrive
+`.\geoworld ...`. Da un'altra cartella si puo' dare il percorso intero
+(`D:\GeoWorld\Pipeline\geoworld build ...`): i percorsi relativi degli
+argomenti restano relativi alla cartella da cui lanci.
+
+### Se qualcosa non va
+
+| Sintomo | Causa | Cosa fare |
+|---|---|---|
+| "non riesco a scaricare micromamba" o errori di rete durante la preparazione | niente internet, o un proxy aziendale | imposta `HTTPS_PROXY` (es. `set HTTPS_PROXY=http://proxy:8080`) e rilancia |
+| la preparazione si interrompe a meta' | rete instabile | rilancia `geoworld`: riprende dai pacchetti gia' scaricati |
+| errori su percorsi troppo lunghi | Windows limita i percorsi a 260 caratteri | sposta il repository in un percorso corto (`D:\GeoWorld`) |
+| il disco si riempie, o OneDrive sincronizza per ore | l'ambiente pesa ~1 GB, e i dataset molto di piu' | tieni il repository fuori da OneDrive, o almeno `Pipeline\ambiente` e i dataset |
+| tutto lentissimo | l'antivirus scansiona ogni file scritto | escludi `Pipeline\ambiente` e la cartella dei dataset |
+
+### Con conda, a mano (se preferisci)
+
+Funziona sempre anche la via classica, con Miniforge e lo stesso file:
+
+```bat
+mamba env create -f environment.yml
+conda activate geoworld
 python run.py check-env
 ```
 
-Stampa versione di GDAL e PROJ, dove PROJ cerca i suoi dati, quali griglie
-geoidiche trova e — soprattutto — se la trasformazione verticale **funziona
-davvero**, provandola su punti italiani noti. Se qualcosa manca, dice cosa
-installare. Su Windows capita spesso di avere piu' installazioni di PROJ
-contemporaneamente (conda, OSGeo4W, quella dentro pyproj): `check-env` dice
-quale sta vincendo.
+`pip install gdal` invece **non** funziona su Windows: GDAL non ha rotelle
+ufficiali su PyPI, e pip proverebbe a compilarlo.
 
-Note specifiche Windows:
+Su Debian/Ubuntu c'e' anche la via del sistema:
+`apt install gdal-bin python3-gdal python3-pyproj python3-numpy python3-pil proj-data`.
 
-* si lancia `python run.py ...`, non `./run.py`;
+Note per Windows, in ogni caso:
+
 * virgolette attorno ai pattern: `-i "tinitaly/*.tif"`;
 * `--jobs` avvia processi separati, e su Windows ognuno reimporta GDAL: con
   poche tile conviene `--jobs 1`, il parallelismo ripaga sui livelli fini;
@@ -43,18 +76,10 @@ Note specifiche Windows:
   centinaia di migliaia di file piccoli. Vale la pena escludere la cartella di
   output.
 
-## Installazione su Linux / macOS
-
-```bash
-conda install -c conda-forge gdal pyproj numpy pillow proj-data
-# oppure, su Debian/Ubuntu:
-apt install gdal-bin python3-gdal python3-pyproj python3-numpy proj-data
-```
-
 ## Non hai ancora i dati?
 
 ```bat
-python run.py fetch --area test -o dati/copernicus
+geoworld fetch --area test -o dati/copernicus
 ```
 
 Scarica il Copernicus DEM GLO-30 (30 m, globale, libero, nessuna credenziale)
@@ -67,17 +92,17 @@ TINITALY (10 m, solo Italia) si scarica a mano dal sito INGV: vedi `docs/dati.md
 ## Uso
 
 ```bat
-python run.py check-env                              :: sempre per primo
-python run.py fetch --area test -o dati/copernicus   :: se non hai dati
-python run.py build -i "dati/copernicus/*.tif" -o dataset/test
-python run.py verify -o dataset/test                 :: controlla il risultato
+geoworld check-env                              :: sempre per primo
+geoworld fetch --area test -o dati/copernicus   :: se non hai dati
+geoworld build -i "dati/copernicus/*.tif" -o dataset/test
+geoworld verify -o dataset/test                 :: controlla il risultato
 ```
 
 Il livello massimo viene scelto da solo in base alla risoluzione del sorgente
 (per TINITALY a 10 m: livello 14, passo ~9.5 m). Per una prova rapida:
 
 ```bash
-python run.py build -i "tinitaly/*.tif" -o /dati/prova --max-level 11
+geoworld build -i "tinitaly/*.tif" -o /dati/prova --max-level 11
 ```
 
 Rilanciare lo stesso comando riprende da dove si era interrotto: ogni stadio
@@ -99,21 +124,21 @@ concluso viene saltato, e le tile gia' scritte non si riscrivono.
 ### Altri comandi
 
 ```bat
-python run.py check-env               :: diagnosi completa dell'ambiente
-python run.py check-geoid             :: solo la griglia geoidica
-python run.py fetch --area italia --dry-run -o dati    :: cosa scaricherei
-python run.py verify -o dataset/italia                 :: controlla un dataset
-python run.py inspect dataset/14/17525/4389.ght
-python run.py test-vectors -o vettori.json   :: riferimento per il C++
+geoworld check-env               :: diagnosi completa dell'ambiente
+geoworld check-geoid             :: solo la griglia geoidica
+geoworld fetch --area italia --dry-run -o dati    :: cosa scaricherei
+geoworld verify -o dataset/italia                 :: controlla un dataset
+geoworld inspect dataset/14/17525/4389.ght
+geoworld test-vectors -o vettori.json   :: riferimento per il C++
 ```
 
 ### Strade, ferrovie, piste (Fase 8)
 
 ```bat
-python run.py fetch-osm --area torino -o dati/osm           :: estratto OSM da Geofabrik
-python run.py build-roads -i dati/osm/nord-ovest-latest.osm.pbf -o dataset/strade_torino --bbox 7.55 45.00 7.80 45.15
-python run.py verify-roads -o dataset/strade_torino
-python run.py inspect-roads dataset/strade_torino/13/8538/2044.gvt
+geoworld fetch-osm --area torino -o dati/osm           :: estratto OSM da Geofabrik
+geoworld build-roads -i dati/osm/nord-ovest-latest.osm.pbf -o dataset/strade_torino --bbox 7.55 45.00 7.80 45.15
+geoworld verify-roads -o dataset/strade_torino
+geoworld inspect-roads dataset/strade_torino/13/8538/2044.gvt
 ```
 
 Tre stadi (estrai, taglia, indici), riavviabili; il taglio va in parallelo
@@ -139,7 +164,7 @@ per riprendere un'elaborazione interrotta.
 Dalla cartella `Pipeline/`:
 
 ```bash
-python -m unittest discover -s tests -v
+geoworld test
 ```
 
 I test di `test_resolution.py` verificano che la risoluzione del sorgente sia

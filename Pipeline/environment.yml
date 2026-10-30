@@ -1,0 +1,30 @@
+# =============================================================================
+#  environment.yml -- Tutto quello che serve alla pipeline, in un file.
+#
+#  Lo usa geoworld.bat (Windows) / geoworld.sh (Linux, macOS): la prima volta
+#  scaricano micromamba e preparano con questo file un ambiente PRIVATO in
+#  Pipeline/ambiente/. Non serve installare niente a mano.
+#
+#  Le versioni sono FISSATE: sono quelle con cui girano i test della pipeline
+#  (GDAL 3.8, numpy 1.26). Con "l'ultima versione" un aggiornamento di
+#  conda-forge potrebbe cambiare il comportamento da un giorno all'altro.
+#  Se cambi questo file, al lancio successivo geoworld rifa' l'ambiente da solo.
+#
+#  Chi preferisce conda/mamba a mano:
+#      mamba env create -f environment.yml && conda activate geoworld
+# =============================================================================
+name: geoworld
+channels:
+  - conda-forge
+dependencies:
+  - python=3.11
+  # GDAL con TUTTI i driver: DTED (.dt2), OSM (.osm.pbf), JPEG2000, ESRI ASCII...
+  - gdal=3.8.5
+  - libgdal=3.8.5
+  - proj=9.4
+  - pyproj=3.6.1
+  # Le griglie del geoide (EGM2008, EGM96): senza, lo stadio 2 si ferma.
+  - proj-data
+  - numpy=1.26
+  # Solo per le ortofoto: il payload JPEG delle tile .gim.
+  - pillow=10.4
