@@ -119,8 +119,12 @@ indici, header e giunzioni leggendoli davvero.
 
 ### Console di Unreal
 
+**L'elenco completo, con la spiegazione di ognuno: `docs/comandi-unreal.md`** (96 comandi,
+generato dal codice). Dentro Unreal: `geo.Help` (i gruppi) e `geo.Help Weather`
+(un gruppo). Qui sotto i piu' usati.
+
 ```
-geo.Help                       elenco dei comandi di Fase 1
+geo.Help [gruppo]              i comandi (tutti: docs/comandi-unreal.md)
 geo.Diag                       diagnosi del jitter (vedi issue #1)
 geo.Debug 1                    overlay
 geo.SpawnMarkers               cubi di verifica sull'Italia
@@ -378,11 +382,12 @@ Plugins/GeoWorld/Source/
   GeoWorldEditor/ i materiali costruiti da codice (geo.Imagery.CreateMaterial)
 
   Tools/StandaloneTests/   test C++ senza Unreal (CMake)
-  Tools/CheckSourceDiscipline.sh     5 regole di disciplina
+  Tools/CheckSourceDiscipline.sh     7 regole di disciplina
   Tools/CheckShadowedParameters.py   parametri che nascondono membri
   Tools/CheckModuleExports.py        simboli invisibili fra moduli (DLL)
   Tools/CheckUnityCollisions.py      nomi che la build unity farebbe scontrare
   Tools/CheckOwnApiCalls.py          metodi inesistenti sulle nostre classi
+  Tools/ListConsoleCommands.py       docs/comandi-unreal.md dai comandi nel codice
 
 Pipeline/         pipeline dati Python + GDAL                   [Fase 2]
   geoworld/       tiling, tileformat, geoid, raster, tilecut, fetch, cli
@@ -547,6 +552,7 @@ Limitazioni note, lasciate aperte di proposito:
 | Design e verifica Fase 9 (acqua, mare aperto, stampe della posizione) | `docs/fase9-design.md`, `docs/fase9-verifica.md` |
 | Design e verifica del vento | `docs/vento-design.md`, `docs/vento-verifica.md` |
 | Design e verifica di pioggia, neve, grandine | `docs/meteo-design.md`, `docs/meteo-verifica.md` |
+| Tutti i comandi della console di Unreal | `docs/comandi-unreal.md` (generato dal codice) |
 | Issue aperte | `docs/issues-aperte.md` |
 | Uso della pipeline, installazione Windows | `Pipeline/README.md` |
 

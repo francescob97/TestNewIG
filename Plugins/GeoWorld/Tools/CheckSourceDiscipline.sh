@@ -27,6 +27,11 @@
 #     stretta e le eccezioni restano visibili con un grep, invece di allentare
 #     il controllo fino a renderlo inutile.
 #
+#   REGOLA 5 - I tipi FAutoConsoleCommand* esistono nel motore.
+#   REGOLA 6 - Il formato di Printf e' un letterale TEXT("...").
+#   REGOLA 7 - docs/comandi-unreal.md corrisponde ai comandi nel codice
+#     (ListConsoleCommands.py --check).
+#
 #  Una regola che nessuno controlla decade in tre settimane. Questo script gira
 #  in un decimo di secondo: mettilo in CI.
 #
@@ -155,6 +160,15 @@ if [ -n "$BAD_PRINTF" ]; then
 	FAILURES=$((FAILURES + 1))
 else
 	echo "  ok - ogni Printf ha un formato letterale"
+fi
+
+echo
+echo "== Regola 7: l'elenco dei comandi console e' aggiornato =="
+# docs/comandi-unreal.md si genera dal codice (ListConsoleCommands.py): un
+# comando aggiunto o cambiato senza rifare l'elenco lo lascerebbe indietro,
+# come era successo alla lista scritta a mano di geo.Help (25 comandi su 96).
+if ! python3 "$(dirname "${BASH_SOURCE[0]}")/ListConsoleCommands.py" --check; then
+	FAILURES=$((FAILURES + 1))
 fi
 
 echo

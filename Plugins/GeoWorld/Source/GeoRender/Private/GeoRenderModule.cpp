@@ -1456,7 +1456,7 @@ namespace GeoRoadsConsole
 
 static FAutoConsoleCommandWithWorldAndArgs GeoRoadsOpenCommand(
 	TEXT("geo.Roads.Open"),
-	TEXT("geo.Roads.Open <cartella> - apre un dataset di strade (python run.py build-roads)."),
+	TEXT("geo.Roads.Open <cartella> - apre un dataset di strade (geoworld build-roads)."),
 	FConsoleCommandWithWorldAndArgsDelegate::CreateStatic(
 		[](const TArray<FString>& RawArgs, UWorld* World)
 	{
@@ -1759,7 +1759,7 @@ namespace GeoWaterConsole
 
 static FAutoConsoleCommandWithWorldAndArgs GeoWaterOpenCommand(
 	TEXT("geo.Water.Open"),
-	TEXT("geo.Water.Open <cartella> - apre un dataset d'acqua (python run.py build-water) e rifa' il terreno scavato."),
+	TEXT("geo.Water.Open <cartella> - apre un dataset d'acqua (geoworld build-water) e rifa' il terreno scavato."),
 	FConsoleCommandWithWorldAndArgsDelegate::CreateStatic(
 		[](const TArray<FString>& RawArgs, UWorld* World)
 	{

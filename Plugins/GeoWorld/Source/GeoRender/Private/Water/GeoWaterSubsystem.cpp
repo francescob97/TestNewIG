@@ -645,7 +645,7 @@ void UGeoWaterSubsystem::DrawDebugOverlay()
 	Line(FColor::Cyan, TEXT("--- GeoWorld | Fase 9: acqua ---"));
 	if (!Streaming || !Streaming->IsDatasetOpen())
 	{
-		Line(FColor::Yellow, TEXT("Nessun dataset d'acqua: geo.Water.Open <cartella> (python run.py build-water)"));
+		Line(FColor::Yellow, TEXT("Nessun dataset d'acqua: geo.Water.Open <cartella> (geoworld build-water)"));
 	}
 	else
 	{

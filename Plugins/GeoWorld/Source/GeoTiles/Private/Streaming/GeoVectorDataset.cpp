@@ -43,7 +43,7 @@ bool FGeoVectorDataset::Open(const FString& InRootDirectory, FString& OutError)
 	{
 		OutError = FString::Printf(
 			TEXT("%s non dichiara un dataset di strade (datasetKind = '%s'). ")
-			TEXT("Hai puntato alle quote o alle ortofoto? Le strade si fanno con: python run.py build-roads"),
+			TEXT("Hai puntato alle quote o alle ortofoto? Le strade si fanno con: geoworld build-roads"),
 			*ManifestPath, *Kind);
 		return false;
 	}

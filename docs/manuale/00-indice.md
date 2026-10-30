@@ -53,6 +53,9 @@ Due convenzioni tipografiche:
 | 14 | `14-vento.md` | Il vento: da un numero a un campo (strato limite, rilievi, raffiche) |
 | 15 | `15-meteo.md` | Il meteo: pioggia, neve, grandine (quota neve, visibilità, suolo, particelle) |
 
+Tutti i comandi della console di Unreal, con la spiegazione di ognuno, sono in
+`docs/comandi-unreal.md` (generato dal codice; in Unreal: `geo.Help`).
+
 La Fase 7 (entità, CIGI, DIS, HLA) è solo progettata: la trovi in
 `docs/fase7-design.md`. Il programma dalla Fase 8 alla 12 (strade, acqua,
 edifici, vegetazione, atmosfera) è nella sezione 0 di `docs/fase8-design.md`.

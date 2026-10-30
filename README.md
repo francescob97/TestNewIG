@@ -146,6 +146,7 @@ geoworld test                                      :: 192 test, sorgente sinteti
 ```
 
 Installazione, opzioni e conda a mano (se lo preferisci): `Pipeline/README.md`.
+**Tutti i comandi della console di Unreal: `docs/comandi-unreal.md`** (in Unreal: `geo.Help`).
 Da dove vengono i dati (DEM e ortofoto): `docs/dati.md`.
 Quadro d'insieme delle sei fasi: `docs/programma.md`.
 **Per riprendere il lavoro: `docs/consegna.md`.**

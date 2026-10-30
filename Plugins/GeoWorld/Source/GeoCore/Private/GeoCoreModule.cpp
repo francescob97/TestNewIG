@@ -79,32 +79,107 @@ namespace GeoConsole
 }
 
 // --- geo.Help ---------------------------------------------------------------
+//  L'elenco viene dal motore (IConsoleManager), non da una lista scritta a
+//  mano: un comando nuovo c'e' subito. La lista a mano era rimasta a 25
+//  comandi su 96. Lo stesso elenco, con le spiegazioni, e' in
+//  docs/comandi-unreal.md (generato da Tools/ListConsoleCommands.py).
+namespace GeoConsole
+{
+	struct FCommandEntry
+	{
+		FString Name;
+		FString Help;
+		FString Group;
+	};
+
+	/** I comandi geo.*, ognuno con il suo gruppo: geo.Weather.Wind -> Weather, geo.Fly -> Fly, geo.Where -> Generale. */
+	static TArray<FCommandEntry> CollectCommands()
+	{
+		TArray<FCommandEntry> Entries;
+		IConsoleManager::Get().ForEachConsoleObjectThatStartsWith(
+			FConsoleObjectVisitor::CreateLambda([&Entries](const TCHAR* Name, IConsoleObject* Object)
+			{
+				if (Object && Object->AsCommand())
+				{
+					FCommandEntry Entry;
+					Entry.Name = Name;
+					Entry.Help = Object->GetHelp();
+					Entries.Add(MoveTemp(Entry));
+				}
+			}),
+			TEXT("geo."));
+
+		// I gruppi: il secondo pezzo del nome, se ha figli (geo.Fly ha geo.Fly.Speed).
+		TSet<FString> Parents;
+		for (const FCommandEntry& Entry : Entries)
+		{
+			TArray<FString> Parts;
+			Entry.Name.ParseIntoArray(Parts, TEXT("."));
+			if (Parts.Num() >= 3) { Parents.Add(Parts[1]); }
+		}
+		for (FCommandEntry& Entry : Entries)
+		{
+			TArray<FString> Parts;
+			Entry.Name.ParseIntoArray(Parts, TEXT("."));
+			const bool bGrouped = Parts.Num() >= 3 || (Parts.Num() == 2 && Parents.Contains(Parts[1]));
+			Entry.Group = bGrouped ? Parts[1] : FString(TEXT("Generale"));
+		}
+		Entries.Sort([](const FCommandEntry& A, const FCommandEntry& B) { return A.Name < B.Name; });
+		return Entries;
+	}
+
+	/** "geo.X <arg> - cosa fa": l'aiuto comincia gia' con l'uso; altrimenti si mette il nome davanti. */
+	static FString DescribeCommand(const FCommandEntry& Entry)
+	{
+		return Entry.Help.StartsWith(Entry.Name) ? Entry.Help : FString::Printf(TEXT("%s - %s"), *Entry.Name, *Entry.Help);
+	}
+}
+
 static FAutoConsoleCommand GeoHelpCommand(
 	TEXT("geo.Help"),
-	TEXT("Elenca i comandi di GeoWorld."),
-	FConsoleCommandDelegate::CreateStatic([]()
+	TEXT("geo.Help [gruppo o parola] - i comandi di GeoWorld: senza argomenti i gruppi (e tutti i comandi nell'Output Log), con un gruppo (Weather) o una parola (Open) quelli che corrispondono."),
+	FConsoleCommandWithArgsDelegate::CreateStatic([](const TArray<FString>& Args)
 	{
-		GeoConsole::Report(TEXT("geo.Where                    - posizione geografica della camera"));
-		GeoConsole::Report(TEXT("geo.Origin                   - origine corrente e statistiche di rebase"));
-		GeoConsole::Report(TEXT("geo.Goto <lat> <lon> [quota]  - teletrasporta su coordinate"));
-		GeoConsole::Report(TEXT("geo.Goto <nome> [quota]      - teletrasporta su un luogo noto, quota SUL SUOLO"));
-		GeoConsole::Report(TEXT("geo.Places                   - elenco dei luoghi noti"));
-		GeoConsole::Report(TEXT("geo.Rebase                   - forza un rebase sulla posizione attuale"));
-		GeoConsole::Report(TEXT("geo.AutoRebase <0|1>         - attiva/disattiva il rebasing automatico"));
-		GeoConsole::Report(TEXT("geo.RebaseThreshold <km>     - cambia la soglia di rebasing"));
-		GeoConsole::Report(TEXT("geo.Debug <0|1>              - overlay di debug"));
-		GeoConsole::Report(TEXT("geo.SpawnMarkers             - piazza i cubi di verifica sull'Italia"));
-		GeoConsole::Report(TEXT("--- Muoversi ---"));
-		GeoConsole::Report(TEXT("geo.Fly                      - camera di volo (solo nel Play)"));
-		GeoConsole::Report(TEXT("geo.Fly.Speed <x>            - moltiplicatore della velocita' di volo"));
-		GeoConsole::Report(TEXT("geo.ViewSpeed <1..8> [x]     - velocita' della camera del viewport dell'editor"));
-		GeoConsole::Report(TEXT("--- Residenza (cosa tenere pronto) ---"));
-		GeoConsole::Report(TEXT("geo.Lod.ViewIndependent <0|1> - selezione indipendente da dove si guarda"));
-		GeoConsole::Report(TEXT("geo.Lod.Prefetch <0|1>       - precarico dove la camera sta andando"));
-		GeoConsole::Report(TEXT("geo.Lod.Lookahead <s>        - orizzonte della previsione, in secondi"));
-		GeoConsole::Report(TEXT("geo.Lod.Safety <fattore>     - anello di sicurezza in RAM (0 = spento)"));
-		GeoConsole::Report(TEXT("geo.Terrain.MeshBudget <N>   - mesh da tenere costruite in tutto"));
-		GeoConsole::Report(TEXT("geo.Terrain.Warmup <N>       - mesh per frame dopo un salto (0 = spento)"));
+		const TArray<GeoConsole::FCommandEntry> Entries = GeoConsole::CollectCommands();
+
+		if (Args.Num() >= 1)
+		{
+			const FString& Word = Args[0];
+			int32 Found = 0;
+			for (const GeoConsole::FCommandEntry& Entry : Entries)
+			{
+				if (Entry.Group.Equals(Word, ESearchCase::IgnoreCase) || Entry.Name.Contains(Word))
+				{
+					GeoConsole::Report(GeoConsole::DescribeCommand(Entry), FColor::White);
+					++Found;
+				}
+			}
+			if (Found == 0)
+			{
+				GeoConsole::Report(FString::Printf(TEXT("Nessun comando per '%s'. geo.Help da solo elenca i gruppi."), *Word), FColor::Yellow);
+			}
+			return;
+		}
+
+		// Senza argomenti: tutto nell'Output Log (da copiare), i gruppi a schermo.
+		TMap<FString, int32> Counts;
+		for (const GeoConsole::FCommandEntry& Entry : Entries)
+		{
+			UE_LOG(LogGeoWorld, Log, TEXT("%s"), *GeoConsole::DescribeCommand(Entry));
+			Counts.FindOrAdd(Entry.Group) += 1;
+		}
+		Counts.KeySort([](const FString& A, const FString& B)
+		{
+			if (A == TEXT("Generale")) { return B != TEXT("Generale"); }
+			if (B == TEXT("Generale")) { return false; }
+			return A < B;
+		});
+		GeoConsole::Report(FString::Printf(TEXT("GeoWorld: %d comandi (tutti, con la spiegazione, nell'Output Log e in docs/comandi-unreal.md)."), Entries.Num()));
+		for (const TPair<FString, int32>& Pair : Counts)
+		{
+			GeoConsole::Report(FString::Printf(TEXT("  geo.Help %-10s  %d comandi"), *Pair.Key, Pair.Value), FColor::White);
+		}
+		GeoConsole::Report(TEXT("Per cominciare: geo.Terrain.Demo \"<cartella del dataset>\", geo.Goto <lat> <lon> [quota], geo.Where"));
 	}));
 
 // --- geo.Where --------------------------------------------------------------

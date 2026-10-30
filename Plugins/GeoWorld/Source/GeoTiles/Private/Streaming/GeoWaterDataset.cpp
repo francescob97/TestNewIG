@@ -52,7 +52,7 @@ bool FGeoWaterDataset::Open(const FString& InRootDirectory, FString& OutError)
 	{
 		OutError = FString::Printf(
 			TEXT("%s non dichiara un dataset d'acqua (datasetKind = '%s'). ")
-			TEXT("L'acqua si fa con: python run.py build-water"), *ManifestPath, *Kind);
+			TEXT("L'acqua si fa con: geoworld build-water"), *ManifestPath, *Kind);
 		return false;
 	}
 	Root->TryGetStringField(TEXT("datasetName"), DatasetName);
@@ -178,7 +178,7 @@ FString FGeoWaterDataset::GetStaleReason() const
 	if (!bIsOpen || RulesVersion >= GeoWorld::Tiles::WaterRulesVersion) { return FString(); }
 	return FString::Printf(
 		TEXT("Acqua VECCHIA: '%s' e' fatta con le regole %d, il motore vuole le %d (con le vecchie i fiumi ")
-		TEXT("diventano fosse profonde). Rifalla: python run.py build-water ... -o %s"),
+		TEXT("diventano fosse profonde). Rifalla: geoworld build-water ... -o %s"),
 		*DatasetName, RulesVersion, GeoWorld::Tiles::WaterRulesVersion, *RootDirectory);
 }
 
