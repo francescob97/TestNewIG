@@ -89,7 +89,9 @@
 #include "Materials/MaterialExpressionTextureCoordinate.h"
 #include "Materials/MaterialExpressionTextureObjectParameter.h"
 #include "Materials/MaterialExpressionTextureSampleParameter2D.h"
+#include "Materials/MaterialExpressionTime.h"
 #include "Materials/MaterialExpressionTransform.h"
+#include "Materials/MaterialExpressionTransformPosition.h"
 #include "Materials/MaterialExpressionVectorParameter.h"
 #include "Materials/MaterialExpressionVertexNormalWS.h"
 #include "Materials/MaterialExpressionWorldPosition.h"
@@ -289,6 +291,305 @@ namespace
 		}
 	};
 
+
+	/** Il nome del materiale che si sta costruendo, per i messaggi. */
+	FString MaterialName(const FGraph& G) { return G.Material ? G.Material->GetName() : FString(TEXT("?")); }
+
+	/** Un'uscita precisa di un nodo: il nodo e l'indice dell'uscita. */
+	struct FPin
+	{
+		UMaterialExpression* Node = nullptr;
+		int32 Output = 0;
+	};
+
+	/** Un ingresso di un nodo Custom: il nome che ha nell'HLSL e cosa ci arriva. */
+	struct FNamedPin
+	{
+		const TCHAR* Name = nullptr;
+		FPin Pin;
+	};
+
+	/**
+	 * L'uscita con questi canali (per esempio RGBA = tutti e quattro), o
+	 * INDEX_NONE. Si cerca per MASCHERA e non per nome: i nomi delle uscite
+	 * ("RGBA", "RGB"...) non sono un contratto del motore, le maschere si'.
+	 */
+	int32 FindOutputByChannels(UMaterialExpression* Node, bool bR, bool bG, bool bB, bool bA)
+	{
+		if (!Node) { return INDEX_NONE; }
+		const TArray<FExpressionOutput>& Outputs = Node->GetOutputs();
+		for (int32 Index = 0; Index < Outputs.Num(); ++Index)
+		{
+			const FExpressionOutput& Output = Outputs[Index];
+			if (Output.Mask == 0) { continue; }
+			if ((Output.MaskR != 0) == bR && (Output.MaskG != 0) == bG
+				&& (Output.MaskB != 0) == bB && (Output.MaskA != 0) == bA)
+			{
+				return Index;
+			}
+		}
+		return INDEX_NONE;
+	}
+
+	/**
+	 * Un nodo Custom (HLSL scritto a mano) con gli ingressi dati per nome.
+	 * Gli ingressi si collegano direttamente (FExpressionInput::Connect),
+	 * senza cercarli per nome: cosi' non dipende da come l'editor chiama i
+	 * pin.
+	 */
+	UMaterialExpressionCustom* MakeCustom(FGraph& G, const TCHAR* Description, const TCHAR* Code,
+	                                      ECustomMaterialOutputType OutputType,
+	                                      const TArray<FNamedPin>& Inputs, int32 X, int32 Y)
+	{
+		UMaterialExpressionCustom* Custom = G.Make<UMaterialExpressionCustom>(X, Y);
+		if (!Custom) { return nullptr; }
+		Custom->Description = Description;
+		Custom->Code = Code;
+		Custom->OutputType = OutputType;
+		Custom->Inputs.Reset();
+		for (const FNamedPin& Input : Inputs)
+		{
+			if (!Input.Pin.Node)
+			{
+				G.bOk = false;
+				Report(FString::Printf(TEXT("%s: manca il nodo per l'ingresso %s di %s."), *MaterialName(G), Input.Name, Description),
+					FColor::Red);
+				continue;
+			}
+			FCustomInput& New = Custom->Inputs.AddDefaulted_GetRef();
+			New.InputName = FName(Input.Name);
+			New.Input.Connect(Input.Pin.Output, Input.Pin.Node);
+		}
+		return Custom;
+	}
+
+	/** Collega un'uscita precisa di un nodo a un ingresso del materiale (per nome dell'uscita). */
+	void ConnectPinToProperty(FGraph& G, FPin Pin, EMaterialProperty Property)
+	{
+		if (!Pin.Node || !Pin.Node->GetOutputs().IsValidIndex(Pin.Output)) { G.bOk = false; return; }
+		const FString OutputName = Pin.Node->GetOutputs()[Pin.Output].OutputName.ToString();
+		G.Connect(Pin.Node, *OutputName, Property);
+	}
+
+	/**
+	 * La posizione nel mondo come float3 normale (centimetri), per i nodi
+	 * Custom.
+	 *
+	 * NOTA UE: la posizione nel mondo e' in "Large World Coordinates" (una
+	 * coppia di float, per i mondi grandi). Il nodo Custom non la vuole: a
+	 * seconda della versione del motore la riceverebbe come un tipo LWC, e
+	 * "P.xy" non compilerebbe. TruncateLWC la porta a un float normale. Qui il
+	 * float basta: il rebase tiene il mondo vicino all'origine (entro poche
+	 * decine di km, cioe' millimetri di errore).
+	 *
+	 * Il nodo si cerca PER NOME a runtime invece di includerne l'header: se in
+	 * questa versione non ci fosse, il file compila lo stesso e la posizione va
+	 * al Custom cosi' com'e' (e l'Output Log lo dice).
+	 */
+	FPin TruncatedWorldPosition(FGraph& G, bool bWithoutOffsets, int32 X, int32 Y)
+	{
+		UMaterialExpressionWorldPosition* Position = G.Make<UMaterialExpressionWorldPosition>(X - 250, Y);
+		if (!Position) { return FPin{}; }
+		if (bWithoutOffsets) { Position->WorldPositionShaderOffset = WPT_ExcludeAllShaderOffsets; }
+		if (UClass* TruncateClass = FindObject<UClass>(nullptr, TEXT("/Script/Engine.MaterialExpressionTruncateLWC")))
+		{
+			UMaterialExpression* Truncate = UMaterialEditingLibrary::CreateMaterialExpression(G.Material, TruncateClass, X, Y);
+			if (Truncate && UMaterialEditingLibrary::ConnectMaterialExpressions(Position, TEXT(""), Truncate, TEXT("")))
+			{
+				return FPin{ Truncate, 0 };
+			}
+		}
+		UE_LOG(LogGeoWorld, Warning, TEXT("%s: nodo TruncateLWC non disponibile, la posizione va al Custom com'e'."), *MaterialName(G));
+		return FPin{ Position, 0 };
+	}
+
+	/** Un parametro di una Material Parameter Collection. */
+	FPin CollectionParameter(FGraph& G, UMaterialParameterCollection* Collection, const FString& Name, int32 X, int32 Y)
+	{
+		UMaterialExpressionCollectionParameter* Node = G.Make<UMaterialExpressionCollectionParameter>(X, Y);
+		if (!Node || !Collection) { G.bOk = false; return FPin{}; }
+		Node->Collection = Collection;
+		Node->ParameterName = FName(*Name);
+		Node->ParameterId = Collection->GetParameterId(Node->ParameterName);
+		if (!Node->ParameterId.IsValid())
+		{
+			G.bOk = false;
+			Report(FString::Printf(TEXT("%s: %s non ha il parametro %s."), *MaterialName(G), *Collection->GetName(), *Name), FColor::Red);
+		}
+		return FPin{ Node, 0 };
+	}
+
+	/**
+	 * Crea la collezione, o le AGGIUNGE solo i parametri mancanti: quelli che
+	 * ci sono tengono il loro Id, e i materiali che li usano restano collegati.
+	 */
+	UMaterialParameterCollection* CreateOrUpdateCollection(const TCHAR* PackagePath, const TCHAR* AssetName,
+	                                                       const TArray<TPair<FName, FLinearColor>>& Wanted)
+	{
+		UMaterialParameterCollection* Collection = LoadObject<UMaterialParameterCollection>(nullptr,
+			*FString::Printf(TEXT("%s.%s"), PackagePath, AssetName), nullptr, LOAD_NoWarn | LOAD_Quiet);
+		const bool bIsNew = (Collection == nullptr);
+		UPackage* Package = nullptr;
+		if (bIsNew)
+		{
+			Package = CreatePackage(PackagePath);
+			if (!Package) { Report(FString::Printf(TEXT("%s: non riesco a creare il package."), AssetName), FColor::Red); return nullptr; }
+			Collection = NewObject<UMaterialParameterCollection>(Package, AssetName, RF_Public | RF_Standalone);
+			if (!Collection) { Report(FString::Printf(TEXT("%s: non riesco a crearla."), AssetName), FColor::Red); return nullptr; }
+		}
+		else
+		{
+			Package = Collection->GetOutermost();
+		}
+
+		int32 Added = 0;
+		for (const TPair<FName, FLinearColor>& Parameter : Wanted)
+		{
+			const bool bPresent = Collection->VectorParameters.ContainsByPredicate(
+				[&Parameter](const FCollectionVectorParameter& Existing) { return Existing.ParameterName == Parameter.Key; });
+			if (bPresent) { continue; }
+			// Il costruttore di FCollectionVectorParameter crea gia' un Id nuovo.
+			FCollectionVectorParameter& New = Collection->VectorParameters.AddDefaulted_GetRef();
+			New.ParameterName = Parameter.Key;
+			New.DefaultValue = Parameter.Value;
+			++Added;
+		}
+
+		if (bIsNew || Added > 0)
+		{
+			Collection->PostEditChange();
+			if (!SaveAssetPackage(Package, Collection, bIsNew, PackagePath))
+			{
+				Report(FString::Printf(TEXT("%s costruita ma NON salvata: salvala tu dal Content Browser."), AssetName), FColor::Yellow);
+			}
+		}
+		if (bIsNew) { Report(FString::Printf(TEXT("%s creata in /GeoWorld/Materials."), AssetName)); }
+		else if (Added > 0) { Report(FString::Printf(TEXT("%s: aggiunti %d parametri."), AssetName, Added)); }
+		return Collection;
+	}
+
+	// -------------------------------------------------------------------------
+	//  IL METEO SUL SUOLO: bagnato e innevato (docs/meteo-design.md)
+	// -------------------------------------------------------------------------
+
+	const TCHAR* WeatherCollectionPackagePath = TEXT("/GeoWorld/Materials/MPC_GeoWeather");
+	const TCHAR* WeatherCollectionAssetName = TEXT("MPC_GeoWeather");
+
+	/**
+	 * La collezione del meteo. La scrive UGeoWeatherSubsystem una volta per
+	 * frame; la leggono il terreno e le strade (suolo bagnato, neve) e le
+	 * particelle della precipitazione.
+	 *
+	 *   GroundWeather = (bagnato 0..1, quota della neve m s.l.m., transizione m, neve 0..1)
+	 *   GroundFrame   = (geoide all'origine m, raggio terrestre m, 0, 0)
+	 *   PrecipRain/Snow/Hail       = (fase nord, est, su in m, densita' 0..1)
+	 *   PrecipRainVel/SnowVel/HailVel = (velocita' nord, est, su in m/s, dimensione m)
+	 *   PrecipBox     = (scatola nord, est, su in m, luminosita')
+	 *   PrecipMix     = (frazione pioggia, neve, grandine, 0)
+	 *
+	 * I valori di riposo non fanno niente: suolo asciutto, neve a 100 km, nessuna particella.
+	 */
+	UMaterialParameterCollection* CreateOrUpdateWeatherCollection()
+	{
+		TArray<TPair<FName, FLinearColor>> Wanted;
+		Wanted.Emplace(FName(TEXT("GroundWeather")), FLinearColor(0.0f, 100000.0f, 150.0f, 0.0f));
+		Wanted.Emplace(FName(TEXT("GroundFrame")), FLinearColor(47.0f, 6371000.0f, 0.0f, 0.0f));
+		for (const TCHAR* Name : { TEXT("PrecipRain"), TEXT("PrecipSnow"), TEXT("PrecipHail") })
+		{
+			Wanted.Emplace(FName(Name), FLinearColor(0.0f, 0.0f, 0.0f, 0.0f));
+		}
+		Wanted.Emplace(FName(TEXT("PrecipRainVel")), FLinearColor(0.0f, 0.0f, -5.0f, 0.2f));
+		Wanted.Emplace(FName(TEXT("PrecipSnowVel")), FLinearColor(0.0f, 0.0f, -1.0f, 0.012f));
+		Wanted.Emplace(FName(TEXT("PrecipHailVel")), FLinearColor(0.0f, 0.0f, -14.0f, 0.008f));
+		Wanted.Emplace(FName(TEXT("PrecipBox")), FLinearColor(50.0f, 50.0f, 30.0f, 1.0f));
+		Wanted.Emplace(FName(TEXT("PrecipMix")), FLinearColor(1.0f, 0.0f, 0.0f, 0.0f));
+		return CreateOrUpdateCollection(WeatherCollectionPackagePath, WeatherCollectionAssetName, Wanted);
+	}
+
+	/**
+	 * Il suolo sotto il meteo: il colore e la ruvidita' di una superficie
+	 * (terreno o strada) diventano bagnati o innevati.
+	 *
+	 * La QUOTA del pixel: il mondo di Unreal ha l'origine sull'ellissoide (il
+	 * rebase la tiene a quota zero), Z verso l'alto. Allontanandosi la Terra
+	 * scende sotto il piano: h = Z + d^2 / 2R (a 30 km, 70 m). Meno il geoide
+	 * all'origine: la quota sul mare, come la quota neve.
+	 */
+	const TCHAR* GroundWeatherCode = TEXT(R"HLSL(
+float3 P = Pos / UuPerMetre;
+float altitude = P.z + dot(P.xy, P.xy) / (2.0 * Frame.y) - Frame.x;
+float transition = max(Ground.z, 1.0);
+// La neve resta sui pendii dolci, scivola via da quelli ripidi.
+float hold = saturate((Normal.z - 0.55) / 0.3);
+float snow = saturate((altitude - Ground.y) / transition + 0.5) * hold * Ground.w;
+// Sulla foto i chiari (prati, campi) si imbiancano prima dei boschi scuri.
+float lum = dot(Colour, float3(0.299, 0.587, 0.114));
+snow = saturate(snow * (0.8 + 0.6 * lum));
+// Bagnato: piu' scuro (l'acqua riempie i pori) e lucido.
+float wet = Ground.x * (1.0 - snow);
+float3 c = Colour * lerp(1.0, 0.55, wet);
+c = lerp(c, float3(0.90, 0.92, 0.95), snow);
+float r = lerp(Rough, min(Rough, 0.18), wet);
+r = lerp(r, 0.6, snow);
+return float4(c, r);
+)HLSL");
+
+	/**
+	 * Mette il meteo fra un colore (e una ruvidita') e le uscite del
+	 * materiale. Senza MPC_GeoWeather collega il colore cosi' com'e': il
+	 * terreno funziona lo stesso, asciutto.
+	 */
+	void ConnectGroundWeather(FGraph& G, FPin Colour, FPin Roughness, float ConstantRoughness, int32 X, int32 Y)
+	{
+		UMaterialParameterCollection* Collection = LoadObject<UMaterialParameterCollection>(nullptr,
+			*FString::Printf(TEXT("%s.%s"), WeatherCollectionPackagePath, WeatherCollectionAssetName), nullptr,
+			LOAD_NoWarn | LOAD_Quiet);
+		if (!Collection)
+		{
+			Report(FString::Printf(TEXT("%s: manca MPC_GeoWeather, niente suolo bagnato ne' neve."), *MaterialName(G)), FColor::Yellow);
+			ConnectPinToProperty(G, Colour, MP_BaseColor);
+			if (Roughness.Node) { ConnectPinToProperty(G, Roughness, MP_Roughness); }
+			return;
+		}
+
+		if (!Roughness.Node)
+		{
+			UMaterialExpressionConstant* Constant = G.Make<UMaterialExpressionConstant>(X - 300, Y + 150);
+			if (Constant) { Constant->R = ConstantRoughness; }
+			Roughness = FPin{ Constant, 0 };
+		}
+		UMaterialExpressionConstant* UuPerMetre = G.Make<UMaterialExpressionConstant>(X - 300, Y + 300);
+		UMaterialExpressionVertexNormalWS* Normal = G.Make<UMaterialExpressionVertexNormalWS>(X - 300, Y + 400);
+		if (!G.bOk) { return; }
+		UuPerMetre->R = static_cast<float>(GeoWorld::Units::MetersToUu);
+
+		TArray<FNamedPin> Inputs;
+		Inputs.Add(FNamedPin{ TEXT("Colour"), Colour });
+		Inputs.Add(FNamedPin{ TEXT("Rough"), Roughness });
+		Inputs.Add(FNamedPin{ TEXT("Normal"), FPin{ Normal, 0 } });
+		Inputs.Add(FNamedPin{ TEXT("Pos"), TruncatedWorldPosition(G, false, X - 300, Y + 500) });
+		Inputs.Add(FNamedPin{ TEXT("Ground"), CollectionParameter(G, Collection, TEXT("GroundWeather"), X - 300, Y + 650) });
+		Inputs.Add(FNamedPin{ TEXT("Frame"), CollectionParameter(G, Collection, TEXT("GroundFrame"), X - 300, Y + 750) });
+		Inputs.Add(FNamedPin{ TEXT("UuPerMetre"), FPin{ UuPerMetre, 0 } });
+		UMaterialExpressionCustom* Weather = MakeCustom(G, TEXT("Meteo sul suolo: bagnato e neve"), GroundWeatherCode,
+			CMOT_Float4, Inputs, X, Y);
+		UMaterialExpressionComponentMask* ColourMask = G.Make<UMaterialExpressionComponentMask>(X + 300, Y);
+		UMaterialExpressionComponentMask* RoughMask = G.Make<UMaterialExpressionComponentMask>(X + 300, Y + 150);
+		if (!G.bOk) { return; }
+		ColourMask->R = true;
+		ColourMask->G = true;
+		ColourMask->B = true;
+		ColourMask->A = false;
+		RoughMask->R = false;
+		RoughMask->G = false;
+		RoughMask->B = false;
+		RoughMask->A = true;
+		G.Connect(Weather, TEXT(""), ColourMask, TEXT(""));
+		G.Connect(Weather, TEXT(""), RoughMask, TEXT(""));
+		G.Connect(ColourMask, TEXT(""), MP_BaseColor);
+		G.Connect(RoughMask, TEXT(""), MP_Roughness);
+	}
+
 	/**
 	 * Costruisce il grafo di M_GeoTerrain. Ritorna false se un nodo non si crea.
 	 *
@@ -331,7 +632,9 @@ namespace
 		G.Connect(Current, TEXT(""), Colour, TEXT("A"));
 		G.Connect(Previous, TEXT(""), Colour, TEXT("B"));
 		G.Connect(Fade, TEXT(""), Colour, TEXT("Alpha"));
-		G.Connect(Colour, TEXT(""), MP_BaseColor);
+		// Il meteo: il colore passa dal suolo bagnato o innevato (MPC_GeoWeather).
+		// Asciutto, la ruvidita' resta 0,5 come prima (quella di default).
+		ConnectGroundWeather(G, FPin{ Colour, 0 }, FPin{}, 0.5f, 400, 300);
 
 		// 2. La forma del padre.
 		UMaterialExpressionScalarParameter* Morph = G.PrimitiveData(TEXT("Morph"), 0, -1200, 1900);
@@ -412,8 +715,11 @@ namespace
 		Atlas->SamplerType = SAMPLERTYPE_Color;
 
 		G.Connect(Coordinates, TEXT(""), Atlas, TEXT("UVs"));
-		G.Connect(Atlas, TEXT("RGB"), MP_BaseColor);
-		G.Connect(Atlas, TEXT("A"), MP_Roughness);
+		// Il meteo: l'asfalto bagnato si scurisce e luccica, la neve lo copre.
+		const int32 AtlasRgb = FindOutputByChannels(Atlas, true, true, true, false);
+		const int32 AtlasAlpha = FindOutputByChannels(Atlas, false, false, false, true);
+		if (AtlasRgb == INDEX_NONE || AtlasAlpha == INDEX_NONE) { return false; }
+		ConnectGroundWeather(G, FPin{ Atlas, AtlasRgb }, FPin{ Atlas, AtlasAlpha }, 0.5f, 100, 0);
 		G.Connect(G.MorphOffset(Morph, 0, 500), TEXT(""), MP_WorldPositionOffset);
 
 		if (!G.bOk) { return false; }
@@ -511,23 +817,6 @@ namespace
 	 */
 	UMaterialParameterCollection* CreateOrUpdateWaveCollection()
 	{
-		UMaterialParameterCollection* Collection = LoadObject<UMaterialParameterCollection>(nullptr,
-			*FString::Printf(TEXT("%s.%s"), WaveCollectionPackagePath, WaveCollectionAssetName), nullptr,
-			LOAD_NoWarn | LOAD_Quiet);
-		const bool bIsNew = (Collection == nullptr);
-		UPackage* Package = nullptr;
-		if (bIsNew)
-		{
-			Package = CreatePackage(WaveCollectionPackagePath);
-			if (!Package) { Report(TEXT("MPC_GeoWater: non riesco a creare il package."), FColor::Red); return nullptr; }
-			Collection = NewObject<UMaterialParameterCollection>(Package, WaveCollectionAssetName, RF_Public | RF_Standalone);
-			if (!Collection) { Report(TEXT("MPC_GeoWater: non riesco a crearla."), FColor::Red); return nullptr; }
-		}
-		else
-		{
-			Package = Collection->GetOutermost();
-		}
-
 		TArray<TPair<FName, FLinearColor>> Wanted;
 		for (int32 Index = 0; Index < WaterWaveCount; ++Index)
 		{
@@ -539,31 +828,7 @@ namespace
 		Wanted.Emplace(FName(TEXT("WaterWind")), FLinearColor(1.0f, 0.0f, 5.0f, 0.0f));
 		Wanted.Emplace(FName(TEXT("WaterDetail")), FLinearColor(0.0f, 0.0f, 0.0f, 0.0f));
 		Wanted.Emplace(FName(TEXT("WaterFlow")), FLinearColor(0.0f, 0.5f, 4.0f, 0.0f));
-
-		int32 Added = 0;
-		for (const TPair<FName, FLinearColor>& Parameter : Wanted)
-		{
-			const bool bPresent = Collection->VectorParameters.ContainsByPredicate(
-				[&Parameter](const FCollectionVectorParameter& Existing) { return Existing.ParameterName == Parameter.Key; });
-			if (bPresent) { continue; }
-			// Il costruttore di FCollectionVectorParameter crea gia' un Id nuovo.
-			FCollectionVectorParameter& New = Collection->VectorParameters.AddDefaulted_GetRef();
-			New.ParameterName = Parameter.Key;
-			New.DefaultValue = Parameter.Value;
-			++Added;
-		}
-
-		if (bIsNew || Added > 0)
-		{
-			Collection->PostEditChange();
-			if (!SaveAssetPackage(Package, Collection, bIsNew, WaveCollectionPackagePath))
-			{
-				Report(TEXT("MPC_GeoWater costruita ma NON salvata: salvala tu dal Content Browser."), FColor::Yellow);
-			}
-		}
-		if (bIsNew) { Report(TEXT("MPC_GeoWater creata in /GeoWorld/Materials.")); }
-		else if (Added > 0) { Report(FString::Printf(TEXT("MPC_GeoWater: aggiunti %d parametri."), Added)); }
-		return Collection;
+		return CreateOrUpdateCollection(WaveCollectionPackagePath, WaveCollectionAssetName, Wanted);
 	}
 
 	/**
@@ -617,73 +882,6 @@ namespace
 		return Texture;
 	}
 
-	/** Un'uscita precisa di un nodo: il nodo e l'indice dell'uscita. */
-	struct FPin
-	{
-		UMaterialExpression* Node = nullptr;
-		int32 Output = 0;
-	};
-
-	/** Un ingresso di un nodo Custom: il nome che ha nell'HLSL e cosa ci arriva. */
-	struct FNamedPin
-	{
-		const TCHAR* Name = nullptr;
-		FPin Pin;
-	};
-
-	/**
-	 * L'uscita con questi canali (per esempio RGBA = tutti e quattro), o
-	 * INDEX_NONE. Si cerca per MASCHERA e non per nome: i nomi delle uscite
-	 * ("RGBA", "RGB"...) non sono un contratto del motore, le maschere si'.
-	 */
-	int32 FindOutputByChannels(UMaterialExpression* Node, bool bR, bool bG, bool bB, bool bA)
-	{
-		if (!Node) { return INDEX_NONE; }
-		const TArray<FExpressionOutput>& Outputs = Node->GetOutputs();
-		for (int32 Index = 0; Index < Outputs.Num(); ++Index)
-		{
-			const FExpressionOutput& Output = Outputs[Index];
-			if (Output.Mask == 0) { continue; }
-			if ((Output.MaskR != 0) == bR && (Output.MaskG != 0) == bG
-				&& (Output.MaskB != 0) == bB && (Output.MaskA != 0) == bA)
-			{
-				return Index;
-			}
-		}
-		return INDEX_NONE;
-	}
-
-	/**
-	 * Un nodo Custom (HLSL scritto a mano) con gli ingressi dati per nome.
-	 * Gli ingressi si collegano direttamente (FExpressionInput::Connect),
-	 * senza cercarli per nome: cosi' non dipende da come l'editor chiama i
-	 * pin.
-	 */
-	UMaterialExpressionCustom* MakeCustom(FGraph& G, const TCHAR* Description, const TCHAR* Code,
-	                                      ECustomMaterialOutputType OutputType,
-	                                      const TArray<FNamedPin>& Inputs, int32 X, int32 Y)
-	{
-		UMaterialExpressionCustom* Custom = G.Make<UMaterialExpressionCustom>(X, Y);
-		if (!Custom) { return nullptr; }
-		Custom->Description = Description;
-		Custom->Code = Code;
-		Custom->OutputType = OutputType;
-		Custom->Inputs.Reset();
-		for (const FNamedPin& Input : Inputs)
-		{
-			if (!Input.Pin.Node)
-			{
-				G.bOk = false;
-				Report(FString::Printf(TEXT("M_GeoWater: manca il nodo per l'ingresso %s di %s."), Input.Name, Description),
-					FColor::Red);
-				continue;
-			}
-			FCustomInput& New = Custom->Inputs.AddDefaulted_GetRef();
-			New.InputName = FName(Input.Name);
-			New.Input.Connect(Input.Pin.Output, Input.Pin.Node);
-		}
-		return Custom;
-	}
 
 	// -------------------------------------------------------------------------
 	//  L'HLSL dei due nodi Custom. E' lo stesso conto di WaveSpectrum.h
@@ -910,29 +1108,15 @@ return float4(SurfaceNormal, foam);
 		}
 
 		// --- I parametri della collezione.
-		auto CollectionParameter = [&G, Collection](const FString& Name, int32 X, int32 Y) -> FPin
-		{
-			UMaterialExpressionCollectionParameter* Node = G.Make<UMaterialExpressionCollectionParameter>(X, Y);
-			if (!Node) { return FPin{}; }
-			Node->Collection = Collection;
-			Node->ParameterName = FName(*Name);
-			Node->ParameterId = Collection->GetParameterId(Node->ParameterName);
-			if (!Node->ParameterId.IsValid())
-			{
-				G.bOk = false;
-				Report(FString::Printf(TEXT("M_GeoWater: MPC_GeoWater non ha il parametro %s."), *Name), FColor::Red);
-			}
-			return FPin{ Node, 0 };
-		};
 		FPin WaveA[WaterWaveCount], WaveB[WaterWaveCount];
 		for (int32 Index = 0; Index < WaterWaveCount; ++Index)
 		{
-			WaveA[Index] = CollectionParameter(FString::Printf(TEXT("Wave%dA"), Index), -1400, -1700 + Index * 90);
-			WaveB[Index] = CollectionParameter(FString::Printf(TEXT("Wave%dB"), Index), -1400, -1150 + Index * 90);
+			WaveA[Index] = CollectionParameter(G, Collection, FString::Printf(TEXT("Wave%dA"), Index), -1400, -1700 + Index * 90);
+			WaveB[Index] = CollectionParameter(G, Collection, FString::Printf(TEXT("Wave%dB"), Index), -1400, -1150 + Index * 90);
 		}
-		const FPin Wind = CollectionParameter(TEXT("WaterWind"), -1400, -500);
-		const FPin Detail = CollectionParameter(TEXT("WaterDetail"), -1400, -400);
-		const FPin Flow = CollectionParameter(TEXT("WaterFlow"), -1400, -300);
+		const FPin Wind = CollectionParameter(G, Collection, TEXT("WaterWind"), -1400, -500);
+		const FPin Detail = CollectionParameter(G, Collection, TEXT("WaterDetail"), -1400, -400);
+		const FPin Flow = CollectionParameter(G, Collection, TEXT("WaterFlow"), -1400, -300);
 		if (!G.bOk) { return false; }
 
 		// ------------------------------------------------------------------
@@ -1098,11 +1282,197 @@ return float4(SurfaceNormal, foam);
 	}
 }
 
+// =============================================================================
+//  IL METEO: M_GeoPrecipitation (pioggia, neve, grandine)
+// =============================================================================
+namespace
+{
+	const TCHAR* PrecipitationMaterialPackagePath = TEXT("/GeoWorld/Materials/M_GeoPrecipitation");
+	const TCHAR* PrecipitationMaterialAssetName = TEXT("M_GeoPrecipitation");
+
+	// -------------------------------------------------------------------------
+	//  Le particelle (Weather/Precipitation.h, FPrecipitationParticles): la
+	//  mesh e' fatta di quadrati DEGENERI, 4 vertici nello stesso punto della
+	//  scatola attorno alla camera (il componente sta sulla camera, in metri:
+	//  scala 100). Qui il vertice li riduce alla scatola dopo lo spostamento
+	//  del loro tipo e li apre: le gocce in una scia lungo la velocita', i
+	//  fiocchi e i chicchi in un quadratino rivolto alla camera. Una particella
+	//  che non si vede (densita') resta un punto: zero pixel.
+	//
+	//  Seeds.x decide se si vede, Seeds.y di che tipo e' (con la miscela).
+	//  Gli assi del mondo: X = nord, Y = est, Z = su.
+	// -------------------------------------------------------------------------
+	const TCHAR* PrecipitationVertexCode = TEXT(R"HLSL(
+float isHail = step(Seeds.y + 0.000001, Mix.z);
+float isSnow = (1.0 - isHail) * step(Seeds.y + 0.000001, Mix.z + Mix.y);
+float isRain = 1.0 - isHail - isSnow;
+float4 Layer = isRain * Rain + isSnow * Snow + isHail * Hail;
+float4 Vel = isRain * RainVel + isSnow * SnowVel + isHail * HailVel;
+float visible = step(Seeds.x, Layer.w);
+
+// Il posto nella scatola dopo lo spostamento: ferme nel mondo, cadono.
+float3 p = Local + Layer.xyz;
+p -= Box.xyz * floor(p / Box.xyz + 0.5);
+// I fiocchi ondeggiano, ognuno con il suo passo.
+p.xy += isSnow * 0.25 * float2(sin(Clock * (1.1 + Seeds.x) + Seeds.y * 37.0), cos(Clock * (0.9 + Seeds.y) + Seeds.x * 23.0));
+
+float dist = max(length(p), 0.05);
+float3 toCam = -p / dist;
+// Le gocce: una scia lungo la velocita'. I fiocchi e i chicchi: rivolti alla camera.
+float3 along = Vel.xyz / max(length(Vel.xyz), 0.001);
+float3 sideRain = cross(along, toCam);
+sideRain = length(sideRain) > 0.001 ? normalize(sideRain) : float3(0.0, 1.0, 0.0);
+float3 sideFlat = cross(float3(0.0, 0.0, 1.0), toCam);
+sideFlat = length(sideFlat) > 0.001 ? normalize(sideFlat) : float3(0.0, 1.0, 0.0);
+float3 upFlat = cross(toCam, sideFlat);
+float3 axisA = isRain * along + (1.0 - isRain) * upFlat;
+float3 axisB = isRain * sideRain + (1.0 - isRain) * sideFlat;
+// Mai piu' sottili di circa un pixel: da lontano restano visibili.
+float pixel = dist * 0.0012;
+float width = isRain * max(0.0015, pixel) + (1.0 - isRain) * max(Vel.w * (0.7 + 0.6 * Seeds.x), pixel);
+float height = isRain * max(Vel.w, 4.0 * pixel) + (1.0 - isRain) * width;
+float2 c = Corner * 2.0 - 1.0;
+float3 finalPos = (p + 0.5 * c.x * width * axisB + 0.5 * c.y * height * axisA) * visible;
+return (finalPos - Local) * UuPerMetre;
+)HLSL");
+
+	/** Il pixel: la forma della particella e la sua trasparenza (colore, opacita'). */
+	const TCHAR* PrecipitationPixelCode = TEXT(R"HLSL(
+float isHail = step(Seeds.y + 0.000001, Mix.z);
+float isSnow = (1.0 - isHail) * step(Seeds.y + 0.000001, Mix.z + Mix.y);
+float isRain = 1.0 - isHail - isSnow;
+float2 c = Corner * 2.0 - 1.0;
+float r2 = dot(c, c);
+// Goccia: piu' chiara al centro della scia, svanisce ai lati e alle estremita'.
+float streak = saturate(1.0 - c.x * c.x) * saturate(1.0 - c.y * c.y);
+// Fiocco: un disco morbido. Chicco: un disco netto.
+float flake = saturate(1.0 - r2);
+float stone = saturate((1.0 - sqrt(r2)) * 4.0);
+float shape = isRain * streak * 0.35 + isSnow * flake * 0.85 + isHail * stone * 0.9;
+// Svaniscono vicinissimo (non accecano) e verso il bordo della scatola, dove
+// una particella esce da una parte e rientra dall'altra.
+float d = Depth / UuPerMetre;
+float halfBox = 0.5 * min(min(Box.x, Box.y), Box.z);
+float fade = saturate((d - 0.3) / 0.7) * saturate((halfBox - d) / (0.3 * halfBox));
+float3 colour = isRain * float3(0.70, 0.74, 0.80) + isSnow * float3(0.95, 0.96, 0.98) + isHail * float3(0.92, 0.94, 0.97);
+return float4(colour * Box.w, shape * fade);
+)HLSL");
+
+	/**
+	 * M_GeoPrecipitation: Unlit, Translucent, due facce. Ritorna false se un
+	 * nodo non si crea.
+	 *
+	 *   WorldPosition (senza offset) -> TransformPosition mondo->locale -+
+	 *   TexCoord 0 (angolo), TexCoord 1 (semi), Time, MPC_GeoWeather ----+--> Custom "Particelle (WPO)" --> World Position Offset
+	 *   TexCoord 0, TexCoord 1, PixelDepth, MPC_GeoWeather --------------+--> Custom "Particelle (colore)"
+	 *                                                                          \--rgb--> Emissive  \--a--> Opacity
+	 */
+	bool BuildPrecipitationGraph(UMaterial* Material)
+	{
+		UMaterialParameterCollection* Collection = LoadObject<UMaterialParameterCollection>(nullptr,
+			*FString::Printf(TEXT("%s.%s"), WeatherCollectionPackagePath, WeatherCollectionAssetName), nullptr,
+			LOAD_NoWarn | LOAD_Quiet);
+		if (!Collection)
+		{
+			Report(TEXT("M_GeoPrecipitation: manca MPC_GeoWeather."), FColor::Red);
+			return false;
+		}
+
+		Material->MaterialDomain = MD_Surface;
+		Material->SetShadingModel(MSM_Unlit);
+		Material->BlendMode = BLEND_Translucent;
+		Material->TwoSided = true;
+
+		FGraph G{ Material };
+		UMaterialExpressionWorldPosition* Position = G.Make<UMaterialExpressionWorldPosition>(-1700, -600);
+		UMaterialExpressionTransformPosition* ToLocal = G.Make<UMaterialExpressionTransformPosition>(-1450, -600);
+		UMaterialExpressionTextureCoordinate* Corner = G.Make<UMaterialExpressionTextureCoordinate>(-1450, -450);
+		UMaterialExpressionTextureCoordinate* Seeds = G.Make<UMaterialExpressionTextureCoordinate>(-1450, -350);
+		UMaterialExpressionTime* Time = G.Make<UMaterialExpressionTime>(-1450, -250);
+		UMaterialExpressionConstant* UuPerMetre = G.Make<UMaterialExpressionConstant>(-1450, -150);
+		UMaterialExpressionPixelDepth* Depth = G.Make<UMaterialExpressionPixelDepth>(-1450, 400);
+		if (!G.bOk) { return false; }
+
+		// Il punto della particella nella scatola, in metri: la posizione a
+		// riposo (senza il proprio offset) riportata nel componente.
+		Position->WorldPositionShaderOffset = WPT_ExcludeAllShaderOffsets;
+		ToLocal->TransformSourceType = TRANSFORMPOSSOURCE_World;
+		ToLocal->TransformType = TRANSFORMPOSSOURCE_Local;
+		G.Connect(Position, TEXT(""), ToLocal, TEXT(""));
+		Corner->CoordinateIndex = 0;
+		Seeds->CoordinateIndex = 1;
+		UuPerMetre->R = static_cast<float>(GeoWorld::Units::MetersToUu);
+
+		const FPin Rain = CollectionParameter(G, Collection, TEXT("PrecipRain"), -1450, -1300);
+		const FPin Snow = CollectionParameter(G, Collection, TEXT("PrecipSnow"), -1450, -1200);
+		const FPin Hail = CollectionParameter(G, Collection, TEXT("PrecipHail"), -1450, -1100);
+		const FPin RainVel = CollectionParameter(G, Collection, TEXT("PrecipRainVel"), -1450, -1000);
+		const FPin SnowVel = CollectionParameter(G, Collection, TEXT("PrecipSnowVel"), -1450, -900);
+		const FPin HailVel = CollectionParameter(G, Collection, TEXT("PrecipHailVel"), -1450, -800);
+		const FPin Box = CollectionParameter(G, Collection, TEXT("PrecipBox"), -1450, -700);
+		const FPin Mix = CollectionParameter(G, Collection, TEXT("PrecipMix"), -1450, 300);
+		if (!G.bOk) { return false; }
+
+		TArray<FNamedPin> VertexInputs;
+		VertexInputs.Add(FNamedPin{ TEXT("Local"), FPin{ ToLocal, 0 } });
+		VertexInputs.Add(FNamedPin{ TEXT("Corner"), FPin{ Corner, 0 } });
+		VertexInputs.Add(FNamedPin{ TEXT("Seeds"), FPin{ Seeds, 0 } });
+		VertexInputs.Add(FNamedPin{ TEXT("Clock"), FPin{ Time, 0 } });
+		VertexInputs.Add(FNamedPin{ TEXT("Rain"), Rain });
+		VertexInputs.Add(FNamedPin{ TEXT("Snow"), Snow });
+		VertexInputs.Add(FNamedPin{ TEXT("Hail"), Hail });
+		VertexInputs.Add(FNamedPin{ TEXT("RainVel"), RainVel });
+		VertexInputs.Add(FNamedPin{ TEXT("SnowVel"), SnowVel });
+		VertexInputs.Add(FNamedPin{ TEXT("HailVel"), HailVel });
+		VertexInputs.Add(FNamedPin{ TEXT("Box"), Box });
+		VertexInputs.Add(FNamedPin{ TEXT("Mix"), Mix });
+		VertexInputs.Add(FNamedPin{ TEXT("UuPerMetre"), FPin{ UuPerMetre, 0 } });
+
+		TArray<FNamedPin> PixelInputs;
+		PixelInputs.Add(FNamedPin{ TEXT("Corner"), FPin{ Corner, 0 } });
+		PixelInputs.Add(FNamedPin{ TEXT("Seeds"), FPin{ Seeds, 0 } });
+		PixelInputs.Add(FNamedPin{ TEXT("Mix"), Mix });
+		PixelInputs.Add(FNamedPin{ TEXT("Box"), Box });
+		PixelInputs.Add(FNamedPin{ TEXT("Depth"), FPin{ Depth, 0 } });
+		PixelInputs.Add(FNamedPin{ TEXT("UuPerMetre"), FPin{ UuPerMetre, 0 } });
+
+		UMaterialExpressionCustom* Vertex = MakeCustom(G, TEXT("Particelle (WPO)"), PrecipitationVertexCode,
+			CMOT_Float3, VertexInputs, -900, -800);
+		UMaterialExpressionCustom* Pixel = MakeCustom(G, TEXT("Particelle (colore)"), PrecipitationPixelCode,
+			CMOT_Float4, PixelInputs, -900, 300);
+		UMaterialExpressionComponentMask* ColourMask = G.Make<UMaterialExpressionComponentMask>(-500, 250);
+		UMaterialExpressionComponentMask* OpacityMask = G.Make<UMaterialExpressionComponentMask>(-500, 400);
+		if (!G.bOk) { return false; }
+		ColourMask->R = true;
+		ColourMask->G = true;
+		ColourMask->B = true;
+		ColourMask->A = false;
+		OpacityMask->R = false;
+		OpacityMask->G = false;
+		OpacityMask->B = false;
+		OpacityMask->A = true;
+
+		G.Connect(Vertex, TEXT(""), MP_WorldPositionOffset);
+		G.Connect(Pixel, TEXT(""), ColourMask, TEXT(""));
+		G.Connect(Pixel, TEXT(""), OpacityMask, TEXT(""));
+		G.Connect(ColourMask, TEXT(""), MP_EmissiveColor);
+		G.Connect(OpacityMask, TEXT(""), MP_Opacity);
+
+		if (!G.bOk) { return false; }
+		UMaterialEditingLibrary::RecompileMaterial(Material);
+		return true;
+	}
+}
+
 static FAutoConsoleCommand GeoImageryCreateMaterialCommand(
 	TEXT("geo.Imagery.CreateMaterial"),
-	TEXT("Costruisce (o RIFA') in /GeoWorld/Materials: M_GeoTerrain (foto e strade dipinte), M_GeoRoad (strade 3D), M_GeoWater e MPC_GeoWater (acqua)."),
+	TEXT("Costruisce (o RIFA') in /GeoWorld/Materials: M_GeoTerrain (foto e strade dipinte), M_GeoRoad (strade 3D), M_GeoWater e MPC_GeoWater (acqua), MPC_GeoWeather e M_GeoPrecipitation (meteo)."),
 	FConsoleCommandDelegate::CreateStatic([]()
 	{
+		// Il meteo per primo: terreno e strade leggono MPC_GeoWeather (suolo
+		// bagnato, neve). Senza, si costruiscono lo stesso, asciutti.
+		const bool bWeatherCollection = CreateOrUpdateWeatherCollection() != nullptr;
+
 		const bool bTerrain = CreateOrRebuildMaterial(MaterialPackagePath, MaterialAssetName, &BuildDrapeGraph);
 		const bool bRoad = CreateOrRebuildMaterial(RoadMaterialPackagePath, RoadMaterialAssetName, &BuildRoadGraph);
 
@@ -1112,9 +1482,17 @@ static FAutoConsoleCommand GeoImageryCreateMaterialCommand(
 		const bool bWater = bWaterAssets
 			&& CreateOrRebuildMaterial(WaterMaterialPackagePath, WaterMaterialAssetName, &BuildWaterGraph);
 
-		if (bTerrain && bRoad && bWater)
+		const bool bPrecipitation = bWeatherCollection
+			&& CreateOrRebuildMaterial(PrecipitationMaterialPackagePath, PrecipitationMaterialAssetName, &BuildPrecipitationGraph);
+
+		if (bTerrain && bRoad && bWater && bPrecipitation)
 		{
 			Report(TEXT("Materiali pronti. Riavvia il Play (o rilancia geo.Roads.Demo / geo.Water.Demo)."));
+		}
+		if (!bPrecipitation)
+		{
+			Report(TEXT("M_GeoPrecipitation non fatto: niente pioggia ne' neve a schermo. Output Log (LogGeoWorld) e docs/meteo-verifica.md"),
+				FColor::Red);
 		}
 		if (!bTerrain)
 		{

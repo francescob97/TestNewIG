@@ -19,6 +19,7 @@
 #include <cmath>
 #include <cstdio>
 #include <string>
+#include <utility>
 
 namespace GeoWorld::Format
 {
@@ -114,5 +115,46 @@ namespace GeoWorld::Format
 	{
 		constexpr double KnotsPerMs = 3600.0 / 1852.0;
 		return Number(SpeedMs, 1) + " m/s (" + Number(SpeedMs * KnotsPerMs, 0) + " kt) da " + Heading(FromDegrees);
+	}
+
+	/**
+	 * Una distanza come la si dice: "350 m" (a decine), "1,2 km", "13 km";
+	 * oltre 50 km (o infinita) "oltre 50 km": la visibilita' di un giorno
+	 * limpido.
+	 */
+	inline std::string Distance(double Value)
+	{
+		if (!std::isfinite(Value) || Value > 50000.0) { return "oltre 50 km"; }
+		if (Value < 995.0) { return Number(std::round(Value / 10.0) * 10.0, 0) + " m"; }
+		return Number(Value / 1000.0, Value < 9950.0 ? 1 : 0) + " km";
+	}
+
+	/**
+	 * Cosa cade e quanto: "pioggia 4,2 mm/h", "neve e pioggia 1,0 mm/h",
+	 * "pioggia e grandine 35 mm/h", "niente". Si nomina ogni tipo che e'
+	 * almeno il 10% del totale, il piu' abbondante per primo; i mm/h sono
+	 * d'acqua (la neve fusa), come nei bollettini.
+	 */
+	inline std::string Precipitation(double RateMmH, double Rain, double Snow, double Hail)
+	{
+		if (!(RateMmH > 0.01)) { return "niente"; }
+		struct FPart { const char* Name; double Fraction; };
+		FPart Parts[3] = { { "pioggia", Rain }, { "neve", Snow }, { "grandine", Hail } };
+		// Tre elementi: un ordinamento a mano, stabile (a pari frazione vince l'ordine sopra).
+		for (int Pass = 0; Pass < 2; ++Pass)
+		{
+			for (int Index = 0; Index < 2 - Pass; ++Index)
+			{
+				if (Parts[Index + 1].Fraction > Parts[Index].Fraction) { std::swap(Parts[Index], Parts[Index + 1]); }
+			}
+		}
+		std::string Names;
+		for (const FPart& Part : Parts)
+		{
+			if (Part.Fraction < 0.1) { continue; }
+			Names += Names.empty() ? Part.Name : std::string(" e ") + Part.Name;
+		}
+		if (Names.empty()) { Names = "precipitazione"; }
+		return Names + " " + Number(RateMmH, RateMmH < 9.95 ? 1 : 0) + " mm/h";
 	}
 }

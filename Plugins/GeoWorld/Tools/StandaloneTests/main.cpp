@@ -10,6 +10,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cmath>
+#include <limits>
 #include <random>
 #include <string>
 #include <vector>
@@ -559,6 +560,13 @@ static void TestFormat()
 		"rotta 000..359", F::Heading(-87.0) + " / " + F::Heading(359.7));
 	Check(F::Wind(7.2, 245.4) == "7,2 m/s (14 kt) da 245" + Deg && F::Wind(0.0, 0.0) == "0,0 m/s (0 kt) da 000" + Deg,
 		"vento: m/s, nodi, da dove soffia", F::Wind(7.2, 245.4));
+	Check(F::Distance(347.0) == "350 m" && F::Distance(1234.0) == "1,2 km" && F::Distance(13456.0) == "13 km"
+		&& F::Distance(9960.0) == "10 km" && F::Distance(std::numeric_limits<double>::infinity()) == "oltre 50 km",
+		"distanze: metri a decine, poi km; l'infinito e' \"oltre 50 km\"", F::Distance(347.0) + " / " + F::Distance(1234.0));
+	Check(F::Precipitation(4.24, 1.0, 0.0, 0.0) == "pioggia 4,2 mm/h" && F::Precipitation(1.0, 0.3, 0.7, 0.0) == "neve e pioggia 1,0 mm/h"
+		&& F::Precipitation(35.0, 0.4, 0.0, 0.6) == "grandine e pioggia 35 mm/h" && F::Precipitation(2.0, 0.95, 0.05, 0.0) == "pioggia 2,0 mm/h"
+		&& F::Precipitation(0.0, 0.0, 0.0, 0.0) == "niente",
+		"precipitazione: i tipi dal piu' abbondante (almeno il 10%), mm/h d'acqua", F::Precipitation(1.0, 0.3, 0.7, 0.0));
 }
 
 // ===========================================================================

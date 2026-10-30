@@ -263,7 +263,8 @@ scatto). `geo.Weather.Wind 8 270` = 8 m/s da ovest.
 ore a formarsi: non segue un soffio di dieci secondi. Le raffiche muovono
 l'increspatura (le normali di dettaglio, che scorrono più in fretta e si
 fanno più marcate) e la schiuma sulle creste. È il seme della fase del
-meteo: nuvole, pioggia, nebbia si aggiungeranno qui.
+meteo: la pioggia, la neve e la nebbia che portano si sono aggiunte poi
+(`docs/meteo-design.md`); le nuvole arriveranno con l'atmosfera.
 
 ### 7.2 Dallo spettro alle onde
 

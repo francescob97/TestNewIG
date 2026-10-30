@@ -4,9 +4,12 @@
 //  Prova Weather/WindField.h: profilo e rugosita', rotazione con la quota,
 //  venti in quota, rilievi (cresta, valle, ridosso, vento verticale),
 //  turbolenza (intensita', coerenza, trasporto, continuita'), variabilita',
-//  determinismo.
+//  determinismo. E Weather/Precipitation.h: zero termico e fase per quota,
+//  copertura e trasporto dei rovesci, grandine nei nuclei, visibilita',
+//  velocita' di caduta, suolo bagnato e neve, particelle, mesh.
 // =============================================================================
 
+#include "Weather/Precipitation.h"
 #include "Weather/WindField.h"
 
 #include <algorithm>
@@ -352,16 +355,256 @@ static void TestVariabilityAndDeterminism()
 		&& D.GetSettings().Turbulence == 2.0, "impostazioni fuori scala: riportate dentro");
 }
 
+
+// ===========================================================================
+//  Il meteo: pioggia, neve, grandine (Weather/Precipitation.h)
+// ===========================================================================
+
+static FPrecipitationField MakeWeather(EPrecipitationKind Kind, double Rate, double Coverage = 1.0,
+                                       double SeaLevelC = 15.0, double CellKm = 8.0)
+{
+	FPrecipitationSettings Settings;
+	Settings.Kind = Kind;
+	Settings.RateMmH = Rate;
+	Settings.Coverage = Coverage;
+	Settings.SeaLevelTemperatureC = SeaLevelC;
+	Settings.CellSizeKm = CellKm;
+	FPrecipitationField Field;
+	Field.SetSettings(Settings);
+	return Field;
+}
+
+static void TestPhase()
+{
+	Section("6. Cosa cade, per quota: zero termico e quota neve");
+	const FPrecipitationField Field = MakeWeather(EPrecipitationKind::Auto, 3.0, 1.0, 9.75);
+	Check(std::fabs(Field.FreezingLevelM() - 1500.0) < 1e-6 && std::fabs(Field.SnowLineM() - 1200.0) < 1e-6
+		&& std::fabs(Field.TemperatureAt(3000.0) + 9.75) < 1e-9,
+		"9,75 °C al mare e 6,5 °C/km: zero termico a 1500 m, quota neve a 1200 m",
+		Fmt("zero termico %.0f m, quota neve %.0f m", Field.FreezingLevelM(), Field.SnowLineM()));
+
+	const FPrecipitationSample Valley = Field.Sample(Lat, Lon, 300.0);
+	const FPrecipitationSample Mixed = Field.Sample(Lat, Lon, 1200.0);
+	const FPrecipitationSample Peak = Field.Sample(Lat, Lon, 2500.0);
+	Check(Valley.IsFalling() && Valley.Rain == 1.0 && Valley.Snow == 0.0 && std::fabs(Mixed.Snow - 0.5) < 1e-9
+		&& Peak.Snow == 1.0 && Peak.Rain == 0.0,
+		"stesso tempo: pioggia in valle, mista alla quota neve, neve in cima",
+		Fmt("300 m neve %.0f%%, 1200 m %.0f%%, 2500 m %.0f%%", 100.0 * Valley.Snow, 100.0 * Mixed.Snow, 100.0 * Peak.Snow)); /* percentuale, non-unita */
+
+	const FPrecipitationSample Forced = MakeWeather(EPrecipitationKind::Snow, 2.0, 1.0, 25.0).Sample(Lat, Lon, 0.0);
+	const FPrecipitationSample Warm = MakeWeather(EPrecipitationKind::Rain, 2.0, 1.0, -10.0).Sample(Lat, Lon, 3000.0);
+	Check(Forced.Snow == 1.0 && Warm.Rain == 1.0, "neve imposta: neve anche a 25 °C; pioggia imposta: pioggia anche a -30 °C");
+
+	const FPrecipitationField Frozen = MakeWeather(EPrecipitationKind::Auto, 1.0, 1.0, -2.0);
+	Check(Frozen.FreezingLevelM() == 0.0 && Frozen.Sample(Lat, Lon, 0.0).Snow == 1.0, "sotto zero al mare: neve dappertutto");
+	Check(!MakeWeather(EPrecipitationKind::Auto, 0.0).Sample(Lat, Lon, 0.0).IsFalling(), "intensita' zero: sereno");
+
+	// Sopra le nuvole non cade niente: 6 km per la pioggia estesa, 10 per i rovesci.
+	const double Below = Field.Sample(Lat, Lon, 4900.0).RateMmH, Fading = Field.Sample(Lat, Lon, 5500.0).RateMmH;
+	Check(Below > 0.0 && std::fabs(Fading - 0.5 * Below) < 0.05 * Below && !Field.Sample(Lat, Lon, 6100.0).IsFalling()
+		&& Field.CloudTopM() == 6000.0
+		&& MakeWeather(EPrecipitationKind::Hail, 3.0, 1.0, 9.75).CloudTopM() == 10000.0
+		&& MakeWeather(EPrecipitationKind::Auto, 3.0, 0.5, 9.75).CloudTopM() == 10000.0,
+		"cima delle nuvole: estesa 6 km (sfuma dall'ultimo km), rovesci e grandine 10 km",
+		Fmt("4900 m %.2f mm/h, 5500 m %.2f", Below, Fading));
+}
+
+static void TestCells()
+{
+	Section("7. I rovesci: copertura, nuclei, trasporto, grandine");
+	// La copertura chiesta e' la frazione di suolo sotto la precipitazione.
+	for (const double Coverage : { 0.2, 0.5, 0.8 })
+	{
+		const FPrecipitationField Field = MakeWeather(EPrecipitationKind::Auto, 10.0, Coverage, 15.0, 6.0);
+		int Wet = 0, Total = 0;
+		double Strongest = 0.0;
+		for (int Row = 0; Row < 120; ++Row)
+		{
+			for (int Column = 0; Column < 120; ++Column)
+			{
+				const double Rate = Field.Sample(Lat + 0.02 * Row, Lon + 0.028 * Column, 0.0).RateMmH;
+				Wet += Rate > 0.0 ? 1 : 0;
+				++Total;
+				Strongest = std::max(Strongest, Rate);
+			}
+		}
+		const double Fraction = static_cast<double>(Wet) / Total;
+		Check(std::fabs(Fraction - Coverage) < 0.08 && Strongest <= 10.0 + 1e-9 && Strongest > 9.0,
+			Fmt("copertura %.1f: piove su quella frazione di suolo, e nei nuclei si arriva al massimo", Coverage),
+			Fmt("%.0f%% del suolo, massimo %.1f mm/h", 100.0 * Fraction, Strongest));   /* percentuale, non-unita */
+	}
+
+	// Trasporto: dopo 10 minuti con 15 m/s verso est, il rovescio e' 9 km piu' a est (e cambiato poco).
+	FPrecipitationField Moving = MakeWeather(EPrecipitationKind::Auto, 10.0, 0.4, 15.0, 6.0);
+	std::vector<double> Before;
+	for (int Index = 0; Index < 400; ++Index) { Before.push_back(Moving.Intensity(Lat + 0.01 * Index, Lon)); }
+	Moving.Advance(600.0, 0.0, 15.0);
+	double Same = 0.0, Other = 0.0, Moved = 0.0;
+	for (int Index = 0; Index < 400; ++Index)
+	{
+		const double La = Lat + 0.01 * Index;
+		const double Downwind = Moving.Intensity(La, Lon + 9000.0 / (111320.0 * std::cos(La * WindDegToRad)));
+		Moved += std::fabs(Downwind - Before[static_cast<size_t>(Index)]);
+		Same += std::fabs(Moving.Intensity(La, Lon) - Before[static_cast<size_t>(Index)]);
+		Other += Before[static_cast<size_t>(Index)];
+	}
+	Check(Moved < 0.5 * Same && Other > 10.0, "i rovesci viaggiano con il vento in quota",
+		Fmt("scarto seguendo il vento %.1f, restando fermi %.1f", Moved, Same));
+
+	// La grandine cade solo nei nuclei, mai dove piove poco.
+	const FPrecipitationField Storm = MakeWeather(EPrecipitationKind::Hail, 40.0, 0.3, 22.0, 5.0);
+	double HailInCores = 0.0, HailAtEdges = 0.0;
+	int Cores = 0, Edges = 0;
+	for (int Index = 0; Index < 20000; ++Index)
+	{
+		const FPrecipitationSample Sample = Storm.Sample(Lat + 0.007 * (Index % 150), Lon + 0.009 * (Index / 150), 200.0);
+		if (!Sample.IsFalling()) { continue; }
+		if (Sample.RateMmH > 0.9 * 40.0) { HailInCores += Sample.Hail; ++Cores; }
+		if (Sample.RateMmH < 0.4 * 40.0) { HailAtEdges += Sample.Hail; ++Edges; }
+	}
+	Check(Cores > 0 && Edges > 0 && HailInCores / Cores > 0.5 && HailAtEdges == 0.0,
+		"grandine nei nuclei del temporale (fino al 60%), niente ai margini",
+		Fmt("nei nuclei %.0f%%, ai margini %.0f%%", 100.0 * HailInCores / std::max(Cores, 1),     /* percentuale, non-unita */
+			100.0 * HailAtEdges / std::max(Edges, 1)));   /* percentuale, non-unita */
+
+	Check(std::fabs(PrecipitationDetail::InverseNormal(0.975) - 1.959964) < 1e-5
+		&& std::fabs(PrecipitationDetail::InverseNormal(0.5)) < 1e-12, "l'inversa della normale (la soglia della copertura)");
+}
+
+static void TestVisibilityAndFall()
+{
+	Section("8. Visibilita' e caduta");
+	const double Light = PrecipitationVisibilityM(1.0, 1.0, 0.0, 0.0);
+	const double Heavy = PrecipitationVisibilityM(50.0, 1.0, 0.0, 0.0);
+	const double Snow = PrecipitationVisibilityM(1.0, 0.0, 1.0, 0.0);
+	Check(Light > 12000.0 && Light < 15000.0 && Heavy > 800.0 && Heavy < 1200.0 && Snow > 900.0 && Snow < 1100.0
+		&& std::isinf(PrecipitationVisibilityM(0.0, 1.0, 0.0, 0.0)),
+		"pioggia debole 13 km, a dirotto 1 km; 1 mm/h di neve: 1 km; sereno: nessun limite",
+		Fmt("%.1f km, %.1f km, neve %.2f km", Light / 1000.0, Heavy / 1000.0, Snow / 1000.0));
+	Check(RainFallSpeed(1.0) > 3.0 && RainFallSpeed(1.0) < 5.0 && RainFallSpeed(50.0) > 6.0 && RainFallSpeed(50.0) < 8.0
+		&& SnowFallSpeed(-10.0) < 1.0 && SnowFallSpeed(1.0) > 1.4 && HailFallSpeed(0.01) == 14.5 && HailFallSpeed(0.02) > 20.0,
+		"le gocce cadono a 4-7 m/s, i fiocchi a ~1, i chicchi da 1 cm a 14,5 (da 2 cm oltre 20)",
+		Fmt("gocce %.1f e %.1f, fiocchi %.1f, chicchi %.1f m/s", RainFallSpeed(1.0), RainFallSpeed(50.0), SnowFallSpeed(-10.0), HailFallSpeed(0.02)));
+}
+
+static void TestGround()
+{
+	Section("9. Il suolo: bagnato, asciutto, neve che scende e fonde");
+	FPrecipitationField Field = MakeWeather(EPrecipitationKind::Auto, 4.0, 1.0, 9.75);    // quota neve 1200 m
+	FGroundWeather Ground;
+	FPrecipitationSample Valley = Field.Sample(Lat, Lon, 200.0);
+	for (int Minute = 0; Minute < 5; ++Minute) { Ground.Advance(60.0, Valley, Field); }
+	const double WetAfterRain = Ground.GetWetness();
+	// La pioggia in valle e' neve in montagna: la copertura scende verso la quota neve.
+	for (int Minute = 0; Minute < 55; ++Minute) { Ground.Advance(60.0, Valley, Field); }
+	const double CoverAfterHour = Ground.GetSnowCoverM();
+	Check(WetAfterRain > 0.9 && CoverAfterHour < 1300.0 && CoverAfterHour >= 1200.0,
+		"dopo 5 minuti di pioggia il suolo e' bagnato; dopo un'ora la neve e' scesa fino alla quota neve",
+		Fmt("bagnato %.2f, neve sopra %.0f m", WetAfterRain, CoverAfterHour));
+
+	FPrecipitationSettings Sunny = Field.GetSettings();
+	Sunny.RateMmH = 0.0;
+	Field.SetSettings(Sunny);
+	const FPrecipitationSample Dry = Field.Sample(Lat, Lon, 200.0);
+	for (int Minute = 0; Minute < 120; ++Minute) { Ground.Advance(60.0, Dry, Field); }
+	Check(Ground.GetWetness() == 0.0 && Ground.GetSnowCoverM() > CoverAfterHour,
+		"smette: in due ore il suolo si asciuga, e la neve risale fondendo dove fa piu' di zero",
+		Fmt("bagnato %.2f, neve sopra %.0f m", Ground.GetWetness(), Ground.GetSnowCoverM()));
+
+	FPrecipitationField Cold = MakeWeather(EPrecipitationKind::Auto, 0.0, 1.0, -5.0);
+	FGroundWeather Winter;
+	Winter.SetSnowCover(300.0);
+	for (int Hour = 0; Hour < 24; ++Hour) { Winter.Advance(3600.0, Cold.Sample(Lat, Lon, 300.0), Cold); }
+	Check(Winter.GetSnowCoverM() == 300.0, "sotto zero la neve non fonde");
+
+	FPrecipitationField Blizzard = MakeWeather(EPrecipitationKind::Snow, 2.0);
+	FGroundWeather Plain;
+	for (int Minute = 0; Minute < 90; ++Minute) { Plain.Advance(60.0, Blizzard.Sample(Lat, Lon, 0.0), Blizzard); }
+	Check(Plain.HasSnow() && Plain.GetSnowCoverM() < 0.0, "neve imposta: in un'ora e mezza imbianca fino al mare",
+		Fmt("neve sopra %.0f m", Plain.GetSnowCoverM()));
+}
+
+static void TestParticles()
+{
+	Section("10. Le particelle attorno alla camera");
+	FPrecipitationParticles Particles;
+	FPrecipitationSample Mixed;
+	Mixed.RateMmH = 10.0;
+	Mixed.Rain = 0.5;
+	Mixed.Snow = 0.3;
+	Mixed.Hail = 0.2;
+	Mixed.TemperatureC = 1.0;
+	const double Camera[3] = { 1234.5, -987.6, 300.0 };
+	Particles.Advance(1.0 / 60.0, Mixed, 4.0, 0.0, 0.0, Camera);
+	const FParticleLayer& Rain = Particles.GetLayer(EParticleType::Rain);
+	const FParticleLayer& Snow = Particles.GetLayer(EParticleType::Snow);
+	const FParticleLayer& Hail = Particles.GetLayer(EParticleType::Hail);
+	Check(Rain.Velocity[2] < -3.0 && Snow.Velocity[2] > -2.0 && Hail.Velocity[2] < Rain.Velocity[2]
+		&& Snow.Velocity[0] == 4.0 && Rain.Velocity[0] < 4.0 && Hail.Velocity[0] < Rain.Velocity[0],
+		"cadono ognuna alla sua velocita', e il vento porta di piu' i fiocchi",
+		Fmt("verticale: gocce %.1f, fiocchi %.1f, chicchi %.1f m/s", Rain.Velocity[2], Snow.Velocity[2], Hail.Velocity[2]));
+	double MixRain = 0.0, MixSnow = 0.0, MixHail = 0.0;
+	Particles.GetMix(MixRain, MixSnow, MixHail);
+	Check(std::fabs(MixRain + MixSnow + MixHail - 1.0) < 1e-12 && MixRain > 0.0 && MixSnow > 0.0 && MixHail > 0.0
+		&& Rain.Size > 0.05 && Rain.Size < 0.4 && Hail.Size >= 0.005,
+		"miscela: le tre particelle insieme; scia delle gocce fra 5 e 40 cm", Fmt("scia %.2f m, chicchi %.3f m", Rain.Size, Hail.Size));
+
+	// Fase continua: muovendo la camera di 1 cm, la fase cambia di 1 cm (le particelle stanno ferme nel mondo).
+	const double Before = Rain.Phase[0];
+	const double Moved[3] = { Camera[0] + 0.01, Camera[1], Camera[2] };
+	Particles.Advance(0.0, Mixed, 4.0, 0.0, 0.0, Moved);
+	Check(std::fabs((Before - Particles.GetLayer(EParticleType::Rain).Phase[0]) - 0.01) < 1e-9
+		&& std::fabs(Particles.GetLayer(EParticleType::Rain).Phase[0]) <= 0.5 * Particles.Box[0],
+		"la camera che si sposta non trascina le particelle; la fase resta nella scatola");
+
+	// Continuita' nel tempo: un frame sposta le gocce di v dt (modulo la scatola).
+	const double Start = Particles.GetLayer(EParticleType::Rain).Phase[2];
+	Particles.Advance(1.0 / 60.0, Mixed, 4.0, 0.0, 0.0, Moved);
+	const double Step = FPrecipitationParticles::Wrap(Particles.GetLayer(EParticleType::Rain).Phase[2] - Start, Particles.Box[2]);
+	Check(std::fabs(Step - Particles.GetLayer(EParticleType::Rain).Velocity[2] / 60.0) < 1e-9, "a ogni frame cadono di v dt, senza salti",
+		Fmt("%.3f m", Step));
+
+	FPrecipitationSample Clear;
+	Particles.Advance(1.0 / 60.0, Clear, 4.0, 0.0, 0.0, Moved);
+	Check(Particles.GetLayer(EParticleType::Rain).Density == 0.0 && Particles.GetLayer(EParticleType::Snow).Density == 0.0
+		&& Particles.GetLayer(EParticleType::Hail).Density == 0.0, "sereno: nessuna particella");
+
+	FPrecipitationMesh Mesh;
+	BuildPrecipitationMesh(1000, Particles.Box, 3, Mesh);
+	bool bShape = Mesh.Positions.size() == 12000 && Mesh.Indices.size() == 6000 && Mesh.Seeds.size() == 8000;
+	for (size_t Quad = 0; bShape && Quad < 1000; ++Quad)
+	{
+		for (int Corner = 1; Corner < 4; ++Corner)
+		{
+			for (int Axis = 0; Axis < 3; ++Axis)
+			{
+				bShape = bShape && Mesh.Positions[(Quad * 4 + Corner) * 3 + Axis] == Mesh.Positions[Quad * 4 * 3 + Axis];
+			}
+		}
+		for (int Axis = 0; Axis < 3; ++Axis)
+		{
+			bShape = bShape && std::fabs(Mesh.Positions[Quad * 12 + Axis]) <= 0.5 * Particles.Box[Axis];
+		}
+		bShape = bShape && Mesh.Seeds[Quad * 8] >= 0.0f && Mesh.Seeds[Quad * 8] < 1.0f;
+	}
+	Check(bShape, "la mesh: 4 vertici nello stesso punto per particella, tutti nella scatola, semi in [0, 1)");
+}
+
 int main()
 {
 	std::printf("=====================================================\n");
-	std::printf(" GeoWeather -- il vento, senza Unreal\n");
+	std::printf(" GeoWeather -- il vento e il meteo, senza Unreal\n");
 	std::printf("=====================================================\n");
 	TestProfile();
 	TestAloft();
 	TestOrography();
 	TestTurbulence();
 	TestVariabilityAndDeterminism();
+	TestPhase();
+	TestCells();
+	TestVisibilityAndFall();
+	TestGround();
+	TestParticles();
 	std::printf("\n=====================================================\n");
 	std::printf(" RISULTATO: %d passati, %d falliti\n", GPassed, GFailed);
 	std::printf("=====================================================\n");

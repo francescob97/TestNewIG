@@ -1835,6 +1835,55 @@ namespace GeoWeatherConsole
 				*Wind(Layer.SpeedMs, Layer.FromDegrees)), FColor::White);
 		}
 	}
+
+	static FString Text(const std::string& Value)
+	{
+		return FString(UTF8_TO_TCHAR(Value.c_str()));
+	}
+
+	/** Il riassunto dei comandi della precipitazione: cosa cade, la temperatura, il suolo. */
+	static void ReportPrecipitation(const UGeoWeatherSubsystem* Weather)
+	{
+		const GeoWorld::Weather::FPrecipitationField& Precipitation = Weather->GetPrecipitationField();
+		const GeoWorld::Weather::FPrecipitationSettings& Settings = Precipitation.GetSettings();
+		static const TCHAR* KindNames[] = { TEXT("pioggia o neve secondo la quota"), TEXT("pioggia"), TEXT("neve"), TEXT("rovesci con grandine") };
+		if (Settings.RateMmH > 0.0)
+		{
+			const FString Where = Settings.Coverage >= 0.999 ? FString(TEXT("dappertutto"))
+				: FString::Printf(TEXT("su %.0f%% del suolo, rovesci da %.0f km"), 100.0 * Settings.Coverage, Settings.CellSizeKm);   /* percentuale, non-unita */
+			GeoTerrainConsole::Report(FString::Printf(TEXT("Precipitazione: %s, %s mm/h nel cuore, %s"),
+				KindNames[static_cast<int32>(Settings.Kind)], *Text(GeoWorld::Format::Number(Settings.RateMmH, 1)), *Where));
+		}
+		else
+		{
+			GeoTerrainConsole::Report(TEXT("Precipitazione: sereno"));
+		}
+		GeoTerrainConsole::Report(FString::Printf(TEXT("  %s al mare (cala di %s ogni km): zero termico %s, quota neve %s"),
+			*Text(GeoWorld::Format::Number(Settings.SeaLevelTemperatureC, 1) + " " + GeoWorld::Format::Degree + "C"),
+			*Text(GeoWorld::Format::Number(Settings.LapseRateCPerKm, 1) + " " + GeoWorld::Format::Degree + "C"),
+			*Text(GeoWorld::Format::Metres(Precipitation.FreezingLevelM())),
+			Settings.Kind == GeoWorld::Weather::EPrecipitationKind::Rain ? TEXT("nessuna (solo pioggia)")
+				: Settings.Kind == GeoWorld::Weather::EPrecipitationKind::Snow ? TEXT("ovunque (solo neve)") : *Text(GeoWorld::Format::Metres(Precipitation.SnowLineM()))),
+			FColor::White);
+		const GeoWorld::Weather::FGroundWeather& GroundState = Weather->GetGround();
+		GeoTerrainConsole::Report(FString::Printf(TEXT("  suolo bagnato %.0f%%, %s"), 100.0 * GroundState.GetWetness(),   /* percentuale, non-unita */
+			GroundState.HasSnow() ? *(TEXT("neve sopra ") + Text(GeoWorld::Format::Metres(GroundState.GetSnowCoverM()))) : TEXT("niente neve")), FColor::White);
+		const FString Problem = Weather->GetRenderProblem();
+		if (!Problem.IsEmpty()) { GeoTerrainConsole::Report(Problem, FColor::Yellow); }
+	}
+
+	/** Rain, Snow, Hail, Precipitation: [mm/h] [copertura 0..1] [km dei rovesci]. */
+	static void SetPrecipitation(UWorld* World, const TArray<FString>& Args, GeoWorld::Weather::EPrecipitationKind Kind,
+	                             double DefaultRateMmH, double DefaultCoverage, double DefaultCellKm)
+	{
+		UGeoWeatherSubsystem* Weather = Get(World);
+		if (!Weather) { return; }
+		const double Rate = Args.Num() >= 1 ? FCString::Atod(*Args[0]) : DefaultRateMmH;
+		const double Coverage = Args.Num() >= 2 ? FCString::Atod(*Args[1]) : DefaultCoverage;
+		const double CellKm = Args.Num() >= 3 ? FCString::Atod(*Args[2]) : DefaultCellKm;
+		Weather->SetPrecipitation(Kind, Rate, Coverage, CellKm);
+		ReportPrecipitation(Weather);
+	}
 }
 
 static FAutoConsoleCommandWithWorldAndArgs GeoWeatherWindCommand(
@@ -1917,7 +1966,7 @@ static FAutoConsoleCommandWithWorldAndArgs GeoWeatherSeedCommand(
 
 static FAutoConsoleCommandWithWorldAndArgs GeoWeatherDebugCommand(
 	TEXT("geo.Weather.Debug"),
-	TEXT("geo.Weather.Debug <0|1> - overlay del vento: riferimento, mare, sotto di te, a 10 m, alla tua quota."),
+	TEXT("geo.Weather.Debug <0|1> - overlay del meteo: il vento (riferimento, mare, sotto di te, a 10 m, alla tua quota) e la precipitazione."),
 	FConsoleCommandWithWorldAndArgsDelegate::CreateStatic(
 		[](const TArray<FString>& Args, UWorld* World)
 	{
@@ -1940,6 +1989,116 @@ static FAutoConsoleCommandWithWorldAndArgs GeoWeatherArrowsCommand(
 		Weather->SetArrowHeight(Height);
 		GeoTerrainConsole::Report(Height > 0.0 ? FString::Printf(TEXT("Frecce del vento a %.0f m dal suolo"), Height)
 		                                       : FString(TEXT("Frecce del vento spente")));
+	}));
+
+static FAutoConsoleCommandWithWorldAndArgs GeoWeatherRainCommand(
+	TEXT("geo.Weather.Rain"),
+	TEXT("geo.Weather.Rain [mm/h] [copertura 0..1] [km] - pioggia (default 4 mm/h, dappertutto). 1 debole, 4 moderata, 15 forte, 50 a dirotto."),
+	FConsoleCommandWithWorldAndArgsDelegate::CreateStatic(
+		[](const TArray<FString>& Args, UWorld* World)
+	{
+		GeoWeatherConsole::SetPrecipitation(World, Args, GeoWorld::Weather::EPrecipitationKind::Rain, 4.0, 1.0, 8.0);
+	}));
+
+static FAutoConsoleCommandWithWorldAndArgs GeoWeatherSnowCommand(
+	TEXT("geo.Weather.Snow"),
+	TEXT("geo.Weather.Snow [mm/h d'acqua] [copertura 0..1] [km] - neve a ogni quota (default 1 mm/h: ~1 cm di neve all'ora)."),
+	FConsoleCommandWithWorldAndArgsDelegate::CreateStatic(
+		[](const TArray<FString>& Args, UWorld* World)
+	{
+		GeoWeatherConsole::SetPrecipitation(World, Args, GeoWorld::Weather::EPrecipitationKind::Snow, 1.0, 1.0, 8.0);
+	}));
+
+static FAutoConsoleCommandWithWorldAndArgs GeoWeatherHailCommand(
+	TEXT("geo.Weather.Hail"),
+	TEXT("geo.Weather.Hail [mm/h] [copertura 0..1] [km] - temporali con grandine nei nuclei (default 30 mm/h, 40% del suolo, celle da 6 km)."),
+	FConsoleCommandWithWorldAndArgsDelegate::CreateStatic(
+		[](const TArray<FString>& Args, UWorld* World)
+	{
+		GeoWeatherConsole::SetPrecipitation(World, Args, GeoWorld::Weather::EPrecipitationKind::Hail, 30.0, 0.4, 6.0);
+	}));
+
+static FAutoConsoleCommandWithWorldAndArgs GeoWeatherPrecipitationCommand(
+	TEXT("geo.Weather.Precipitation"),
+	TEXT("geo.Weather.Precipitation [mm/h] [copertura 0..1] [km] - pioggia o neve secondo la temperatura e la quota (default 3 mm/h). Senza argomenti con il sereno, dice com'e'."),
+	FConsoleCommandWithWorldAndArgsDelegate::CreateStatic(
+		[](const TArray<FString>& Args, UWorld* World)
+	{
+		UGeoWeatherSubsystem* Weather = GeoWeatherConsole::Get(World);
+		if (!Weather) { return; }
+		if (Args.Num() == 0 && Weather->GetPrecipitationSettings().RateMmH > 0.0)
+		{
+			GeoWeatherConsole::ReportPrecipitation(Weather);
+			return;
+		}
+		GeoWeatherConsole::SetPrecipitation(World, Args, GeoWorld::Weather::EPrecipitationKind::Auto, 3.0, 1.0, 8.0);
+	}));
+
+static FAutoConsoleCommandWithWorldAndArgs GeoWeatherClearCommand(
+	TEXT("geo.Weather.Clear"),
+	TEXT("geo.Weather.Clear - torna il sereno. Il suolo si asciuga e la neve fonde da soli (in decine di minuti)."),
+	FConsoleCommandWithWorldAndArgsDelegate::CreateStatic(
+		[](const TArray<FString>& Args, UWorld* World)
+	{
+		UGeoWeatherSubsystem* Weather = GeoWeatherConsole::Get(World);
+		if (!Weather) { return; }
+		Weather->ClearPrecipitation();
+		GeoWeatherConsole::ReportPrecipitation(Weather);
+		GeoTerrainConsole::Report(TEXT("  Per asciugare subito: geo.Weather.Wetness 0 e geo.Weather.SnowCover off"), FColor::White);
+	}));
+
+static FAutoConsoleCommandWithWorldAndArgs GeoWeatherTemperatureCommand(
+	TEXT("geo.Weather.Temperature"),
+	TEXT("geo.Weather.Temperature <gradi C al livello del mare> [gradi C per km] - decide dove la pioggia diventa neve (default 15 e 6,5)."),
+	FConsoleCommandWithWorldAndArgsDelegate::CreateStatic(
+		[](const TArray<FString>& Args, UWorld* World)
+	{
+		UGeoWeatherSubsystem* Weather = GeoWeatherConsole::Get(World);
+		if (!Weather) { return; }
+		if (Args.Num() >= 1)
+		{
+			const GeoWorld::Weather::FPrecipitationSettings& Current = Weather->GetPrecipitationSettings();
+			Weather->SetTemperature(FCString::Atod(*Args[0]), Args.Num() >= 2 ? FCString::Atod(*Args[1]) : Current.LapseRateCPerKm);
+		}
+		GeoWeatherConsole::ReportPrecipitation(Weather);
+	}));
+
+static FAutoConsoleCommandWithWorldAndArgs GeoWeatherWetnessCommand(
+	TEXT("geo.Weather.Wetness"),
+	TEXT("geo.Weather.Wetness <0..1> - quanto e' bagnato il suolo, adesso (poi segue la pioggia da solo)."),
+	FConsoleCommandWithWorldAndArgsDelegate::CreateStatic(
+		[](const TArray<FString>& Args, UWorld* World)
+	{
+		UGeoWeatherSubsystem* Weather = GeoWeatherConsole::Get(World);
+		if (!Weather || Args.Num() < 1) { return; }
+		Weather->SetWetness(FCString::Atod(*Args[0]));
+		GeoWeatherConsole::ReportPrecipitation(Weather);
+	}));
+
+static FAutoConsoleCommandWithWorldAndArgs GeoWeatherSnowCoverCommand(
+	TEXT("geo.Weather.SnowCover"),
+	TEXT("geo.Weather.SnowCover <quota s.l.m. m> | off - neve sul suolo sopra quella quota, adesso (poi scende con le nevicate e risale con il caldo)."),
+	FConsoleCommandWithWorldAndArgsDelegate::CreateStatic(
+		[](const TArray<FString>& Args, UWorld* World)
+	{
+		UGeoWeatherSubsystem* Weather = GeoWeatherConsole::Get(World);
+		if (!Weather || Args.Num() < 1) { return; }
+		if (Args[0].Equals(TEXT("off"), ESearchCase::IgnoreCase)) { Weather->ClearSnowCover(); }
+		else { Weather->SetSnowCover(FCString::Atod(*Args[0])); }
+		GeoWeatherConsole::ReportPrecipitation(Weather);
+	}));
+
+static FAutoConsoleCommandWithWorldAndArgs GeoWeatherFogCommand(
+	TEXT("geo.Weather.Fog"),
+	TEXT("geo.Weather.Fog <0|1> - la precipitazione toglie visibilita' con la nebbia del livello (default 1)."),
+	FConsoleCommandWithWorldAndArgsDelegate::CreateStatic(
+		[](const TArray<FString>& Args, UWorld* World)
+	{
+		UGeoWeatherSubsystem* Weather = GeoWeatherConsole::Get(World);
+		if (!Weather) { return; }
+		const bool bValue = (Args.Num() >= 1) ? (FCString::Atoi(*Args[0]) != 0) : !Weather->IsFogEnabled();
+		Weather->SetFogEnabled(bValue);
+		GeoTerrainConsole::Report(bValue ? TEXT("Nebbia della precipitazione: ON") : TEXT("Nebbia della precipitazione: OFF (la nebbia del livello torna com'era)"));
 	}));
 
 static FAutoConsoleCommandWithWorldAndArgs GeoWaterDemoCommand(

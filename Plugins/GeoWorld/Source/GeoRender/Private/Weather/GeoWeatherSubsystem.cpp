@@ -15,6 +15,7 @@ using namespace GeoWorld;
 using GeoWorld::Weather::FWind;
 using GeoWorld::Weather::FWindSample;
 using GeoWorld::Weather::FSurfaceInfluence;
+using GeoWorld::Weather::FPrecipitationSample;
 
 namespace
 {
@@ -23,6 +24,12 @@ namespace
 	/** Le frecce: 9 x 9 attorno alla camera, lunghe quanto il vento fa in 20 s. */
 	constexpr int32 ArrowGrid = 9;
 	constexpr double ArrowSeconds = 20.0;
+	/** I rovesci viaggiano con il vento a questa quota (s.l.m.): ~700 hPa, il "vento guida" dei meteorologi. */
+	constexpr double SteeringAltitudeM = 3000.0;
+	/** La visibilita' segue la precipitazione in qualche secondo: la nebbia non scatta. */
+	constexpr double VisibilitySeconds = 3.0;
+	/** Koschmieder: visibilita' = 3,912 / estinzione (dove resta il 2% di contrasto). */
+	constexpr double Koschmieder = 3.912;
 
 	FWind WindOf(double North, double East)
 	{
@@ -45,6 +52,8 @@ namespace
 	}
 
 	FString Utf8(const std::string& Text) { return FString(UTF8_TO_TCHAR(Text.c_str())); }
+	/** "2,5 °C" (il simbolo del grado arriva in UTF-8 da GeoFormat.h). */
+	FString Celsius(double Value) { return Utf8(Format::Number(Value, 1) + " " + Format::Degree + "C"); }
 }
 
 bool UGeoWeatherSubsystem::ShouldCreateSubsystem(UObject* Outer) const
@@ -64,6 +73,32 @@ void UGeoWeatherSubsystem::Initialize(FSubsystemCollectionBase& Collection)
 	Settings.Reference = FWind{ 5.0, 240.0 };
 	Field.SetSettings(Settings);
 	SeaWind = SeaGust = Field.SurfaceWind(45.0, Weather::RoughnessWater);
+
+	// Il rebase sposta il mondo sotto le particelle: si segue (vedi
+	// OnGeoreferenceRebased). Lo stato di partenza serve gia' al primo.
+	Collection.InitializeDependency<UGeoreferenceSubsystem>();
+	if (UGeoreferenceSubsystem* Georeference = GetWorld()->GetSubsystem<UGeoreferenceSubsystem>())
+	{
+		LastSnapshot = Georeference->GetSnapshot();
+		bHaveSnapshot = true;
+		RebaseHandle = Georeference->OnGeoreferenceRebased.AddUObject(this, &UGeoWeatherSubsystem::OnGeoreferenceRebased);
+	}
+	Renderer = MakeUnique<FGeoPrecipitationRenderer>();
+}
+
+void UGeoWeatherSubsystem::Deinitialize()
+{
+	if (UWorld* World = GetWorld())
+	{
+		if (UGeoreferenceSubsystem* Georeference = World->GetSubsystem<UGeoreferenceSubsystem>())
+		{
+			Georeference->OnGeoreferenceRebased.Remove(RebaseHandle);
+		}
+	}
+	// Via le particelle, e la nebbia del livello torna com'era.
+	if (Renderer) { Renderer->Shutdown(); }
+	Renderer.Reset();
+	Super::Deinitialize();
 }
 
 TStatId UGeoWeatherSubsystem::GetStatId() const
@@ -118,6 +153,31 @@ void UGeoWeatherSubsystem::ClearWindAloft()
 	Weather::FWindSettings Settings = Field.GetSettings();
 	Settings.Aloft.clear();
 	Field.SetSettings(Settings);
+}
+
+void UGeoWeatherSubsystem::SetPrecipitation(Weather::EPrecipitationKind Kind, double RateMmH, double Coverage, double CellSizeKm)
+{
+	Weather::FPrecipitationSettings Settings = Precipitation.GetSettings();
+	Settings.Kind = Kind;
+	Settings.RateMmH = RateMmH;
+	Settings.Coverage = Coverage;
+	Settings.CellSizeKm = CellSizeKm;
+	Precipitation.SetSettings(Settings);
+}
+
+void UGeoWeatherSubsystem::ClearPrecipitation()
+{
+	Weather::FPrecipitationSettings Settings = Precipitation.GetSettings();
+	Settings.RateMmH = 0.0;
+	Precipitation.SetSettings(Settings);
+}
+
+void UGeoWeatherSubsystem::SetTemperature(double SeaLevelC, double LapseRateCPerKm)
+{
+	Weather::FPrecipitationSettings Settings = Precipitation.GetSettings();
+	Settings.SeaLevelTemperatureC = SeaLevelC;
+	Settings.LapseRateCPerKm = LapseRateCPerKm;
+	Precipitation.SetSettings(Settings);
 }
 
 // ---------------------------------------------------------------------------
@@ -206,6 +266,24 @@ FVector UGeoWeatherSubsystem::GetWindNorthEastUp(const FVector& WorldLocation) c
 	return FVector(Sample.North, Sample.East, Sample.Up);
 }
 
+FGeoPrecipitationInfo UGeoWeatherSubsystem::GetPrecipitationAt(const FVector& WorldLocation) const
+{
+	FGeoPrecipitationInfo Info;
+	const UGeoreferenceSubsystem* Georeference = GetWorld() ? GetWorld()->GetSubsystem<UGeoreferenceSubsystem>() : nullptr;
+	if (!Georeference) { return Info; }
+	const Core::FGeodetic Where = Georeference->GetSnapshot().UnrealToGeodetic(WorldLocation);
+	const double LatDeg = Where.LatRad / Core::DegToRad, LonDeg = Where.LonRad / Core::DegToRad;
+	// La temperatura e la neve vanno con la quota sul MARE: si toglie il geoide.
+	const FPrecipitationSample Sample = Precipitation.Sample(LatDeg, LonDeg, Where.HeightM - GeoidAt(LonDeg, LatDeg));
+	Info.RateMmH = static_cast<float>(Sample.RateMmH);
+	Info.Rain = static_cast<float>(Sample.Rain);
+	Info.Snow = static_cast<float>(Sample.Snow);
+	Info.Hail = static_cast<float>(Sample.Hail);
+	Info.TemperatureC = static_cast<float>(Sample.TemperatureC);
+	Info.VisibilityM = static_cast<float>(FMath::Min(Sample.VisibilityM, 1.0e9));
+	return Info;
+}
+
 // ---------------------------------------------------------------------------
 //  A ogni frame
 // ---------------------------------------------------------------------------
@@ -215,9 +293,15 @@ void UGeoWeatherSubsystem::Tick(float DeltaTime)
 	Super::Tick(DeltaTime);
 	// Un frame lunghissimo (il debugger, un caricamento) non deve far correre
 	// le raffiche di chilometri: si avanza al massimo di un secondo.
-	Field.Advance(FMath::Min(static_cast<double>(DeltaTime), 1.0), Observer.LatDeg);
+	const double Step = FMath::Min(static_cast<double>(DeltaTime), 1.0);
+	Field.Advance(Step, Observer.LatDeg);
 	UpdateObserver();
-	if (bShowDebugOverlay) { DrawDebugOverlay(); }
+	UpdatePrecipitation(Step);
+	if (bShowDebugOverlay)
+	{
+		DrawDebugOverlay();
+		DrawPrecipitationOverlay();
+	}
 	if (ArrowHeightM > 0.0) { DrawArrows(); }
 }
 
@@ -231,10 +315,13 @@ void UGeoWeatherSubsystem::UpdateObserver()
 		SeaWind = SeaGust = Field.SurfaceWind(Observer.LatDeg, Weather::RoughnessWater);
 		return;
 	}
+	ViewLocation = Location;
 	const Core::FGeodetic Here = Georeference->GetSnapshot().UnrealToGeodetic(Location);
 	Observer.LatDeg = Here.LatRad / Core::DegToRad;
 	Observer.LonDeg = Here.LonRad / Core::DegToRad;
+	Observer.HeightM = Here.HeightM;
 	const double Geoid = GeoidAt(Observer.LonDeg, Observer.LatDeg);
+	Observer.GeoidM = Geoid;
 	if (!TerrainHeightAt(Observer.LonDeg, Observer.LatDeg, true, Observer.GroundHeightM)) { Observer.GroundHeightM = Geoid; }
 	Observer.HeightAboveGroundM = FMath::Max(0.0, Here.HeightM - Observer.GroundHeightM);
 	Observer.Surface = SurfaceAt(Observer.LatDeg, Observer.LonDeg, Observer.bOverWater);
@@ -252,6 +339,88 @@ void UGeoWeatherSubsystem::UpdateObserver()
 	Sea.RoughnessM = Weather::RoughnessWater;
 	const FWindSample Gust = Field.Sample(Observer.LatDeg, Observer.LonDeg, Weather::ReferenceHeightM, Weather::ReferenceHeightM, Sea);
 	SeaGust = WindOf(Gust.North, Gust.East);
+}
+
+void UGeoWeatherSubsystem::UpdatePrecipitation(double DeltaSeconds)
+{
+	// ------------------------------------------------------------------
+	//  1. I rovesci viaggiano con il vento in quota (medio: le raffiche non
+	//     spostano un temporale).
+	// ------------------------------------------------------------------
+	const FSurfaceInfluence FreeAir;
+	const double SteeringAboveGround = FMath::Max(SteeringAltitudeM + Observer.GeoidM - Observer.GroundHeightM, Weather::BoundaryLayerTopM);
+	const FWindSample Steering = Field.Sample(Observer.LatDeg, Observer.LonDeg, SteeringAboveGround, SteeringAltitudeM, FreeAir);
+	Precipitation.Advance(DeltaSeconds, Steering.MeanNorth, Steering.MeanEast);
+
+	// ------------------------------------------------------------------
+	//  2. Cosa cade qui: alla quota della camera (le particelle, la
+	//     visibilita') e al suolo sotto (bagnato, neve). Quote sul MARE.
+	// ------------------------------------------------------------------
+	FObserverPrecipitation& Here = ObserverPrecipitation;
+	if (Observer.bValid)
+	{
+		Here.AtCamera = Precipitation.Sample(Observer.LatDeg, Observer.LonDeg, Observer.HeightM - Observer.GeoidM);
+		Here.AtGround = Precipitation.Sample(Observer.LatDeg, Observer.LonDeg, Observer.GroundHeightM - Observer.GeoidM);
+	}
+	else
+	{
+		Here.AtCamera = Here.AtGround = FPrecipitationSample{};
+	}
+	Ground.Advance(DeltaSeconds, Here.AtGround, Precipitation);
+
+	// La visibilita' segue piano: si smussa l'ESTINZIONE (che si somma), non la distanza.
+	const double Extinction = std::isfinite(Here.AtCamera.VisibilityM) ? Koschmieder / FMath::Max(Here.AtCamera.VisibilityM, 1.0) : 0.0;
+	SmoothedExtinction += (Extinction - SmoothedExtinction) * (1.0 - FMath::Exp(-DeltaSeconds / VisibilitySeconds));
+	Here.VisibilityM = SmoothedExtinction > 1.0e-7 ? Koschmieder / SmoothedExtinction : 1.0e9;
+
+	// ------------------------------------------------------------------
+	//  3. Le particelle: cadono con il vento di adesso (raffiche comprese),
+	//     attorno alla camera in metri (nord, est, su: gli assi di Unreal
+	//     all'origine).
+	// ------------------------------------------------------------------
+	const FWindSample& CameraWind = Observer.AtCamera;
+	const double Camera[3] = { ViewLocation.X * Units::UuToMeters, ViewLocation.Y * Units::UuToMeters, ViewLocation.Z * Units::UuToMeters };
+	if (Observer.bValid)
+	{
+		Particles.Advance(DeltaSeconds, Here.AtCamera, CameraWind.North, CameraWind.East, CameraWind.Up, Camera);
+	}
+	else
+	{
+		Particles.Advance(DeltaSeconds, FPrecipitationSample{}, 0.0, 0.0, 0.0, Camera);
+	}
+
+	// ------------------------------------------------------------------
+	//  4. A schermo: particelle, suolo (MPC_GeoWeather) e nebbia.
+	// ------------------------------------------------------------------
+	if (!Renderer) { return; }
+	FGeoPrecipitationRenderer::FGroundParameters Parameters;
+	Parameters.Wetness = Ground.GetWetness();
+	Parameters.SnowCoverM = Ground.GetSnowCoverM();
+	Parameters.SnowAmount = Ground.HasSnow() ? 1.0 : 0.0;
+	// Il materiale ricava la quota dalla Z: all'origine Z = 0 e' l'ellissoide,
+	// e per avere la quota sul mare toglie il geoide di li'.
+	if (bHaveSnapshot)
+	{
+		const Core::FGeodetic Origin = LastSnapshot.Georeference.GetOriginGeodetic();
+		Parameters.GeoidAtOriginM = GeoidAt(Origin.LonRad / Core::DegToRad, Origin.LatRad / Core::DegToRad);
+	}
+	const double GroundZ = (Observer.GroundHeightM - Observer.HeightM) * Units::MetersToUu + ViewLocation.Z;
+	Renderer->Update(GetWorld(), ViewLocation, Particles, Parameters, Here.VisibilityM, bDriveFog && Observer.bValid, GroundZ);
+}
+
+void UGeoWeatherSubsystem::OnGeoreferenceRebased(const FGeoreferenceSnapshot& Snapshot)
+{
+	// Il punto che prima stava nella vecchia posizione della nuova origine ora
+	// sta a zero: tutto il mondo si e' spostato di -Delta. Le particelle si
+	// spostano con lui, come le onde (UGeoWaterSubsystem::OnGeoreferenceRebased).
+	if (bHaveSnapshot)
+	{
+		const FVector OldPosition = LastSnapshot.GeodeticToUnreal(Snapshot.Georeference.GetOriginGeodetic());
+		const double Delta[3] = { OldPosition.X * Units::UuToMeters, OldPosition.Y * Units::UuToMeters, OldPosition.Z * Units::UuToMeters };
+		Particles.ApplyOriginShift(Delta);
+	}
+	LastSnapshot = Snapshot;
+	bHaveSnapshot = true;
 }
 
 // ---------------------------------------------------------------------------
@@ -305,6 +474,57 @@ void UGeoWeatherSubsystem::DrawDebugOverlay() const
 		*Utf8(Format::Wind(AtCamera.MeanSpeed(), AtCamera.MeanFromDegrees())), *Utf8(Format::Number(AtCamera.Speed(), 1)), AtCamera.Up));
 	Line(FColor::Yellow, FString::Printf(TEXT("Frecce       : %s (geo.Weather.Arrows <quota sul suolo>)"),
 		ArrowHeightM > 0.0 ? *FString::Printf(TEXT("a %.0f m dal suolo"), ArrowHeightM) : TEXT("spente")));
+}
+
+void UGeoWeatherSubsystem::DrawPrecipitationOverlay() const
+{
+	if (!GEngine) { return; }
+	int32 Key = 0x6F80;
+	auto Line = [&Key](const FColor& Colour, const FString& Text)
+	{
+		GEngine->AddOnScreenDebugMessage(Key++, 0.0f, Colour, Text);
+	};
+	const Weather::FPrecipitationSettings& Sky = Precipitation.GetSettings();
+	static const TCHAR* KindNames[] = { TEXT("secondo la temperatura"), TEXT("solo pioggia"), TEXT("solo neve"), TEXT("con grandine") };
+	Line(FColor::Cyan, TEXT("--- GeoWorld | Meteo: pioggia, neve, grandine ---"));
+	if (Sky.RateMmH > 0.0)
+	{
+		Line(FColor::White, FString::Printf(TEXT("Precipitazione: %s mm/h nel cuore, %s, copertura %.0f%%, rovesci da %s km"),
+			*Utf8(Format::Number(Sky.RateMmH, 1)), KindNames[static_cast<int32>(Sky.Kind)], 100.0 * Sky.Coverage,   /* percentuale, non-unita */
+			*Utf8(Format::Number(Sky.CellSizeKm, 0))));
+	}
+	else
+	{
+		Line(FColor::White, TEXT("Precipitazione: sereno (geo.Weather.Rain 4, Snow 1, Hail 30)"));
+	}
+	Line(FColor::White, FString::Printf(TEXT("Temperatura   : %s al mare, cala di %s/km: zero termico %s, quota neve %s, nuvole fino a %s"),
+		*Celsius(Sky.SeaLevelTemperatureC), *Celsius(Sky.LapseRateCPerKm),
+		*Utf8(Format::Metres(Precipitation.FreezingLevelM())),
+		Sky.Kind == Weather::EPrecipitationKind::Rain ? TEXT("mai") : Sky.Kind == Weather::EPrecipitationKind::Snow ? TEXT("ovunque")
+			: *Utf8(Format::Metres(Precipitation.SnowLineM())),
+		*Utf8(Format::Metres(Precipitation.CloudTopM()))));
+	Line(FColor::White, FString::Printf(TEXT("Suolo         : bagnato %.0f%%, %s"), 100.0 * Ground.GetWetness(),   /* percentuale, non-unita */
+		Ground.HasSnow() ? *FString::Printf(TEXT("neve sopra %s"), *Utf8(Format::Metres(Ground.GetSnowCoverM()))) : TEXT("niente neve")));
+	if (Observer.bValid)
+	{
+		const FObserverPrecipitation& Here = ObserverPrecipitation;
+		Line(FColor::Green, FString::Printf(TEXT("Qui           : %s, %s; al suolo %s"),
+			*Utf8(Format::Precipitation(Here.AtCamera.RateMmH, Here.AtCamera.Rain, Here.AtCamera.Snow, Here.AtCamera.Hail)),
+			*Celsius(Here.AtCamera.TemperatureC),
+			*Utf8(Format::Precipitation(Here.AtGround.RateMmH, Here.AtGround.Rain, Here.AtGround.Snow, Here.AtGround.Hail))));
+		const Weather::FParticleLayer& Drops = Particles.GetLayer(Weather::EParticleType::Rain);
+		const Weather::FParticleLayer& Flakes = Particles.GetLayer(Weather::EParticleType::Snow);
+		const Weather::FParticleLayer& Stones = Particles.GetLayer(Weather::EParticleType::Hail);
+		Line(FColor::Green, FString::Printf(TEXT("Particelle    : gocce %.0f%%, fiocchi %.0f%%, chicchi %.0f%% (cadono a %.1f / %.1f / %.1f m/s)"),
+			100.0 * Drops.Density, 100.0 * Flakes.Density, 100.0 * Stones.Density,   /* percentuale, non-unita */
+			-Drops.Velocity[2], -Flakes.Velocity[2], -Stones.Velocity[2]));
+		Line(FColor::Green, FString::Printf(TEXT("Visibilita'   : %s; nebbia %s (densita' %.4f)"),
+			*Utf8(Format::Distance(Here.VisibilityM)),
+			!bDriveFog ? TEXT("spenta") : Renderer ? Renderer->GetFogState() : TEXT("--"),
+			Renderer ? Renderer->GetFogDensity() : 0.0));
+	}
+	const FString Problem = GetRenderProblem();
+	if (!Problem.IsEmpty()) { Line(FColor::Yellow, Problem); }
 }
 
 void UGeoWeatherSubsystem::DrawArrows() const

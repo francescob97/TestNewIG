@@ -51,6 +51,7 @@ Due convenzioni tipografiche:
 | 12 | `12-strade.md` | Fase 8 — Strade, ferrovie e piste: i dati vettoriali |
 | 13 | `13-acqua.md` | Fase 9 — L'acqua, il vento, e le stampe della posizione; mari e oceani |
 | 14 | `14-vento.md` | Il vento: da un numero a un campo (strato limite, rilievi, raffiche) |
+| 15 | `15-meteo.md` | Il meteo: pioggia, neve, grandine (quota neve, visibilità, suolo, particelle) |
 
 La Fase 7 (entità, CIGI, DIS, HLA) è solo progettata: la trovi in
 `docs/fase7-design.md`. Il programma dalla Fase 8 alla 12 (strade, acqua,

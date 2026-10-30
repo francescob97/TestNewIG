@@ -154,6 +154,23 @@ void UGeoPositionHudSubsystem::Draw(UCanvas* Canvas, APlayerController* /*Contro
 		const Weather::FWindSample Surface = WeatherSubsystem->SampleWind(LatDeg, LonDeg,
 			(GroundHeightAt(LonDeg, LatDeg, Ground) ? Ground : Here.HeightM) + Weather::ReferenceHeightM);
 		Add(TEXT("A 10 m"), Format::Wind(Surface.MeanSpeed(), Surface.MeanFromDegrees()));
+
+		// Il tempo che fa qui: cosa cade (alla quota della vista), la
+		// temperatura e lo zero termico, quanto si vede, il suolo.
+		const Weather::FPrecipitationField& Sky = WeatherSubsystem->GetPrecipitationField();
+		const Weather::FPrecipitationSample Falling = Sky.Sample(LatDeg, LonDeg, Here.HeightM - Undulation);
+		Add(TEXT("Meteo"), Format::Precipitation(Falling.RateMmH, Falling.Rain, Falling.Snow, Falling.Hail));
+		Add(TEXT("Temperatura"), Format::Number(Falling.TemperatureC, 1) + " " + Format::Degree + "C, zero termico "
+			+ Format::Metres(Sky.FreezingLevelM()));
+		const double Visibility = WeatherSubsystem->GetObserverPrecipitation().VisibilityM;
+		if (Visibility < 50000.0) { Add(TEXT("Visibilita'"), Format::Distance(Visibility)); }
+		const Weather::FGroundWeather& Soil = WeatherSubsystem->GetGround();
+		if (Soil.GetWetness() > 0.01 || Soil.HasSnow())
+		{
+			std::string Text = Soil.GetWetness() > 0.01 ? "bagnato " + Format::Number(100.0 * Soil.GetWetness(), 0) + "%" : "asciutto"; /* percentuale, non-unita */
+			if (Soil.HasSnow()) { Text += ", neve sopra " + Format::Metres(Soil.GetSnowCoverM()); }
+			Add(TEXT("Suolo"), Text);
+		}
 	}
 
 	// --- Disegno --------------------------------------------------------------

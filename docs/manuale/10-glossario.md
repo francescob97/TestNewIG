@@ -51,11 +51,15 @@ classe `UCLASS`, con i valori di default. I file `.ini` vengono applicati a lui.
 letti dal materiale come parametri. Si possono cambiare a ogni frame senza ricostruire
 l'istanza di materiale. Qui: Morph e Fade delle transizioni. (6)
 
+**Coefficiente di estinzione** — quanta luce una nebbia, una pioggia o una nevicata toglie per chilometro. La pioggia ha `0,29 · R^0,67` per km (R in mm/h), la neve `3,9 · S^0,75`: dieci volte tanto a parità d'acqua. Le estinzioni di cose diverse si sommano. (15)
+
 **Componente** (`UActorComponent`) — un pezzo di un attore che gli dà una capacità:
 disegnarsi, muoversi, stare a una coordinata geografica. (1)
 
 **Copertura** — la percentuale di una tile di immagine effettivamente coperta
 dall'ortofoto. (7)
+
+**Copertura (della precipitazione)** — quanta parte del suolo è sotto la precipitazione: 1 un fronte che copre tutto, 0,3 rovesci sparsi. Decide la soglia sulla mappa dei rovesci, con l'inversa della normale. (15)
 
 **COG** (*Cloud Optimized GeoTIFF*) — un GeoTIFF organizzato in modo che se ne
 possano leggere pezzi via rete senza scaricarlo tutto. (7)
@@ -83,6 +87,8 @@ terreno vero. Qui approssimato con il passo fra i post. (5)
 del LOD. Soglia di default: 8 pixel (era 4: vedi `docs/prova-torino-2.md`). (5)
 
 **Esposizione (alle onde)** — quanto un punto d'acqua sente le onde del vento: 1 il mare aperto, 0,35 una laguna, da 0,12 a 0,8 un lago secondo la grandezza (il *fetch*, la distanza su cui il vento spinge), quasi 0 fiumi e canali. Sta nel canale G del raster. (13)
+
+**ExponentialHeightFog** — l'attore della nebbia di Unreal: una densità che cala con la quota. La precipitazione ne alza la densità (`56,4 / visibilità in m`) e la rimette com'era; nell'editor quella del livello non si tocca, perché si salverebbe. (15)
 
 **Fascia** (del piano di residenza) — un gruppo di tile del piano con la stessa urgenza: 0 = adesso, 1..3 = posizioni previste, l'ultima = anello di sicurezza. (11)
 
@@ -127,6 +133,8 @@ quota minima e massima (quote) o copertura (immagini). (3)
 
 **Isteresi** — due soglie diverse per entrare e per uscire da uno stato (riscaldamento: entra sotto il 60%, esce sopra il 95%; raffinamento di una tile: si entra alla soglia, si esce all'80%), per non oscillare attorno a una soglia unica. (11)
 
+**Koschmieder** — la regola della visibilità: si vede fin dove il contrasto scende al 2%, cioè `visibilità = 3,912 / estinzione`. (15)
+
 **Latitudine parametrica** — tan β = (b/a)·tan φ. È la latitudine di un punto dell'ellissoide nello spazio scalato, dove l'ellissoide diventa una sfera. (11)
 
 **LOD** (*Level Of Detail*) — usare versioni più semplici di ciò che è lontano. (5)
@@ -166,6 +174,8 @@ Est → Y, Alto → Z. (2)
 **Normale geodetica** — la perpendicolare all'ellissoide. Non punta al centro
 della Terra. (2)
 
+**Nucleo (di un rovescio)** — il centro di un rovescio, dove l'intensità sale al massimo. La grandine cade lì, mai ai margini. (15)
+
 **Ondulazione** (`N`) — la differenza fra geoide ed ellissoide. In Italia fra +42
 e +52 m. (3)
 
@@ -201,8 +211,12 @@ sul thread di rendering. (1)
 
 **Quadtree** — albero in cui ogni nodo ha quattro figli. La piramide delle tile. (5)
 
+**Quadrato degenere** — un quadrato con i quattro vertici nello stesso punto: non si vede. Le particelle della pioggia sono quadrati degeneri che il materiale apre (World Position Offset) solo dove serve. (15)
+
 **Quota ellissoidica / ortometrica** — sopra l'ellissoide / sopra il livello del
 mare. Il motore usa solo la prima. (3)
+
+**Quota neve** — la quota sopra cui la precipitazione cade come neve: 300 m sotto lo zero termico (i fiocchi ci mettono qualche centinaio di metri a fondere), con 150 m di neve mista sopra e sotto. (15)
 
 **Raffica** — la variazione lenta del vento attorno alla media. Muove l'increspatura e la schiuma, non le onde lunghe, che seguono il vento medio. (13)
 
@@ -260,6 +274,8 @@ pixel. Il runtime le disegna alla risoluzione che serve. Livelli 10..13. (12)
 
 **TINITALY** — il modello del terreno dell'Italia a 10 m dell'INGV. (3)
 
+**Transient** (`RF_Transient`) — l'etichetta di un oggetto che Unreal non salva mai. L'attore delle particelle e la nebbia creata dal meteo la portano. (15)
+
 **Turbolenza congelata** — l'ipotesi di Taylor: su tempi brevi le raffiche non cambiano, vengono solo trasportate dal vento. Il campo delle raffiche scorre con il vento medio, e una raffica si vede correre sul lago. (14)
 
 **UBT / UHT** — Unreal Build Tool e Unreal Header Tool: compilano e generano codice. (1)
@@ -287,6 +303,10 @@ uno solo. (3, 7)
 **Wireframe** — la visualizzazione a reticolo dei triangoli. `viewmode wireframe` è
 il primo comando da provare quando non si vede niente. (6)
 
+**World Position Offset** (WPO) — l'uscita di un materiale che sposta ogni vertice, calcolata dalla scheda video a ogni frame. Le onde e le particelle della pioggia si muovono così, senza che la CPU tocchi la mesh. (13, 15)
+
+**Zero termico** — la quota dove l'aria è a 0 °C. Con 15 °C al mare e 6,5 °C in meno ogni chilometro, a 2.308 m. (15)
+
 ---
 
 ## Mappa completa dei file
@@ -311,7 +331,7 @@ il primo comando da provare quando non si vede niente. (6)
 | `Public/Geo/Ellipsoid.h` | WGS84, conversioni, basi ENU/NEU |
 | `Public/Geo/EnuFrame.h` | frame locale ENU |
 | `Public/Geo/GeoUnits.h` | `MetersToUu`: l'unico posto del numero 100 |
-| `Public/Geo/GeoFormat.h` | numeri, gradi e metri all'italiana, per le stampe |
+| `Public/Geo/GeoFormat.h` | numeri, gradi, metri, vento, distanze e precipitazione all'italiana, per le stampe |
 | `Public/Geo/Georeference.h` | `P_unreal = M·(P − O)·100` |
 | `Public/Georeference/GeoreferenceSnapshot.h` | la copia per i thread |
 | `Public/Georeference/GeoreferenceSubsystem.h` | il subsystem del rebasing |
@@ -367,7 +387,8 @@ il primo comando da provare quando non si vede niente. (6)
 | `Public/GeoFlyPawn.h` | la camera di volo |
 | `Public/Water/WaterMesh.h`, `WaveSpectrum.h`, `WaterTextures.h` | acqua: scavo, mesh, onde, texture (puri) |
 | `Public/Water/GeoWaterSubsystem.h` | il subsystem dell'acqua |
-| `Public/Weather/Wind.h`, `GeoWeatherSubsystem.h` | il vento |
+| `Public/Weather/Wind.h`, `WindField.h`, `GeoWeatherSubsystem.h` | il vento (il campo e' puro) |
+| `Public/Weather/Precipitation.h`, `GeoPrecipitationRenderer.h` | pioggia, neve, grandine: il modello (puro) e il disegno (particelle, suolo, nebbia) |
 | `Public/GeoPositionHudSubsystem.h` | le stampe della posizione |
 | `Private/GeoRenderModule.cpp` | comandi `geo.Lod.*`, `geo.Terrain.*`, `geo.Imagery.*`, `geo.Roads.*`, `geo.Water.*`, `geo.Weather.*`, `geo.Hud`, `geo.Fly*` |
 | `Private/**/*.cpp` | le implementazioni |
@@ -378,7 +399,7 @@ il primo comando da provare quando non si vede niente. (6)
 |---|---|
 | `GeoWorldEditor.Build.cs` | `MaterialEditor`, `AssetTools` |
 | `Private/GeoWorldEditorModule.cpp` | il modulo |
-| `Private/GeoTerrainMaterialFactory.cpp` | `geo.Imagery.CreateMaterial`: `M_GeoTerrain`, `M_GeoRoad`, `M_GeoWater`, `MPC_GeoWater` |
+| `Private/GeoTerrainMaterialFactory.cpp` | `geo.Imagery.CreateMaterial`: `M_GeoTerrain`, `M_GeoRoad`, `M_GeoWater`, `MPC_GeoWater`, `MPC_GeoWeather`, `M_GeoPrecipitation` |
 
 ### Strumenti
 

@@ -13,7 +13,7 @@ Il progetto `TestNewIG` e' un guscio vuoto: tutto il codice vive in
 |---|---|---|
 | `GeoCore` | Runtime | Geodesia, georeferenziazione, origin rebasing |
 | `GeoTiles` | Runtime | Formato tile, loader asincrono, cache LRU, ortofoto *(Fasi 2/3/6)* |
-| `GeoRender` | Runtime | Quadtree, LOD, mesh, terreno, drappeggio, strade, acqua, vento *(Fasi 4/5/6/8/9)* |
+| `GeoRender` | Runtime | Quadtree, LOD, mesh, terreno, drappeggio, strade, acqua, vento, pioggia e neve *(Fasi 4/5/6/8/9)* |
 | `GeoWorldEditor` | Editor | I materiali costruiti da codice (`geo.Imagery.CreateMaterial`) |
 
 `GeoCore` e' diviso in due strati fisicamente separati:
@@ -44,6 +44,11 @@ Il progetto `TestNewIG` e' un guscio vuoto: tutto il codice vive in
       viaggiano, venti in quota; primo pezzo del meteo della Fase 12
       *(`docs/vento-design.md`, prova: `docs/vento-verifica.md`, per chi impara:
       `docs/manuale/14-vento.md`)*
+- [x] **Pioggia, neve, grandine** — rovesci che viaggiano con il vento in quota,
+      pioggia in valle e neve in montagna (zero termico e quota neve), grandine
+      nei nuclei dei temporali; particelle attorno alla camera, suolo bagnato e
+      innevato, visibilità con la nebbia *(`docs/meteo-design.md`, prova:
+      `docs/meteo-verifica.md`, per chi impara: `docs/manuale/15-meteo.md`)*
 - [ ] Fase 10 — edifici e monumenti
 - [ ] Fase 11 — vegetazione
 - [ ] Fase 12 — atmosfera, cielo, nuvole e luce
@@ -81,7 +86,7 @@ Dettagli e motivazioni in `docs/fase2-design.md`.
 ```bash
 cmake -S Plugins/GeoWorld/Tools/StandaloneTests -B build
 cmake --build build
-./build/geocore_tests        # 49 test  -- geodesia, rebasing, formato delle stampe (lat, lon, quota, vento)
+./build/geocore_tests        # 51 test  -- geodesia, rebasing, formato delle stampe (lat, lon, quota, vento, meteo)
 ./build/geotiles_tests       # 22 test  -- formato tile, cache (piu' quelli su un dataset vero)
 ./build/geoquadtree_tests    # 84 test  -- LOD, culling, orizzonte, residenza
 ./build/geomesh_tests        # 41 test  -- mesh, gonne, giunzioni, passo, geomorphing
@@ -89,7 +94,7 @@ cmake --build build
 ./build/georoads_tests       # 80 test  -- strade: formato .gvt, larghezze misurate, ritagli, strade 3D, marciapiedi e incroci
 ./build/geowater_tests Plugins/GeoWorld/Source/GeoTiles/TestData/water_fixture.gwa
                              # 71 test  -- acqua: formato .gwa, scavo, mesh, onde dal vento, texture, il Po vero, mare aperto
-./build/geoweather_tests     # 26 test  -- vento: strato limite, rugosita', venti in quota, rilievi, raffiche, variabilita'
+./build/geoweather_tests     # 50 test  -- vento (strato limite, rugosita', rilievi, raffiche) e precipitazione (quota neve, rovesci, visibilita', suolo, particelle)
 
 ./Plugins/GeoWorld/Tools/CheckSourceDiscipline.sh
 python3 Plugins/GeoWorld/Tools/CheckShadowedParameters.py
@@ -103,7 +108,7 @@ le classi di errore di compilazione gia' incontrate su Windows -- shadowing,
 simboli non esportati fra moduli, tipi di comando console inesistenti,
 collisioni da build unity, metodi inesistenti chiamati sulle nostre classi.
 
-425 test C++ in totale, piu' 187 test Python della pipeline.
+451 test C++ in totale, piu' 187 test Python della pipeline.
 
 **Dopo la prima prova su Torino** (materiale, scene Sentinel, prestazioni): `docs/prova-torino.md`.
 **Dopo la seconda** (troppi triangoli, RAM): `docs/prova-torino-2.md`.
