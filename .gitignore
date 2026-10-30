@@ -79,3 +79,6 @@ Pipeline/**/__pycache__/
 Pipeline/synthetic_source/
 Pipeline/dataset/
 _work/
+
+# Test standalone (cmake -S Plugins/GeoWorld/Tools/StandaloneTests -B build)
+/build/
