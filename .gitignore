@@ -85,3 +85,6 @@ _work/
 
 # L'ambiente privato della pipeline, preparato da geoworld.bat / geoworld.sh
 Pipeline/ambiente/
+
+# Le cache di Python, ovunque (anche quelle degli strumenti in Plugins/GeoWorld/Tools)
+__pycache__/
