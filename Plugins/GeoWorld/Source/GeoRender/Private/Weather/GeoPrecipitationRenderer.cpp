@@ -41,7 +41,7 @@ namespace
 	/** Quanto si puo' moltiplicare la densita' di una nebbia del livello che sta piu' in basso del suolo. */
 	constexpr double MaxFogCompensation = 16.0;
 
-	FLinearColor Colour(double A, double B, double C, double D)
+	FLinearColor ToLinearColour(double A, double B, double C, double D)
 	{
 		return FLinearColor(static_cast<float>(A), static_cast<float>(B), static_cast<float>(C), static_cast<float>(D));
 	}
@@ -169,24 +169,24 @@ void FGeoPrecipitationRenderer::WriteParameters(UWorld* World, const Weather::FP
 	if (!Instance) { return; }
 
 	Instance->SetVectorParameterValue(TEXT("GroundWeather"),
-		Colour(Ground.Wetness, Ground.SnowCoverM, Ground.SnowTransitionM, Ground.SnowAmount));
+		ToLinearColour(Ground.Wetness, Ground.SnowCoverM, Ground.SnowTransitionM, Ground.SnowAmount));
 	// Il raggio di curvatura: quello medio della Terra basta (l'errore sulla
 	// quota a 30 km e' meno di un metro).
-	Instance->SetVectorParameterValue(TEXT("GroundFrame"), Colour(Ground.GeoidAtOriginM, 6371000.0, 0.0, 0.0));
+	Instance->SetVectorParameterValue(TEXT("GroundFrame"), ToLinearColour(Ground.GeoidAtOriginM, 6371000.0, 0.0, 0.0));
 
 	static const TCHAR* LayerNames[Weather::ParticleTypeCount] = { TEXT("PrecipRain"), TEXT("PrecipSnow"), TEXT("PrecipHail") };
 	static const TCHAR* VelocityNames[Weather::ParticleTypeCount] = { TEXT("PrecipRainVel"), TEXT("PrecipSnowVel"), TEXT("PrecipHailVel") };
 	for (int32 Type = 0; Type < Weather::ParticleTypeCount; ++Type)
 	{
 		const Weather::FParticleLayer& Layer = Particles.GetLayer(static_cast<Weather::EParticleType>(Type));
-		Instance->SetVectorParameterValue(LayerNames[Type], Colour(Layer.Phase[0], Layer.Phase[1], Layer.Phase[2], Layer.Density));
+		Instance->SetVectorParameterValue(LayerNames[Type], ToLinearColour(Layer.Phase[0], Layer.Phase[1], Layer.Phase[2], Layer.Density));
 		Instance->SetVectorParameterValue(VelocityNames[Type],
-			Colour(Layer.Velocity[0], Layer.Velocity[1], Layer.Velocity[2], Layer.Size));
+			ToLinearColour(Layer.Velocity[0], Layer.Velocity[1], Layer.Velocity[2], Layer.Size));
 	}
-	Instance->SetVectorParameterValue(TEXT("PrecipBox"), Colour(Particles.Box[0], Particles.Box[1], Particles.Box[2], 0.9));
+	Instance->SetVectorParameterValue(TEXT("PrecipBox"), ToLinearColour(Particles.Box[0], Particles.Box[1], Particles.Box[2], 0.9));
 	double Rain = 1.0, Snow = 0.0, Hail = 0.0;
 	Particles.GetMix(Rain, Snow, Hail);
-	Instance->SetVectorParameterValue(TEXT("PrecipMix"), Colour(Rain, Snow, Hail, 0.0));
+	Instance->SetVectorParameterValue(TEXT("PrecipMix"), ToLinearColour(Rain, Snow, Hail, 0.0));
 }
 
 void FGeoPrecipitationRenderer::Update(UWorld* World, const FVector& CameraLocation,

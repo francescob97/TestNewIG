@@ -27,6 +27,11 @@ endif()
 
 set(GEOCORE_DIR ${CMAKE_CURRENT_SOURCE_DIR}/../../Source/GeoCore)
 
+# -Werror=shadow (GCC, Clang): un nome che ne nasconde un altro -- un membro,
+# un parametro, una variabile di fuori -- e' un ERRORE, come in Unreal
+# (C4456, C4457, C4458). Lo strato puro si compila qui prima che sulla
+# macchina Windows: e' qui che conviene accorgersene.
+
 # Nessun .cpp oltre al main: lo strato puro e' header-only (vedi la nota
 # "IMPLEMENTAZIONE" in Ellipsoid.h per il perche').
 add_executable(geocore_tests main.cpp)
@@ -38,7 +43,7 @@ if (MSVC)
 else()
 	# -ffast-math NON va usato: romperebbe le assunzioni IEEE su cui poggiano
 	# le soglie numeriche di questi test (e la geodesia in generale).
-	target_compile_options(geocore_tests PRIVATE -Wall -Wextra -O2)
+	target_compile_options(geocore_tests PRIVATE -Wall -Wextra -Werror=shadow -O2)
 endif()
 
 # --- GeoTiles (Fase 3): formato delle tile, schema, cache LRU ---------------
@@ -51,7 +56,7 @@ target_include_directories(geotiles_tests PRIVATE
 if (MSVC)
 	target_compile_options(geotiles_tests PRIVATE /W4)
 else()
-	target_compile_options(geotiles_tests PRIVATE -Wall -Wextra -O2)
+	target_compile_options(geotiles_tests PRIVATE -Wall -Wextra -Werror=shadow -O2)
 endif()
 
 # --- Quadtree (Fase 4): volumi, culling, selezione LOD ---------------------
@@ -64,7 +69,7 @@ target_include_directories(geoquadtree_tests PRIVATE
 if (MSVC)
 	target_compile_options(geoquadtree_tests PRIVATE /W4)
 else()
-	target_compile_options(geoquadtree_tests PRIVATE -Wall -Wextra -O2)
+	target_compile_options(geoquadtree_tests PRIVATE -Wall -Wextra -Werror=shadow -O2)
 endif()
 
 # --- Mesh (Fase 5): generazione della geometria e gonne --------------------
@@ -75,7 +80,7 @@ target_include_directories(geomesh_tests PRIVATE
 if (MSVC)
 	target_compile_options(geomesh_tests PRIVATE /W4)
 else()
-	target_compile_options(geomesh_tests PRIVATE -Wall -Wextra -O2)
+	target_compile_options(geomesh_tests PRIVATE -Wall -Wextra -Werror=shadow -O2)
 endif()
 
 # --- Ortofoto (Fase 6): drappeggio, formato, cache template ----------------
@@ -86,7 +91,7 @@ target_include_directories(geoimagery_tests PRIVATE
 if (MSVC)
 	target_compile_options(geoimagery_tests PRIVATE /W4)
 else()
-	target_compile_options(geoimagery_tests PRIVATE -Wall -Wextra -O2)
+	target_compile_options(geoimagery_tests PRIVATE -Wall -Wextra -Werror=shadow -O2)
 endif()
 
 # --- Strade (Fase 8): formato .gvt e rasterizzatore delle linee -------------
@@ -97,7 +102,7 @@ target_include_directories(georoads_tests PRIVATE
 if (MSVC)
 	target_compile_options(georoads_tests PRIVATE /W4)
 else()
-	target_compile_options(georoads_tests PRIVATE -Wall -Wextra -O2)
+	target_compile_options(georoads_tests PRIVATE -Wall -Wextra -Werror=shadow -O2)
 endif()
 
 # --- Acqua (Fase 9): formato .gwa, scavo, mesh, onde, texture ----------------
@@ -112,7 +117,7 @@ target_link_libraries(geowater_tests PRIVATE ZLIB::ZLIB)
 if (MSVC)
 	target_compile_options(geowater_tests PRIVATE /W4)
 else()
-	target_compile_options(geowater_tests PRIVATE -Wall -Wextra -O2)
+	target_compile_options(geowater_tests PRIVATE -Wall -Wextra -Werror=shadow -O2)
 endif()
 
 add_executable(geoweather_tests geoweather_main.cpp)
@@ -121,7 +126,7 @@ target_include_directories(geoweather_tests PRIVATE ${GEORENDER_DIR}/Public)
 if (MSVC)
 	target_compile_options(geoweather_tests PRIVATE /W4)
 else()
-	target_compile_options(geoweather_tests PRIVATE -Wall -Wextra -O2)
+	target_compile_options(geoweather_tests PRIVATE -Wall -Wextra -Werror=shadow -O2)
 endif()
 
 enable_testing()

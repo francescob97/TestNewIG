@@ -140,10 +140,10 @@ public:
 	const GeoWorld::Weather::FPrecipitationField& GetPrecipitationField() const { return Precipitation; }
 
 	/** Il suolo: quanto e' bagnato (0..1) e da che quota in su e' bianco (m s.l.m.). */
-	void SetWetness(double Wetness) { Ground.SetWetness(Wetness); }
-	void SetSnowCover(double AltitudeM) { Ground.SetSnowCover(AltitudeM); }
-	void ClearSnowCover() { Ground.ClearSnowCover(); }
-	const GeoWorld::Weather::FGroundWeather& GetGround() const { return Ground; }
+	void SetWetness(double Wetness) { GroundState.SetWetness(Wetness); }
+	void SetSnowCover(double AltitudeM) { GroundState.SetSnowCover(AltitudeM); }
+	void ClearSnowCover() { GroundState.ClearSnowCover(); }
+	const GeoWorld::Weather::FGroundWeather& GetGround() const { return GroundState; }
 
 	/** La precipitazione toglie visibilita' con la nebbia del livello (default si'). */
 	void SetFogEnabled(bool bInEnabled) { bDriveFog = bInEnabled; }
@@ -206,7 +206,8 @@ private:
 	FVector ViewLocation = FVector::ZeroVector;
 
 	GeoWorld::Weather::FPrecipitationField Precipitation;
-	GeoWorld::Weather::FGroundWeather Ground;
+	/** Il suolo: bagnato e neve. (Non "Ground": e' il nome delle quote del suolo nelle funzioni.) */
+	GeoWorld::Weather::FGroundWeather GroundState;
 	GeoWorld::Weather::FPrecipitationParticles Particles;
 	FObserverPrecipitation ObserverPrecipitation;
 	/** Il coefficiente di estinzione smussato (1/m): la visibilita' cambia in qualche secondo. */

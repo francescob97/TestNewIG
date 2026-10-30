@@ -758,12 +758,12 @@ static void TestBridge()
 	BuildRoadMesh(Tile, Surface, nullptr, Bridge, Window, MakeRoad3DStyle(), Parameters, BridgeMesh, &Stats);
 	BuildRoadMesh(Tile, Surface, nullptr, Road, Window, MakeRoad3DStyle(), Parameters, RoadMesh);
 
-	auto Extreme = [](const Mesh::FTileMeshData& MeshData, ERoadSurface Surface, bool bLowest)
+	auto Extreme = [](const Mesh::FTileMeshData& MeshData, ERoadSurface Material, bool bLowest)
 	{
 		double Value = bLowest ? 1e9 : -1e9;
 		for (size_t Vertex = 0; Vertex < MeshData.Positions.size() / 3; ++Vertex)
 		{
-			if (!UsesSurface(MeshData, Vertex, Surface)) { continue; }
+			if (!UsesSurface(MeshData, Vertex, Material)) { continue; }
 			const double H = VertexGeodetic(MeshData, Vertex).HeightM;
 			Value = bLowest ? std::min(Value, H) : std::max(Value, H);
 		}
@@ -881,10 +881,10 @@ static void TestSidewalksAndJunctions()
 	Mesh::FTileMeshData Motorway;
 	BuildRoadMesh(Flat, Surface, nullptr, RoadsInNorthWestQuarter({ { ERoadClass::Motorway, 0, 0, 110, { {1000, 4000}, {7000, 4000} } } }),
 		Window, Style, Parameters, Motorway);
-	auto CountSurface = [](const Mesh::FTileMeshData& MeshData, ERoadSurface Surface)
+	auto CountSurface = [](const Mesh::FTileMeshData& MeshData, ERoadSurface Material)
 	{
 		int Count = 0;
-		for (size_t Vertex = 0; Vertex < MeshData.Positions.size() / 3; ++Vertex) { Count += UsesSurface(MeshData, Vertex, Surface) ? 1 : 0; }
+		for (size_t Vertex = 0; Vertex < MeshData.Positions.size() / 3; ++Vertex) { Count += UsesSurface(MeshData, Vertex, Material) ? 1 : 0; }
 		return Count;
 	};
 	Check(CountSurface(Motorway, ERoadSurface::Steel) > 0 && CountSurface(Street, ERoadSurface::Steel) == 0,

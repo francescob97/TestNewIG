@@ -366,7 +366,7 @@ void UGeoWeatherSubsystem::UpdatePrecipitation(double DeltaSeconds)
 	{
 		Here.AtCamera = Here.AtGround = FPrecipitationSample{};
 	}
-	Ground.Advance(DeltaSeconds, Here.AtGround, Precipitation);
+	GroundState.Advance(DeltaSeconds, Here.AtGround, Precipitation);
 
 	// La visibilita' segue piano: si smussa l'ESTINZIONE (che si somma), non la distanza.
 	const double Extinction = std::isfinite(Here.AtCamera.VisibilityM) ? Koschmieder / FMath::Max(Here.AtCamera.VisibilityM, 1.0) : 0.0;
@@ -394,9 +394,9 @@ void UGeoWeatherSubsystem::UpdatePrecipitation(double DeltaSeconds)
 	// ------------------------------------------------------------------
 	if (!Renderer) { return; }
 	FGeoPrecipitationRenderer::FGroundParameters Parameters;
-	Parameters.Wetness = Ground.GetWetness();
-	Parameters.SnowCoverM = Ground.GetSnowCoverM();
-	Parameters.SnowAmount = Ground.HasSnow() ? 1.0 : 0.0;
+	Parameters.Wetness = GroundState.GetWetness();
+	Parameters.SnowCoverM = GroundState.GetSnowCoverM();
+	Parameters.SnowAmount = GroundState.HasSnow() ? 1.0 : 0.0;
 	// Il materiale ricava la quota dalla Z: all'origine Z = 0 e' l'ellissoide,
 	// e per avere la quota sul mare toglie il geoide di li'.
 	if (bHaveSnapshot)
@@ -503,8 +503,8 @@ void UGeoWeatherSubsystem::DrawPrecipitationOverlay() const
 		Sky.Kind == Weather::EPrecipitationKind::Rain ? TEXT("mai") : Sky.Kind == Weather::EPrecipitationKind::Snow ? TEXT("ovunque")
 			: *Utf8(Format::Metres(Precipitation.SnowLineM())),
 		*Utf8(Format::Metres(Precipitation.CloudTopM()))));
-	Line(FColor::White, FString::Printf(TEXT("Suolo         : bagnato %.0f%%, %s"), 100.0 * Ground.GetWetness(),   /* percentuale, non-unita */
-		Ground.HasSnow() ? *FString::Printf(TEXT("neve sopra %s"), *Utf8(Format::Metres(Ground.GetSnowCoverM()))) : TEXT("niente neve")));
+	Line(FColor::White, FString::Printf(TEXT("Suolo         : bagnato %.0f%%, %s"), 100.0 * GroundState.GetWetness(),   /* percentuale, non-unita */
+		GroundState.HasSnow() ? *FString::Printf(TEXT("neve sopra %s"), *Utf8(Format::Metres(GroundState.GetSnowCoverM()))) : TEXT("niente neve")));
 	if (Observer.bValid)
 	{
 		const FObserverPrecipitation& Here = ObserverPrecipitation;
