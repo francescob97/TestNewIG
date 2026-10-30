@@ -14,7 +14,11 @@
 //  temperatura con la quota. Il suolo si bagna e si imbianca, le particelle
 //  cadono attorno alla camera, la visibilita' cala (GeoPrecipitationRenderer).
 //
-//  Nuvole e fulmini si aggiungeranno qui.
+//  I FULMINI (Weather/Lightning.h): nei nuclei dei temporali, nube-suolo o
+//  dentro la nube, con il lampo che sfarfalla, la luce sul paesaggio e il
+//  tuono che arriva dopo (GeoLightningRenderer).
+//
+//  Le nuvole si aggiungeranno qui.
 //
 //  geo.Weather.Wind 8 270           8 m/s da ovest (a 10 m su un prato, come un METAR)
 //  geo.Weather.Turbulence 1.5       raffiche piu' forti del normale
@@ -22,6 +26,8 @@
 //  geo.Weather.WindAloft 3000 25 290   vento in quota (s.l.m.); "clear" li toglie
 //  geo.Weather.Rain 4               pioggia, 4 mm/h (anche Snow, Hail, Precipitation)
 //  geo.Weather.Temperature 2        2 °C al livello del mare: neve dai ~0 m
+//  geo.Weather.Storm                temporali: rovesci con fulmini
+//  geo.Weather.Strike 1500          un fulmine a 1,5 km davanti alla camera
 //  geo.Weather.Clear                torna il sereno
 //  geo.Weather.Debug 1              overlay; geo.Weather.Arrows 50: frecce a 50 m dal suolo
 // =============================================================================
@@ -31,11 +37,16 @@
 #include "Subsystems/WorldSubsystem.h"
 
 #include "Georeference/GeoreferenceSnapshot.h"
+#include "Weather/GeoLightningRenderer.h"
 #include "Weather/GeoPrecipitationRenderer.h"
+#include "Weather/Lightning.h"
 #include "Weather/Precipitation.h"
 #include "Weather/WindField.h"
 
 #include "GeoWeatherSubsystem.generated.h"
+
+/** Un fulmine: dove (unita' Unreal, il punto colpito o il suolo sotto il lampo), se e' arrivato a terra, a che distanza dalla camera (m). */
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_ThreeParams(FGeoLightningStrikeSignature, FVector, WorldLocation, bool, bCloudToGround, float, DistanceM);
 
 /** La precipitazione in un punto, per i Blueprint. */
 USTRUCT(BlueprintType)
@@ -167,6 +178,33 @@ public:
 	/** La densita' che la nebbia ha per colpa della precipitazione (0 = non la si tocca). */
 	double GetFogDensity() const { return Renderer ? Renderer->GetFogDensity() : 0.0; }
 
+	// --- I fulmini -----------------------------------------------------------
+
+	/** 0 = niente fulmini, 1 = un temporale normale, fino a 5. Servono i rovesci (copertura sotto 1). */
+	void SetLightningActivity(double Activity);
+	const GeoWorld::Weather::FLightningSettings& GetLightningSettings() const { return Lightning.GetSettings(); }
+	/** Un fulmine adesso, a DistanceM davanti alla camera: per provare senza aspettare un temporale. */
+	bool ForceStrike(double DistanceM, bool bCloudToGround);
+	void SetThunderVolume(double Volume) { if (LightningRenderer) { LightningRenderer->SetThunderVolume(Volume); } }
+	double GetThunderVolume() const { return LightningRenderer ? LightningRenderer->GetThunderVolume() : 0.0; }
+
+	/** Ogni fulmine, per i Blueprint: un suono, un effetto, una telecamera che trema. */
+	UPROPERTY(BlueprintAssignable, Category = "GeoWorld|Meteo")
+	FGeoLightningStrikeSignature OnLightningStrike;
+
+	/** Per le stampe: quanti nell'ultimo minuto, e l'ultimo. */
+	struct FLightningReport
+	{
+		int32 LastMinute = 0;
+		bool bAny = false;
+		bool bCloudToGround = true;
+		double DistanceM = 0.0;
+		double AgeSeconds = 0.0;
+		/** Fra quanto arriva il prossimo tuono (s); negativo se nessuno. */
+		double ThunderInSeconds = -1.0;
+	};
+	FLightningReport GetLightningReport() const;
+
 	// --- Debug --------------------------------------------------------------
 
 	void SetDebugOverlayEnabled(bool bInEnabled) { bShowDebugOverlay = bInEnabled; }
@@ -190,6 +228,9 @@ private:
 	void UpdateObserver();
 	/** Rovesci, suolo, particelle e quel che si vede: dopo UpdateObserver. */
 	void UpdatePrecipitation(double DeltaSeconds);
+	/** I fulmini nati in questo frame, e la loro luce: dopo UpdatePrecipitation. */
+	void UpdateLightning(double DeltaSeconds);
+	void FireStrike(const GeoWorld::Weather::FLightningStrike& Strike);
 	void OnGeoreferenceRebased(const FGeoreferenceSnapshot& Snapshot);
 	void DrawDebugOverlay() const;
 	void DrawPrecipitationOverlay() const;
@@ -218,4 +259,12 @@ private:
 	FGeoreferenceSnapshot LastSnapshot;
 	bool bHaveSnapshot = false;
 	FDelegateHandle RebaseHandle;
+
+	GeoWorld::Weather::FLightningScheduler Lightning;
+	TUniquePtr<FGeoLightningRenderer> LightningRenderer;
+	/** Quando sono caduti i fulmini dell'ultimo minuto (orologio dello scheduler). */
+	TArray<double> RecentStrikeTimes;
+	GeoWorld::Weather::FLightningStrike LatestStrike;
+	bool bHaveLatestStrike = false;
+	double LatestStrikeDistanceM = 0.0;
 };

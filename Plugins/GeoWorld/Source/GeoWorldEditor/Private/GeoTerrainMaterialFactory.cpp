@@ -1464,9 +1464,62 @@ return float4(colour * Box.w, shape * fade);
 	}
 }
 
+// ============================================================================
+//  I FULMINI: M_GeoLightning
+// ============================================================================
+
+namespace
+{
+	const TCHAR* LightningMaterialPackagePath = TEXT("/GeoWorld/Materials/M_GeoLightning");
+	const TCHAR* LightningMaterialAssetName = TEXT("M_GeoLightning");
+
+	/**
+	 * Il colore di un nastro del canale (GeoLightningRenderer): un filo
+	 * accecante nel quarto centrale, un alone tenue su tutto il nastro. Weight
+	 * (UV1.x) e' quanto e' luminoso il pezzo; Flash (Custom Primitive Data 0)
+	 * la luce del fulmine in questo istante, gia' misurata sulla luce della
+	 * scena. Additivo: si somma a quello che c'e' dietro, e il bloom fa il resto.
+	 */
+	const TCHAR* LightningPixelCode = TEXT(R"HLSL(
+float across = abs(Corner.x * 2.0 - 1.0);
+float core = pow(saturate(1.0 - across * 4.0), 2.0);
+float halo = pow(saturate(1.0 - across), 3.0);
+float3 colour = float3(0.80, 0.86, 1.0);
+return colour * (core * 80.0 + halo * 4.0) * Weight.x * Flash;
+)HLSL");
+
+	/** M_GeoLightning: Unlit, Additive, due facce. Ritorna false se un nodo non si crea. */
+	bool BuildLightningGraph(UMaterial* Material)
+	{
+		Material->MaterialDomain = MD_Surface;
+		Material->SetShadingModel(MSM_Unlit);
+		Material->BlendMode = BLEND_Additive;
+		Material->TwoSided = true;
+
+		FGraph G{ Material };
+		UMaterialExpressionTextureCoordinate* Corner = G.Make<UMaterialExpressionTextureCoordinate>(-900, -150);
+		UMaterialExpressionTextureCoordinate* Weight = G.Make<UMaterialExpressionTextureCoordinate>(-900, -50);
+		UMaterialExpressionScalarParameter* Flash = G.PrimitiveData(TEXT("Flash"), 0, -900, 50);
+		if (!G.bOk) { return false; }
+		Corner->CoordinateIndex = 0;
+		Weight->CoordinateIndex = 1;
+
+		TArray<FNamedPin> Inputs;
+		Inputs.Add(FNamedPin{ TEXT("Corner"), FPin{ Corner, 0 } });
+		Inputs.Add(FNamedPin{ TEXT("Weight"), FPin{ Weight, 0 } });
+		Inputs.Add(FNamedPin{ TEXT("Flash"), FPin{ Flash, 0 } });
+		UMaterialExpressionCustom* Pixel = MakeCustom(G, TEXT("Fulmine (colore)"), LightningPixelCode, CMOT_Float3, Inputs, -500, -50);
+		if (!G.bOk) { return false; }
+		G.Connect(Pixel, TEXT(""), MP_EmissiveColor);
+		if (!G.bOk) { return false; }
+		UMaterialEditingLibrary::RecompileMaterial(Material);
+		return true;
+	}
+}
+
 static FAutoConsoleCommand GeoImageryCreateMaterialCommand(
 	TEXT("geo.Imagery.CreateMaterial"),
-	TEXT("Costruisce (o RIFA') in /GeoWorld/Materials: M_GeoTerrain (foto e strade dipinte), M_GeoRoad (strade 3D), M_GeoWater e MPC_GeoWater (acqua), MPC_GeoWeather e M_GeoPrecipitation (meteo)."),
+	TEXT("Costruisce (o RIFA') in /GeoWorld/Materials: M_GeoTerrain (foto e strade dipinte), M_GeoRoad (strade 3D), M_GeoWater e MPC_GeoWater (acqua), MPC_GeoWeather, M_GeoPrecipitation e M_GeoLightning (meteo)."),
 	FConsoleCommandDelegate::CreateStatic([]()
 	{
 		// Il meteo per primo: terreno e strade leggono MPC_GeoWeather (suolo
@@ -1484,14 +1537,20 @@ static FAutoConsoleCommand GeoImageryCreateMaterialCommand(
 
 		const bool bPrecipitation = bWeatherCollection
 			&& CreateOrRebuildMaterial(PrecipitationMaterialPackagePath, PrecipitationMaterialAssetName, &BuildPrecipitationGraph);
+		const bool bLightning = CreateOrRebuildMaterial(LightningMaterialPackagePath, LightningMaterialAssetName, &BuildLightningGraph);
 
-		if (bTerrain && bRoad && bWater && bPrecipitation)
+		if (bTerrain && bRoad && bWater && bPrecipitation && bLightning)
 		{
 			Report(TEXT("Materiali pronti. Riavvia il Play (o rilancia geo.Roads.Demo / geo.Water.Demo)."));
 		}
 		if (!bPrecipitation)
 		{
 			Report(TEXT("M_GeoPrecipitation non fatto: niente pioggia ne' neve a schermo. Output Log (LogGeoWorld) e docs/meteo-verifica.md"),
+				FColor::Red);
+		}
+		if (!bLightning)
+		{
+			Report(TEXT("M_GeoLightning non fatto: i fulmini illuminano, ma il canale non si vede. Output Log (LogGeoWorld)"),
 				FColor::Red);
 		}
 		if (!bTerrain)

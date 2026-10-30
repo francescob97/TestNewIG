@@ -4,7 +4,7 @@
 > Non modificarlo a mano: i controlli statici (`CheckSourceDiscipline.sh`, regola 7)
 > dicono quando e' indietro. In Unreal lo stesso elenco lo da' `geo.Help`.
 
-**96 comandi** in 9 gruppi.
+**100 comandi** in 9 gruppi.
 
 ## Come si usano
 
@@ -33,6 +33,7 @@
 | volare (in Play) | `geo.Fly` |
 | rifare i materiali dopo un aggiornamento | `geo.Imagery.CreateMaterial` |
 | pioggia, neve, sereno | `geo.Weather.Rain 4   geo.Weather.Snow 1   geo.Weather.Clear` |
+| un temporale, o un fulmine subito | `geo.Weather.Storm   oppure   geo.Weather.Strike 1500` |
 | vento | `geo.Weather.Wind 10 270` |
 | capire perche' non vedo niente | `geo.Terrain.Diag   (poi viewmode wireframe, r.Fog 0)` |
 | i comandi di un gruppo, dentro Unreal | `geo.Help Weather` |
@@ -46,7 +47,7 @@
 - [Le ortofoto](#le-ortofoto) — `geo.Imagery.*`, 8 comandi
 - [Strade, ferrovie, piste](#strade-ferrovie-piste) — `geo.Roads.*`, 11 comandi
 - [L'acqua](#lacqua) — `geo.Water.*`, 5 comandi
-- [Il meteo](#il-meteo) — `geo.Weather.*`, 16 comandi
+- [Il meteo](#il-meteo) — `geo.Weather.*`, 20 comandi
 - [La camera di volo](#la-camera-di-volo) — `geo.Fly.*`, 2 comandi
 
 ## Generale
@@ -144,7 +145,7 @@ Le foto sul terreno, e i materiali di tutto il progetto (Fase 6).
 | `geo.Imagery.Budget <N>` | texture create per frame (default 4). |
 | `geo.Imagery.Stats` | Statistiche del drappeggio e dello streaming delle ortofoto. |
 | `geo.Imagery.Demo <cartella_terreno> <cartella_ortofoto>` | apre tutto e accende. |
-| `geo.Imagery.CreateMaterial` | Costruisce (o RIFA') in /GeoWorld/Materials: M_GeoTerrain (foto e strade dipinte), M_GeoRoad (strade 3D), M_GeoWater e MPC_GeoWater (acqua), MPC_GeoWeather e M_GeoPrecipitation (meteo). *(solo nell'editor)* |
+| `geo.Imagery.CreateMaterial` | Costruisce (o RIFA') in /GeoWorld/Materials: M_GeoTerrain (foto e strade dipinte), M_GeoRoad (strade 3D), M_GeoWater e MPC_GeoWater (acqua), MPC_GeoWeather, M_GeoPrecipitation e M_GeoLightning (meteo). *(solo nell'editor)* |
 
 ## Strade, ferrovie, piste
 
@@ -178,7 +179,7 @@ Mare, laghi, fiumi (Fase 9).
 
 ## Il meteo
 
-Vento, pioggia, neve, grandine.
+Vento, pioggia, neve, grandine, fulmini e tuono.
 
 | Comando | Cosa fa |
 |---|---|
@@ -193,7 +194,11 @@ Vento, pioggia, neve, grandine.
 | `geo.Weather.Snow [mm/h d'acqua] [copertura 0..1] [km]` | neve a ogni quota (default 1 mm/h: ~1 cm di neve all'ora). |
 | `geo.Weather.Hail [mm/h] [copertura 0..1] [km]` | temporali con grandine nei nuclei (default 30 mm/h, 40% del suolo, celle da 6 km). |
 | `geo.Weather.Precipitation [mm/h] [copertura 0..1] [km]` | pioggia o neve secondo la temperatura e la quota (default 3 mm/h). Senza argomenti con il sereno, dice com'e'. |
-| `geo.Weather.Clear` | torna il sereno. Il suolo si asciuga e la neve fonde da soli (in decine di minuti). |
+| `geo.Weather.Storm [mm/h] [copertura 0..1] [km]` | temporali: rovesci (pioggia o neve secondo la quota) con i fulmini (default 25 mm/h, 35% del suolo, celle da 6 km). |
+| `geo.Weather.Lightning <0..5>` | quanti fulmini nei temporali: 0 nessuno, 1 un temporale normale (~5 al minuto per cella), 3 forte, 5 una supercella. |
+| `geo.Weather.Strike [distanza m] [nube]` | un fulmine adesso, davanti alla camera (default 1500 m; "nube": un lampo dentro la nube). Il tuono arriva dopo 3 s per km. |
+| `geo.Weather.Thunder <0..2>` | il volume del tuono (0 = muto, 1 = normale). |
+| `geo.Weather.Clear` | torna il sereno, e niente fulmini. Il suolo si asciuga e la neve fonde da soli (in decine di minuti). |
 | `geo.Weather.Temperature <gradi C al livello del mare> [gradi C per km]` | decide dove la pioggia diventa neve (default 15 e 6,5). |
 | `geo.Weather.Wetness <0..1>` | quanto e' bagnato il suolo, adesso (poi segue la pioggia da solo). |
 | `geo.Weather.SnowCover <quota s.l.m. m> \| off` | neve sul suolo sopra quella quota, adesso (poi scende con le nevicate e risale con il caldo). |
@@ -227,6 +232,6 @@ Non sono di GeoWorld, ma la documentazione li usa spesso.
 | File | Comandi |
 |---|---|
 | `Plugins/GeoWorld/Source/GeoCore/Private/GeoCoreModule.cpp` | 10 |
-| `Plugins/GeoWorld/Source/GeoRender/Private/GeoRenderModule.cpp` | 75 |
+| `Plugins/GeoWorld/Source/GeoRender/Private/GeoRenderModule.cpp` | 79 |
 | `Plugins/GeoWorld/Source/GeoTiles/Private/GeoTilesModule.cpp` | 10 |
 | `Plugins/GeoWorld/Source/GeoWorldEditor/Private/GeoTerrainMaterialFactory.cpp` | 1 |

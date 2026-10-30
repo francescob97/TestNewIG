@@ -4,7 +4,7 @@
 > **precipitazione**: dove cade, cosa cade (pioggia, neve, grandine o una
 > miscela, secondo la quota), quanto. E le sue conseguenze: le particelle
 > attorno alla camera, il suolo bagnato e la neve posata, la visibilità che
-> cala.
+> cala. E i **fulmini**, con il loro tuono (sezioni 2.8, 2.9 e 3.7).
 >
 > Come provarlo: `docs/meteo-verifica.md`. Per chi impara: `docs/manuale/15-meteo.md`.
 
@@ -169,6 +169,72 @@ posizione = (posto + spostamento − camera), ridotta alla scatola
 **Il rebase** sposta il mondo sotto la camera: lo spostamento si corregge della
 stessa quantità (come le onde), e le particelle non saltano.
 
+### 2.8 I fulmini
+
+Codice: `Plugins/GeoWorld/Source/GeoRender/Public/Weather/Lightning.h`
+(puro, provato da `geoweather_tests`, sezioni 11–13).
+
+**Dove e quanti.** Nei **nuclei** dei temporali, gli stessi della mappa della
+precipitazione: la densità è di **0,25 fulmini per km² al minuto** dove il
+nucleo è pieno (con attività 1), cioè ~5 al minuto per un temporale con un
+nucleo di 20 km². Il "quanto è nucleo" di un punto è
+`smoothstep(0,55; 0,9; livello)` nei rovesci; in una pioggia estesa (un
+fronte) i temporali sono rari e deboli, un decimo dei picchi più alti.
+`Attività` moltiplica tutto: 3 un temporale forte, 5 una supercella.
+
+**Come si estraggono: un processo di Poisson diradato.** A ogni frame si
+tirano punti a caso nel cerchio di **30 km** attorno alla camera, quanti ne
+darebbe la densità massima ovunque; ognuno si tiene con la probabilità "quanto
+è nucleo" del suo posto. Il risultato è esattamente un processo di Poisson
+con la densità vera, senza integrare la mappa. Il test conta un'ora di
+fulmini: 5.806 contro i 5.951 attesi.
+
+**Di che tipo.** Circa **uno su tre** arriva al suolo (nube-suolo); gli altri
+restano nella nube (si vede il cielo che si illumina).
+
+**Il lampo: i colpi di ritorno.** Un nube-suolo non è un colpo solo: dopo il
+primo, sullo stesso canale ne passano altri, in media **3** in tutto (fino a
+8), a **30–90 ms** l'uno dall'altro, un po' più deboli. Ogni colpo è un
+picco che si spegne in ~25 ms; fra un colpo e l'altro resta una luce debole
+(la corrente continua). È per questo che il lampo **sfarfalla**. Tutto dura
+~0,3 s.
+
+**La forma.** Un canale dalla nube (2,2–3,5 km sopra il suolo, spostata di
+lato fino a un quinto dell'altezza) al punto colpito, con lo **spostamento del
+punto medio**: il segmento si spezza a metà, il punto medio si sposta di lato
+(fino a un quarto della lunghezza), e si ripete sulle due metà, sette volte:
+128 pezzi, zig-zag sempre più piccoli. Poi fino a 9 **rami**, più deboli
+(0,35), che scendono di lato e si fermano a mezz'aria. Nell'ultimo 15% in alto
+la luce sfuma: lì il canale entra nella nube.
+
+### 2.9 Il tuono
+
+**Il ritardo.** Il suono fa 340 m/s a 15 °C (`331,3 + 0,606 · T`): **tre
+secondi per chilometro**. Il tuono di un fulmine a 3,4 km arriva dopo 10 s.
+
+**Il rombo.** Tutto il canale fa il botto nello stesso istante, ma ogni pezzo
+sta a una distanza diversa da chi ascolta: il botto arriva **spalmato** su
+`(distanza del pezzo più lontano − del più vicino) / velocità del suono`. Un
+fulmine a 300 m con il canale alto 3 km brontola per 8 s; uno a 10 km, dove
+tutti i pezzi sono quasi alla stessa distanza, molto meno.
+
+**Lo schiocco e il brontolio.** L'aria assorbe gli acuti con la distanza.
+Ogni pezzo di canale è un colpo di rumore filtrato con un passa-basso che si
+chiude con la distanza (`120 + 5000 · e^(−d/1200)` Hz: 4,7 kHz a 100 m, 2,3 kHz
+a 1 km, 120 Hz a 10 km): da vicino uno schiocco, da lontano un brontolio. Sotto,
+un rumore molto basso (~90 Hz) che si spegne in 1–2 s: le eco del suolo e
+delle nubi.
+
+**Il volume** cala con la distanza come l'ampiezza di un'onda sferica
+(`1000 m / distanza`, fra 0,06 e 1): −6 dB ogni volta che la distanza
+raddoppia. Oltre **25 km** il tuono non si sente.
+
+Il tuono si **sintetizza**: niente file audio. 22 kHz mono; per un fulmine
+vicino (il rombo più lungo) sono 8 ms di calcolo in media, 16 nel caso
+peggiore: un frame intero. Per questo lo fa un **thread di lavoro**; sul game
+thread si calcola solo quando arriva (le distanze del canale) e si costruisce
+il canale (8 microsecondi).
+
 ---
 
 ## 3. In Unreal
@@ -292,6 +358,51 @@ geo.Weather.Fog <0|1>                          la nebbia della precipitazione
 Intensità indicative: 1 mm/h pioggia debole, 4 moderata, 15 forte, 50 a
 dirotto; 1 mm/h di neve (d'acqua) sono ~1 cm di neve all'ora.
 
+I fulmini:
+
+```
+geo.Weather.Storm [mm/h] [copertura] [km]      temporali: rovesci con i fulmini (25 mm/h, 35%, celle da 6 km)
+geo.Weather.Lightning <0..5>                   quanti fulmini: 0 nessuno, 1 normale, 3 forte, 5 supercella
+geo.Weather.Strike [distanza m] [nube]         un fulmine adesso, davanti alla camera (default 1.500 m)
+geo.Weather.Thunder <0..2>                     il volume del tuono
+```
+
+`geo.Weather.Hail` accende anche i fulmini (la grandine viene dai temporali);
+`geo.Weather.Clear` li spegne.
+
+### 3.7 I fulmini a schermo e il tuono
+
+`FGeoLightningRenderer` (`GeoRender/.../Weather/GeoLightningRenderer.*`). Ogni
+fulmine è un **attore transient** che vive meno di un secondo:
+
+- **il canale**: una mesh di **nastri**, uno per pezzo, girati verso la camera
+  nel momento in cui il fulmine nasce (in 0,3 s la camera non si sposta
+  abbastanza da accorgersene). Il filo è largo almeno 1,5 m e da lontano
+  almeno ~1 pixel (1,2 mm per metro di distanza); il nastro è 8 volte tanto,
+  per l'alone. Materiale `M_GeoLightning`: Unlit, **Additive**, un filo
+  accecante (emissivo 80) dentro un alone (4). La luce di ogni istante arriva
+  nei **Custom Primitive Data**: ogni fulmine sfarfalla per conto suo;
+- **la luce**: una **point light** senza ombre, a un terzo dell'altezza del
+  canale. Al suolo sotto di lei vale **una volta e mezza il sole del livello**
+  (di notte, almeno qualche lux): si vede di giorno e acceca di notte. Un
+  lampo nella nube è solo la luce, a 5 km e più larga (25 km di raggio, 0,6
+  volte il sole). L'emissivo del canale si misura anche lui sul sole: con un
+  sole fisico (100.000 lux) l'esposizione è molto più bassa;
+- **il tuono**: sintetizzato su un thread di lavoro quando il fulmine nasce, e
+  suonato quando arriva (`USoundWaveProcedural`, 2D);
+- **il rebase**: il fulmine ricorda dove è caduto in coordinate geografiche e
+  si rimette a posto a ogni frame.
+
+Al massimo 12 fulmini a schermo e 8 tuoni in coda o che suonano (quelli entro
+5 km si sentono sempre). In una supercella (attività 5, una decina di fulmini
+al secondo nel cerchio) il resto si vede solo come luce.
+
+**Per i Blueprint**: l'evento `OnLightningStrike` del `GeoWeatherSubsystem`
+(posizione, nube-suolo o no, distanza) a ogni fulmine.
+
+**Nelle stampe**: la riga `Fulmine` (a che distanza, quanti secondi fa, fra
+quanto il tuono); nell'overlay quanti nell'ultimo minuto e l'attività.
+
 ---
 
 ## 4. Cosa non fa (ancora)
@@ -309,7 +420,12 @@ dirotto; 1 mm/h di neve (d'acqua) sono ~1 cm di neve all'ora.
 - **Le particelle sono solo attorno alla camera** (50 m): oltre, la
   precipitazione è la nebbia. Da 2 km di quota non si vedono le colonne di
   pioggia sotto i temporali.
-- **Niente fulmini, tuoni, suono.**
+- **I fulmini non hanno ancora le nuvole**: il canale parte da mezz'aria
+  (sfumando) e il lampo nella nube illumina un cielo sereno. E il fulmine non
+  sceglie i punti alti (campanili, creste): cade dove capita nel nucleo.
+- **Il tuono è 2D e non conosce il terreno**: niente eco delle valli, niente
+  ombra acustica dietro una montagna. E si sente solo il tuono: la pioggia non
+  ha ancora un suono.
 - **Il tempo è impostato a mano**: domani da un bollettino (METAR, GRIB).
 
 ---
@@ -328,6 +444,14 @@ dirotto; 1 mm/h di neve (d'acqua) sono ~1 cm di neve all'ora.
   scheda video a ogni frame: millisecondi spesi per una formula.
 - **Pioggia a schermo** (un effetto di post-processo con le strisce). Costa
   poco, ma non ha profondità: girando la camera la pioggia gira con lei.
+- **Il tuono da file audio** (qualche registrazione, scelta a caso). Suona
+  meglio di qualunque sintesi, ma un file non sa a che distanza è il fulmine
+  né com'è fatto il canale: il rombo lungo di un fulmine vicino e lo schiocco
+  che diventa brontolio con la distanza vengono gratis solo sintetizzando
+  dalla geometria. E non servono asset da distribuire.
+- **Il fulmine come effetto Niagara (ribbon).** Stessa obiezione delle
+  particelle: un asset da costruire nell'editor, per una geometria che il
+  codice sa già calcolare (e i test provare).
 - **Uno stato del suolo per punto** (una texture di bagnato e di neve attorno
   alla camera, aggiornata con la mappa). Più vero, ma serve una texture che
   segue la camera, con il suo rebase. Il bagnato globale e la neve per quota
@@ -341,9 +465,11 @@ dirotto; 1 mm/h di neve (d'acqua) sono ~1 cm di neve all'ora.
 |---|---|
 | `GeoRender/Public/Weather/Precipitation.h` | il modello (puro): mappa, tipo, visibilità, caduta, suolo, particelle, la mesh |
 | `GeoRender/.../Weather/GeoPrecipitationRenderer.*` | in Unreal: l'attore delle particelle, `MPC_GeoWeather`, la nebbia |
-| `GeoRender/.../Weather/GeoWeatherSubsystem.*` | il giro di un frame, il rebase, l'overlay, `GetPrecipitationAt` |
+| `GeoRender/Public/Weather/Lightning.h` | i fulmini (puro): dove e quanti, i colpi di ritorno, il canale, il tuono |
+| `GeoRender/.../Weather/GeoLightningRenderer.*` | in Unreal: il canale, la luce, il tuono che suona |
+| `GeoRender/.../Weather/GeoWeatherSubsystem.*` | il giro di un frame, il rebase, l'overlay, `GetPrecipitationAt`, `OnLightningStrike` |
 | `GeoRender/Private/GeoPositionHudSubsystem.cpp` | le righe `Meteo`, `Temperatura`, `Visibilita'`, `Suolo` |
 | `GeoRender/Private/GeoRenderModule.cpp` | i comandi `geo.Weather.*` |
-| `GeoWorldEditor/Private/GeoTerrainMaterialFactory.cpp` | `MPC_GeoWeather`, `M_GeoPrecipitation`, il suolo in `M_GeoTerrain` e `M_GeoRoad` |
+| `GeoWorldEditor/Private/GeoTerrainMaterialFactory.cpp` | `MPC_GeoWeather`, `M_GeoPrecipitation`, `M_GeoLightning`, il suolo in `M_GeoTerrain` e `M_GeoRoad` |
 | `GeoCore/Public/Geo/GeoFormat.h` | "pioggia 4,2 mm/h", "1,2 km" |
-| `Tools/StandaloneTests/geoweather_main.cpp` | i test (sezioni 6–10) |
+| `Tools/StandaloneTests/geoweather_main.cpp` | i test (sezioni 6–10; i fulmini 11–13) |

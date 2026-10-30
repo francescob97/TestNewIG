@@ -53,6 +53,8 @@ l'istanza di materiale. Qui: Morph e Fade delle transizioni. (6)
 
 **Coefficiente di estinzione** — quanta luce una nebbia, una pioggia o una nevicata toglie per chilometro. La pioggia ha `0,29 · R^0,67` per km (R in mm/h), la neve `3,9 · S^0,75`: dieci volte tanto a parità d'acqua. Le estinzioni di cose diverse si sommano. (15)
 
+**Colpo di ritorno** — ognuna delle scariche che passano sullo stesso canale di un fulmine: in media tre, a 30–90 ms l'una dall'altra. È per questo che il lampo sfarfalla. (15)
+
 **Componente** (`UActorComponent`) — un pezzo di un attore che gli dà una capacità:
 disegnarsi, muoversi, stare a una coordinata geografica. (1)
 
@@ -184,6 +186,8 @@ e +52 m. (3)
 **OpenStreetMap (OSM)** — la mappa libera del mondo fatta dai volontari: strade, ferrovie,
 edifici, boschi, acqua. Licenza ODbL, da citare. Fonte della Fase 8 e delle successive. (12)
 
+**Nube-suolo** — il fulmine che arriva a terra, circa uno su tre; gli altri restano dentro la nube e si vedono solo come il cielo che si illumina. (15)
+
 **Ortofoto** — immagine aerea o satellitare raddrizzata, in cui ogni pixel sta alla
 sua coordinata. (7)
 
@@ -194,6 +198,8 @@ sua coordinata. (7)
 **Pin** — marcare una tile della cache come "non sfrattabile". (4)
 
 **Plugin** — un pacchetto di codice e contenuti riutilizzabile. (1)
+
+**Poisson diradato** (processo di) — un modo di estrarre eventi a caso con una densità che cambia da punto a punto: si tirano punti come se la densità fosse massima ovunque, e ognuno si tiene con la probabilità della densità del suo posto. Così nascono i fulmini nei nuclei dei temporali. (15)
 
 **Post** — un punto di campionamento di una griglia di quote. (3)
 
@@ -231,6 +237,8 @@ quote) o un'area (i pixel). Decide se il bordo è condiviso. (3, 7)
 **Residenza** — l'insieme delle scelte su cosa tenere in memoria e pronto, in base a posizione e velocità invece che alla direzione dello sguardo. (11)
 
 **Ridosso** — la zona sottovento a una cresta ripida: il vento si stacca dalla cresta e dietro resta un vortice (il rotore). Meno vento, molta più turbolenza. (14)
+
+**Rombo** (del tuono) — il tuono che dura secondi: ogni pezzo del canale fa il botto nello stesso istante, ma i pezzi sono a distanze diverse da chi ascolta, e il suono ci mette tre secondi per chilometro. (15)
 
 **Riscaldamento** — dopo un salto, qualche decimo di secondo in cui si costruiscono più mesh per frame (24 invece di 4): il frame rallenta, il terreno arriva tutto insieme. (11)
 
@@ -299,6 +307,8 @@ mostrare: le ortofoto e le strade. Il terreno ne accetta più d'uno, per nome. (
 
 **VRT** — un raster virtuale di GDAL: un file XML che fa apparire più file come
 uno solo. (3, 7)
+
+**USoundWaveProcedural** — un suono di Unreal i cui campioni li scrive il codice invece di un file: così si suona il tuono sintetizzato. (15)
 
 **WGS84** — l'ellissoide del GPS, usato dal progetto. (2)
 
@@ -392,6 +402,7 @@ il primo comando da provare quando non si vede niente. (6)
 | `Public/Water/GeoWaterSubsystem.h` | il subsystem dell'acqua |
 | `Public/Weather/Wind.h`, `WindField.h`, `GeoWeatherSubsystem.h` | il vento (il campo e' puro) |
 | `Public/Weather/Precipitation.h`, `GeoPrecipitationRenderer.h` | pioggia, neve, grandine: il modello (puro) e il disegno (particelle, suolo, nebbia) |
+| `Public/Weather/Lightning.h`, `GeoLightningRenderer.h` | fulmini e tuono: il modello (puro) e il disegno (canale, luce, suono) |
 | `Public/GeoPositionHudSubsystem.h` | le stampe della posizione |
 | `Private/GeoRenderModule.cpp` | comandi `geo.Lod.*`, `geo.Terrain.*`, `geo.Imagery.*`, `geo.Roads.*`, `geo.Water.*`, `geo.Weather.*`, `geo.Hud`, `geo.Fly*` |
 | `Private/**/*.cpp` | le implementazioni |
@@ -402,7 +413,7 @@ il primo comando da provare quando non si vede niente. (6)
 |---|---|
 | `GeoWorldEditor.Build.cs` | `MaterialEditor`, `AssetTools` |
 | `Private/GeoWorldEditorModule.cpp` | il modulo |
-| `Private/GeoTerrainMaterialFactory.cpp` | `geo.Imagery.CreateMaterial`: `M_GeoTerrain`, `M_GeoRoad`, `M_GeoWater`, `MPC_GeoWater`, `MPC_GeoWeather`, `M_GeoPrecipitation` |
+| `Private/GeoTerrainMaterialFactory.cpp` | `geo.Imagery.CreateMaterial`: `M_GeoTerrain`, `M_GeoRoad`, `M_GeoWater`, `MPC_GeoWater`, `MPC_GeoWeather`, `M_GeoPrecipitation`, `M_GeoLightning` |
 
 ### Strumenti
 

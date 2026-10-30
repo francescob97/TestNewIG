@@ -2,7 +2,8 @@
 
 > Come si simula la precipitazione e come la si mette a schermo: dove cade,
 > cosa cade a ogni quota, quanto toglie la vista, il suolo che si bagna e
-> s'imbianca, e le particelle che cadono attorno alla camera. Il documento di
+> s'imbianca, e le particelle che cadono attorno alla camera. Poi i fulmini e
+> il tuono (sezione 15.7). Il documento di
 > progetto con tutti i numeri è `docs/meteo-design.md`; come provarlo è in
 > `docs/meteo-verifica.md`.
 
@@ -149,6 +150,51 @@ sapesse, tutte le particelle salterebbero di 20 km (riportati nella scatola:
 un salto a caso di qualche metro, ma visibile). Come le onde, al rebase lo
 spostamento si corregge della stessa quantità.
 
+## 15.7 I fulmini e il tuono
+
+Un fulmine nasce dove l'aria sale più forte: nei **nuclei** dei temporali. Il
+modello li prende dalla stessa mappa della precipitazione, con una densità:
+0,25 fulmini per km² al minuto dove il nucleo è pieno, cioè una manciata al
+minuto per temporale.
+
+Per estrarli si usa un trucco elegante, il **processo di Poisson diradato**:
+si tirano punti a caso nel cerchio attorno alla camera, quanti ne darebbe la
+densità massima ovunque, e ognuno si tiene con la probabilità "quanto è
+nucleo" del suo posto. Quelli che restano sono distribuiti esattamente come
+se la densità fosse quella vera, punto per punto, senza aver mai integrato la
+mappa.
+
+**Il lampo sfarfalla** perché un fulmine non è un colpo solo. Il primo
+"colpo di ritorno" apre il canale nell'aria; poi sullo stesso canale ne
+passano altri, in media tre, a qualche decina di millisecondi l'uno
+dall'altro. A 60 fps sono due o tre frame di luce piena separati da frame
+quasi bui.
+
+**La forma** viene dallo spostamento del punto medio: il segmento dalla nube
+al suolo si spezza a metà, il punto medio si sposta di lato, e si ripete sulle
+due metà, sette volte. Zig-zag dentro zig-zag: la stessa struttura frattale di
+una costa.
+
+> 💡 **Esempio: il tuono.** Il suono fa 340 m/s: **tre secondi per
+> chilometro**. Conti i secondi fra il lampo e il tuono, dividi per tre, e sai
+> a che distanza è caduto. Le stampe lo fanno per te: "tuono fra 9 s".
+
+**Perché il tuono brontola.** Tutto il canale fa il botto nello stesso
+istante. Ma il pezzo più basso può essere a 300 m da te e il più alto a 3 km:
+il primo arriva dopo un secondo, l'ultimo dopo nove. In mezzo, tutti gli
+altri: è il rombo. Più il fulmine è vicino, più le distanze dei pezzi sono
+diverse, e più il rombo è lungo. Da lontano invece l'aria si è mangiata gli
+acuti, e resta un brontolio basso.
+
+Il tuono del progetto è **sintetizzato** da queste regole: ogni pezzo di
+canale è un colpo di rumore filtrato (più è lontano, più il filtro taglia gli
+acuti), messo nel tempo al suo istante d'arrivo. Nessun file audio.
+
+> ⚠️ **Trappola.** Sintetizzare il tuono di un fulmine vicino costa 8–16 ms:
+> fatto sul game thread, ogni fulmine vicino era un frame perso, cioè un
+> piccolo scatto. Lo fa un thread di lavoro; sul game thread resta solo il
+> conto di **quando** arriva.
+
 ---
 
 ## Alternative considerate
@@ -210,6 +256,30 @@ quando smette.
 > butta) o se il livello non ne ha una (e allora se ne crea una **transient**,
 > che non si salva).
 
+### Il suono fatto dal codice: USoundWaveProcedural
+
+Un `USoundWave` di solito viene da un file. `USoundWaveProcedural` è un suono i
+cui campioni li dà il codice: si crea, si dice la frequenza (22.050 al secondo)
+e i canali (uno), si mettono in coda i campioni a 16 bit (`QueueAudio`) e lo
+si suona come qualunque altro suono (`UGameplayStatics::PlaySound2D`). Non è
+una `UPROPERTY` di nessuno: il garbage collector potrebbe portarselo via
+mentre suona, e il renderer lo tiene in vita finché dura
+(`TStrongObjectPtr`).
+
+### La luce del fulmine: una point light enorme, per un attimo
+
+Un fulmine illumina il paesaggio: è una `UPointLightComponent` con un raggio di
+15 km, senza ombre (costerebbero troppo), accesa per un terzo di secondo.
+L'intensità è in **candele**: a un metro una candela dà un lux, a mille metri
+un milionesimo. Per avere al suolo una volta e mezza il sole del livello, a
+900 m di altezza, servono 1,5 × sole × 900² candele.
+
+### Additive: la luce che si somma
+
+Il materiale del canale è **Additive**: il suo colore si somma a quello che
+c'è dietro, come la luce vera (il nero non cambia niente, il bianco schiarisce).
+Con un emissivo molto alto, il **bloom** di Unreal fa l'alone attorno al filo.
+
 ### Un attore transient
 
 `RF_Transient` è un'etichetta che dice a Unreal "questo oggetto non va
@@ -224,10 +294,12 @@ esistono finché il mondo è aperto, e non finiscono mai in un file.
 |---|---|
 | `GeoRender/Public/Weather/Precipitation.h` | il modello (puro): mappa, tipo, visibilità, caduta, suolo, particelle |
 | `GeoRender/.../Weather/GeoPrecipitationRenderer.*` | l'attore delle particelle, `MPC_GeoWeather`, la nebbia |
-| `GeoRender/.../Weather/GeoWeatherSubsystem.*` | il giro di un frame, il rebase, l'overlay, `GetPrecipitationAt` |
-| `GeoRender/Private/GeoRenderModule.cpp` | i comandi `geo.Weather.Rain`, `Snow`, `Hail`, ... |
-| `GeoWorldEditor/Private/GeoTerrainMaterialFactory.cpp` | `M_GeoPrecipitation` e il suolo bagnato/innevato |
-| `Tools/StandaloneTests/geoweather_main.cpp` | i test (sezioni 6–10) |
+| `GeoRender/Public/Weather/Lightning.h` | i fulmini (puro): dove, il lampo, il canale, il tuono |
+| `GeoRender/.../Weather/GeoLightningRenderer.*` | il canale, la luce, il tuono che suona |
+| `GeoRender/.../Weather/GeoWeatherSubsystem.*` | il giro di un frame, il rebase, l'overlay, `GetPrecipitationAt`, `OnLightningStrike` |
+| `GeoRender/Private/GeoRenderModule.cpp` | i comandi `geo.Weather.Rain`, `Snow`, `Hail`, `Storm`, `Strike`, ... |
+| `GeoWorldEditor/Private/GeoTerrainMaterialFactory.cpp` | `M_GeoPrecipitation`, `M_GeoLightning` e il suolo bagnato/innevato |
+| `Tools/StandaloneTests/geoweather_main.cpp` | i test (sezioni 6–13) |
 
 ---
 
@@ -244,3 +316,7 @@ esistono finché il mondo è aperto, e non finiscono mai in un file.
 - Le **particelle** sono una scatola che si ripete attorno alla camera, ferme
   nel mondo; la scheda video le apre e le muove, la CPU scrive dieci numeri.
 - Lo spostamento **si somma** e si corregge al rebase: niente salti.
+- I **fulmini** nascono nei nuclei dei temporali (Poisson diradato),
+  sfarfallano (i colpi di ritorno), hanno un canale frattale; il **tuono**
+  arriva dopo tre secondi per chilometro e brontola perché i pezzi del canale
+  sono a distanze diverse. Sintetizzato, su un thread di lavoro.

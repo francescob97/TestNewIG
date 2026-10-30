@@ -1881,6 +1881,12 @@ namespace GeoWeatherConsole
 			GroundState.HasSnow() ? *(TEXT("neve sopra ") + Text(GeoWorld::Format::Metres(GroundState.GetSnowCoverM()))) : TEXT("niente neve")), FColor::White);
 		const FString Problem = Weather->GetRenderProblem();
 		if (!Problem.IsEmpty()) { GeoTerrainConsole::Report(Problem, FColor::Yellow); }
+		const double Activity = Weather->GetLightningSettings().Activity;
+		if (Activity > 0.0)
+		{
+			GeoTerrainConsole::Report(FString::Printf(TEXT("  fulmini: attivita' %.1f (geo.Weather.Strike per vederne uno subito)%s"), Activity,
+				Settings.Coverage >= 0.999 ? TEXT(" -- con la pioggia estesa sono rari: geo.Weather.Storm") : TEXT("")), FColor::White);
+		}
 	}
 
 	/** Rain, Snow, Hail, Precipitation: [mm/h] [copertura 0..1] [km dei rovesci]. */
@@ -2026,6 +2032,11 @@ static FAutoConsoleCommandWithWorldAndArgs GeoWeatherHailCommand(
 	FConsoleCommandWithWorldAndArgsDelegate::CreateStatic(
 		[](const TArray<FString>& Args, UWorld* World)
 	{
+		// La grandine viene dai temporali: e i temporali fulminano.
+		if (UGeoWeatherSubsystem* Weather = GeoWeatherConsole::Get(World))
+		{
+			if (Weather->GetLightningSettings().Activity <= 0.0) { Weather->SetLightningActivity(1.0); }
+		}
 		GeoWeatherConsole::SetPrecipitation(World, Args, GeoWorld::Weather::EPrecipitationKind::Hail, 30.0, 0.4, 6.0);
 	}));
 
@@ -2045,15 +2056,75 @@ static FAutoConsoleCommandWithWorldAndArgs GeoWeatherPrecipitationCommand(
 		GeoWeatherConsole::SetPrecipitation(World, Args, GeoWorld::Weather::EPrecipitationKind::Auto, 3.0, 1.0, 8.0);
 	}));
 
+static FAutoConsoleCommandWithWorldAndArgs GeoWeatherStormCommand(
+	TEXT("geo.Weather.Storm"),
+	TEXT("geo.Weather.Storm [mm/h] [copertura 0..1] [km] - temporali: rovesci (pioggia o neve secondo la quota) con i fulmini (default 25 mm/h, 35% del suolo, celle da 6 km)."),
+	FConsoleCommandWithWorldAndArgsDelegate::CreateStatic(
+		[](const TArray<FString>& Args, UWorld* World)
+	{
+		UGeoWeatherSubsystem* Weather = GeoWeatherConsole::Get(World);
+		if (!Weather) { return; }
+		if (Weather->GetLightningSettings().Activity <= 0.0) { Weather->SetLightningActivity(1.0); }
+		GeoWeatherConsole::SetPrecipitation(World, Args, GeoWorld::Weather::EPrecipitationKind::Auto, 25.0, 0.35, 6.0);
+	}));
+
+static FAutoConsoleCommandWithWorldAndArgs GeoWeatherLightningCommand(
+	TEXT("geo.Weather.Lightning"),
+	TEXT("geo.Weather.Lightning <0..5> - quanti fulmini nei temporali: 0 nessuno, 1 un temporale normale (~5 al minuto per cella), 3 forte, 5 una supercella."),
+	FConsoleCommandWithWorldAndArgsDelegate::CreateStatic(
+		[](const TArray<FString>& Args, UWorld* World)
+	{
+		UGeoWeatherSubsystem* Weather = GeoWeatherConsole::Get(World);
+		if (!Weather) { return; }
+		if (Args.Num() >= 1) { Weather->SetLightningActivity(FCString::Atod(*Args[0])); }
+		GeoWeatherConsole::ReportPrecipitation(Weather);
+	}));
+
+static FAutoConsoleCommandWithWorldAndArgs GeoWeatherStrikeCommand(
+	TEXT("geo.Weather.Strike"),
+	TEXT("geo.Weather.Strike [distanza m] [nube] - un fulmine adesso, davanti alla camera (default 1500 m; \"nube\": un lampo dentro la nube). Il tuono arriva dopo 3 s per km."),
+	FConsoleCommandWithWorldAndArgsDelegate::CreateStatic(
+		[](const TArray<FString>& Args, UWorld* World)
+	{
+		UGeoWeatherSubsystem* Weather = GeoWeatherConsole::Get(World);
+		if (!Weather) { return; }
+		const double Distance = Args.Num() >= 1 ? FMath::Max(50.0, FCString::Atod(*Args[0])) : 1500.0;
+		const bool bInCloud = Args.Num() >= 2 && Args[1].Equals(TEXT("nube"), ESearchCase::IgnoreCase);
+		if (!Weather->ForceStrike(Distance, !bInCloud))
+		{
+			GeoTerrainConsole::Report(TEXT("Nessuna camera: il fulmine va messo davanti a qualcuno."), FColor::Yellow);
+			return;
+		}
+		GeoTerrainConsole::Report(FString::Printf(TEXT("Fulmine %s a %.0f m davanti a te: il tuono fra circa %.1f s."),
+			bInCloud ? TEXT("nella nube") : TEXT("nube-suolo"), Distance, Distance / GeoWorld::Weather::SpeedOfSound(15.0)));
+		if (!World || !World->IsGameWorld())
+		{
+			GeoTerrainConsole::Report(TEXT("  Fuori dal Play il tuono potrebbe non sentirsi: provalo in Play."), FColor::White);
+		}
+	}));
+
+static FAutoConsoleCommandWithWorldAndArgs GeoWeatherThunderCommand(
+	TEXT("geo.Weather.Thunder"),
+	TEXT("geo.Weather.Thunder <0..2> - il volume del tuono (0 = muto, 1 = normale)."),
+	FConsoleCommandWithWorldAndArgsDelegate::CreateStatic(
+		[](const TArray<FString>& Args, UWorld* World)
+	{
+		UGeoWeatherSubsystem* Weather = GeoWeatherConsole::Get(World);
+		if (!Weather) { return; }
+		if (Args.Num() >= 1) { Weather->SetThunderVolume(FCString::Atod(*Args[0])); }
+		GeoTerrainConsole::Report(FString::Printf(TEXT("Volume del tuono: %.2f"), Weather->GetThunderVolume()));
+	}));
+
 static FAutoConsoleCommandWithWorldAndArgs GeoWeatherClearCommand(
 	TEXT("geo.Weather.Clear"),
-	TEXT("geo.Weather.Clear - torna il sereno. Il suolo si asciuga e la neve fonde da soli (in decine di minuti)."),
+	TEXT("geo.Weather.Clear - torna il sereno, e niente fulmini. Il suolo si asciuga e la neve fonde da soli (in decine di minuti)."),
 	FConsoleCommandWithWorldAndArgsDelegate::CreateStatic(
 		[](const TArray<FString>& Args, UWorld* World)
 	{
 		UGeoWeatherSubsystem* Weather = GeoWeatherConsole::Get(World);
 		if (!Weather) { return; }
 		Weather->ClearPrecipitation();
+		Weather->SetLightningActivity(0.0);
 		GeoWeatherConsole::ReportPrecipitation(Weather);
 		GeoTerrainConsole::Report(TEXT("  Per asciugare subito: geo.Weather.Wetness 0 e geo.Weather.SnowCover off"), FColor::White);
 	}));

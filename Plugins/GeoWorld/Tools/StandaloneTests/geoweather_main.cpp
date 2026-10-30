@@ -9,6 +9,7 @@
 //  velocita' di caduta, suolo bagnato e neve, particelle, mesh.
 // =============================================================================
 
+#include "Weather/Lightning.h"
 #include "Weather/Precipitation.h"
 #include "Weather/WindField.h"
 
@@ -590,6 +591,248 @@ static void TestParticles()
 	Check(bShape, "la mesh: 4 vertici nello stesso punto per particella, tutti nella scatola, semi in [0, 1)");
 }
 
+// ===========================================================================
+//  11-13. I fulmini
+// ===========================================================================
+
+static FLightningScheduler MakeLightning(double Activity, uint32_t Seed = 11)
+{
+	FLightningSettings Settings;
+	Settings.Activity = Activity;
+	Settings.Seed = Seed;
+	FLightningScheduler Scheduler;
+	Scheduler.SetSettings(Settings);
+	return Scheduler;
+}
+
+/** Un'ora di fulmini attorno a (Lat, Lon), con la mappa della precipitazione ferma. */
+static std::vector<FLightningStrike> OneHour(FLightningScheduler& Scheduler, const FPrecipitationField& Field)
+{
+	std::vector<FLightningStrike> Strikes;
+	for (int Step = 0; Step < 7200; ++Step) { Scheduler.Advance(0.5, Lat, Lon, Field, Strikes); }
+	return Strikes;
+}
+
+static double DistanceFromCentreM(double LatDeg, double LonDeg)
+{
+	const double North = (LatDeg - Lat) * 111132.0;
+	const double East = (LonDeg - Lon) * 111320.0 * std::cos(Lat * WindDegToRad);
+	return std::sqrt(North * North + East * East);
+}
+
+static void TestLightningWhere()
+{
+	Section("11. I fulmini: dove e quanti");
+	const FPrecipitationField Storms = MakeWeather(EPrecipitationKind::Auto, 30.0, 0.4, 15.0, 6.0);
+
+	FLightningScheduler Off = MakeLightning(0.0);
+	Check(OneHour(Off, Storms).empty(), "attivita' zero: nessun fulmine");
+	FLightningScheduler Dry = MakeLightning(1.0);
+	Check(OneHour(Dry, MakeWeather(EPrecipitationKind::Auto, 0.0, 0.4)).empty(), "senza pioggia non fulmina");
+
+	// Quanti ne aspettiamo: la densita' nei nuclei per quanto la mappa e' "nucleo", su tutto il cerchio.
+	double CoreKm2 = 0.0;
+	const int Grid = 240;
+	const double Cell = 60000.0 / Grid;
+	for (int Row = 0; Row < Grid; ++Row)
+	{
+		for (int Column = 0; Column < Grid; ++Column)
+		{
+			const double North = -30000.0 + (Row + 0.5) * Cell, East = -30000.0 + (Column + 0.5) * Cell;
+			if (North * North + East * East > 30000.0 * 30000.0) { continue; }
+			const double LatDeg = Lat + North / 111132.0, LonDeg = Lon + East / (111320.0 * std::cos(Lat * WindDegToRad));
+			CoreKm2 += LightningDetail::ConvectiveWeight(Storms, LatDeg, LonDeg) * Cell * Cell / 1.0e6;
+		}
+	}
+	const double Expected = CoreFlashDensityPerKm2PerMinute * CoreKm2 * 60.0;
+	FLightningScheduler Normal = MakeLightning(1.0);
+	const std::vector<FLightningStrike> Strikes = OneHour(Normal, Storms);
+	Check(std::fabs(static_cast<double>(Strikes.size()) - Expected) < 0.06 * Expected,
+		"in un'ora, quanti la densita' nei nuclei promette (0,25 al km2 al minuto)",
+		Fmt("%.0f fulmini, attesi %.0f (nuclei: %.0f km2)", static_cast<double>(Strikes.size()), Expected, CoreKm2));
+
+	double WeightOfStrikes = 0.0, Farthest = 0.0;
+	int CloudToGround = 0;
+	bool bAllInCores = true;
+	for (const FLightningStrike& Strike : Strikes)
+	{
+		const double Weight = LightningDetail::ConvectiveWeight(Storms, Strike.LatDeg, Strike.LonDeg);
+		bAllInCores = bAllInCores && Weight > 0.0;
+		WeightOfStrikes += Weight;
+		Farthest = std::max(Farthest, DistanceFromCentreM(Strike.LatDeg, Strike.LonDeg));
+		CloudToGround += Strike.Kind == ELightningKind::CloudToGround ? 1 : 0;
+	}
+	const double MeanAreaWeight = CoreKm2 / (3.141592653589793 * 900.0);
+	Check(bAllInCores && WeightOfStrikes / Strikes.size() > 3.0 * MeanAreaWeight && Farthest <= 30000.0,
+		"tutti nei nuclei dei temporali, e entro 30 km",
+		Fmt("nucleo medio dei fulmini %.2f, del cerchio %.2f, il piu' lontano a %.1f km",
+			WeightOfStrikes / Strikes.size(), MeanAreaWeight, Farthest / 1000.0));
+	const double Fraction = static_cast<double>(CloudToGround) / Strikes.size();
+	Check(std::fabs(Fraction - 0.3) < 0.03, "circa uno su tre arriva al suolo, gli altri restano nella nube",
+		Fmt("nube-suolo %.0f%%", 100.0 * Fraction)); /* percentuale, non-unita */
+
+	FLightningScheduler Severe = MakeLightning(3.0);
+	const size_t SevereCount = OneHour(Severe, Storms).size();
+	FLightningScheduler Front = MakeLightning(1.0);
+	const size_t FrontCount = OneHour(Front, MakeWeather(EPrecipitationKind::Auto, 30.0, 1.0)).size();
+	Check(std::fabs(static_cast<double>(SevereCount) / Strikes.size() - 3.0) < 0.3 && FrontCount < Strikes.size() / 5,
+		"attivita' 3: il triplo; una pioggia estesa (un fronte) fulmina poco",
+		Fmt("x%.2f; fronte %.0f contro %.0f", static_cast<double>(SevereCount) / Strikes.size(),
+			static_cast<double>(FrontCount), static_cast<double>(Strikes.size())));
+
+	FLightningScheduler Again = MakeLightning(1.0);
+	const std::vector<FLightningStrike> Repeat = OneHour(Again, Storms);
+	Check(Repeat.size() == Strikes.size() && Repeat.front().LatDeg == Strikes.front().LatDeg
+		&& Repeat.back().TimeSeconds == Strikes.back().TimeSeconds, "stesso seme, stessi fulmini");
+}
+
+static void TestLightningFlashAndShape()
+{
+	Section("12. Il lampo e il canale");
+	FLightningScheduler Scheduler = MakeLightning(1.0);
+	FLightningStrike Strike = Scheduler.Strike(ELightningKind::CloudToGround, Lat, Lon);
+	for (int Attempt = 0; Attempt < 50 && Strike.Strokes < 3; ++Attempt)
+	{
+		Strike = Scheduler.Strike(ELightningKind::CloudToGround, Lat, Lon);
+	}
+	int Peaks = 0;
+	double Previous = -1.0, Before = -1.0;
+	for (double Time = -0.005; Time <= FlashDuration(Strike) + 0.05; Time += 0.001)
+	{
+		const double Light = FlashBrightness(Strike, Time);
+		if (Before >= 0.0 && Previous > Before && Previous >= Light) { ++Peaks; }
+		Before = Previous;
+		Previous = Light;
+	}
+	const double Between = 0.5 * (Strike.StrokeTimes[0] + Strike.StrokeTimes[1]);
+	Check(Strike.Strokes >= 3 && Peaks == Strike.Strokes && FlashBrightness(Strike, 0.0) >= 1.0
+		&& FlashBrightness(Strike, Between) < 0.8 * FlashBrightness(Strike, Strike.StrokeTimes[1])
+		&& FlashBrightness(Strike, FlashDuration(Strike) + 0.01) == 0.0 && FlashBrightness(Strike, -0.01) == 0.0,
+		"il lampo sfarfalla: un picco per ogni colpo di ritorno, buio prima e dopo",
+		Fmt("%.0f colpi, %.0f picchi, dura %.0f ms", Strike.Strokes, Peaks, 1000.0 * FlashDuration(Strike)));
+
+	double Strokes = 0.0, Interval = 0.0, ShortestGap = 1.0, LongestGap = 0.0;
+	int Gaps = 0;
+	for (int Index = 0; Index < 2000; ++Index)
+	{
+		const FLightningStrike Sample = Scheduler.Strike(ELightningKind::CloudToGround, Lat, Lon);
+		Strokes += Sample.Strokes;
+		for (int Stroke = 1; Stroke < Sample.Strokes; ++Stroke)
+		{
+			const double Gap = Sample.StrokeTimes[Stroke] - Sample.StrokeTimes[Stroke - 1];
+			Interval += Gap;
+			ShortestGap = std::min(ShortestGap, Gap);
+			LongestGap = std::max(LongestGap, Gap);
+			++Gaps;
+		}
+	}
+	Check(Strokes / 2000.0 > 2.8 && Strokes / 2000.0 < 4.0 && ShortestGap >= 0.03 && LongestGap <= 0.09,
+		"in media 3 colpi per fulmine (fino a 8), a 30-90 ms l'uno dall'altro",
+		Fmt("%.2f colpi, %.0f ms in media", Strokes / 2000.0, 1000.0 * Interval / Gaps));
+
+	const double Height = 3000.0;
+	std::vector<FBoltSegment> Channel;
+	BuildLightningChannel(Height, 1234u, Channel);
+	bool bContinuous = true;
+	for (int Index = 0; Index + 1 < MainChannelSegments; ++Index)
+	{
+		for (int Axis = 0; Axis < 3; ++Axis) { bContinuous = bContinuous && Channel[Index].B[Axis] == Channel[Index + 1].A[Axis]; }
+	}
+	const FBoltSegment& Last = Channel[MainChannelSegments - 1];
+	double LowestBranch = 1.0e9, Widest = 0.0, HeaviestBranch = 0.0;
+	for (size_t Index = 0; Index < Channel.size(); ++Index)
+	{
+		const FBoltSegment& Segment = Channel[Index];
+		for (int Axis = 0; Axis < 2; ++Axis) { Widest = std::max({ Widest, std::fabs(Segment.A[Axis]), std::fabs(Segment.B[Axis]) }); }
+		if (Index >= static_cast<size_t>(MainChannelSegments))
+		{
+			LowestBranch = std::min({ LowestBranch, Segment.A[2], Segment.B[2] });
+			HeaviestBranch = std::max(HeaviestBranch, Segment.Weight);
+		}
+	}
+	Check(bContinuous && Channel[0].A[2] == Height && Last.B[0] == 0.0 && Last.B[1] == 0.0 && Last.B[2] == 0.0,
+		"il canale principale e' un filo continuo dalla nube al punto colpito");
+	Check(Channel.size() > static_cast<size_t>(MainChannelSegments) && LowestBranch > 0.1 * Height && HeaviestBranch <= 0.35
+		&& Widest < 1.2 * Height && Channel.size() < 600,
+		"i rami: piu' deboli, si fermano a mezz'aria; tutto entro una larghezza ragionevole",
+		Fmt("%.0f pezzi, il ramo piu' basso a %.0f m, largo %.0f m", static_cast<double>(Channel.size()), LowestBranch, Widest));
+	Check(Channel[0].Weight < 0.2 && Channel[MainChannelSegments / 2].Weight == 1.0,
+		"in cima il canale sfuma (entra nella nube); a meta' e' pieno");
+	std::vector<FBoltSegment> Same, Other;
+	BuildLightningChannel(Height, 1234u, Same);
+	BuildLightningChannel(Height, 1235u, Other);
+	Check(Same.size() == Channel.size() && Same[40].A[0] == Channel[40].A[0] && Other[40].A[0] != Channel[40].A[0],
+		"stesso seme, stessa forma; seme diverso, forma diversa");
+}
+
+/** Quante volte il segnale cambia segno al secondo, nei primi Seconds: alto = acuto. */
+static double ZeroCrossingsPerSecond(const FThunder& Thunder, double Seconds)
+{
+	const size_t Count = std::min(Thunder.Samples.size(), static_cast<size_t>(Seconds * Thunder.SampleRate));
+	int Crossings = 0;
+	for (size_t Index = 1; Index < Count; ++Index)
+	{
+		Crossings += (Thunder.Samples[Index - 1] < 0.0f) != (Thunder.Samples[Index] < 0.0f) ? 1 : 0;
+	}
+	return Crossings / (static_cast<double>(Count) / Thunder.SampleRate);
+}
+
+static void TestThunder()
+{
+	Section("13. Il tuono");
+	std::vector<FBoltSegment> Channel;
+	BuildLightningChannel(3000.0, 77u, Channel);
+
+	// A 3,43 km: tre secondi per chilometro, cioe' ~10 s a 15 °C.
+	const double Far[3] = { 3430.0, 0.0, 2.0 };
+	FThunder Thunder;
+	const bool bHeard = SynthesizeThunder(Channel, Far, 15.0, 1u, 22050, Thunder);
+	Check(bHeard && std::fabs(Thunder.DelaySeconds - Thunder.NearestM / 340.39) < 1e-3
+		&& Thunder.DelaySeconds > 9.0 && Thunder.DelaySeconds < 10.5,
+		"il tuono arriva dopo distanza / velocita' del suono: 3 secondi per chilometro",
+		Fmt("a %.2f km: %.2f s", Thunder.NearestM / 1000.0, Thunder.DelaySeconds));
+
+	bool bClean = true;
+	for (float Sample : Thunder.Samples) { bClean = bClean && std::isfinite(Sample) && std::fabs(Sample) <= 0.951f; }
+	FThunder Again;
+	SynthesizeThunder(Channel, Far, 15.0, 1u, 22050, Again);
+	Check(bClean && Again.Samples == Thunder.Samples, "campioni puliti in [-1, 1], e ripetibili");
+
+	// Da vicino uno schiocco, da lontano un brontolio: l'aria si mangia gli acuti.
+	const double Near[3] = { 300.0, 0.0, 2.0 };
+	const double Distant[3] = { 12000.0, 0.0, 2.0 };
+	FThunder Close, Rumble;
+	SynthesizeThunder(Channel, Near, 15.0, 2u, 22050, Close);
+	SynthesizeThunder(Channel, Distant, 15.0, 3u, 22050, Rumble);
+	const double CloseRate = ZeroCrossingsPerSecond(Close, 0.3), RumbleRate = ZeroCrossingsPerSecond(Rumble, 0.3);
+	Check(CloseRate > 3.0 * RumbleRate, "da vicino acuto (uno schiocco), da lontano basso (un brontolio)",
+		Fmt("%.0f contro %.0f passaggi per lo zero al secondo", CloseRate, RumbleRate));
+
+	// Il rombo: dura quanto la differenza di distanza fra i pezzi del canale.
+	double Nearest = 1e9, Farthest = 0.0;
+	for (const FBoltSegment& Segment : Channel)
+	{
+		const double Dx = 0.5 * (Segment.A[0] + Segment.B[0]) - Near[0], Dy = 0.5 * (Segment.A[1] + Segment.B[1]) - Near[1];
+		const double Dz = 0.5 * (Segment.A[2] + Segment.B[2]) - Near[2];
+		Nearest = std::min(Nearest, std::sqrt(Dx * Dx + Dy * Dy + Dz * Dz));
+		Farthest = std::max(Farthest, std::sqrt(Dx * Dx + Dy * Dy + Dz * Dz));
+	}
+	const double Spread = (Farthest - Nearest) / 340.39;
+	const double Length = static_cast<double>(Close.Samples.size()) / Close.SampleRate;
+	Check(Spread > 5.0 && std::fabs(Length - (Spread + 1.5 + 2.5 * Nearest / 10000.0 + 0.3)) < 0.05,
+		"il rombo dura quanto il suono ci mette a percorrere la differenza fra il pezzo piu' vicino e il piu' lontano",
+		Fmt("canale da %.0f a %.0f m: %.1f s di rombo", Nearest, Farthest, Spread));
+
+	FThunder TooFar;
+	const double Away[3] = { 30000.0, 0.0, 2.0 };
+	const bool bHeardFromAfar = SynthesizeThunder(Channel, Away, 15.0, 4u, 22050, TooFar);
+	Check(Close.Loudness == 1.0 && std::fabs(Rumble.Loudness - 1000.0 / Rumble.NearestM) < 1e-9 && !bHeardFromAfar,
+		"forte da vicino, piu' piano con la distanza; oltre 25 km non si sente",
+		Fmt("volume a %.0f km: %.2f", Rumble.NearestM / 1000.0, Rumble.Loudness));
+	Check(std::fabs(SpeedOfSound(15.0) - 340.39) < 0.01 && std::fabs(SpeedOfSound(-10.0) - 325.24) < 0.01,
+		"la velocita' del suono cresce con la temperatura (340 m/s a 15 °C)");
+}
+
 int main()
 {
 	std::printf("=====================================================\n");
@@ -605,6 +848,9 @@ int main()
 	TestVisibilityAndFall();
 	TestGround();
 	TestParticles();
+	TestLightningWhere();
+	TestLightningFlashAndShape();
+	TestThunder();
 	std::printf("\n=====================================================\n");
 	std::printf(" RISULTATO: %d passati, %d falliti\n", GPassed, GFailed);
 	std::printf("=====================================================\n");

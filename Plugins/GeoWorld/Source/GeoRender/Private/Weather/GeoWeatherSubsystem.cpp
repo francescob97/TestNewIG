@@ -84,6 +84,7 @@ void UGeoWeatherSubsystem::Initialize(FSubsystemCollectionBase& Collection)
 		RebaseHandle = Georeference->OnGeoreferenceRebased.AddUObject(this, &UGeoWeatherSubsystem::OnGeoreferenceRebased);
 	}
 	Renderer = MakeUnique<FGeoPrecipitationRenderer>();
+	LightningRenderer = MakeUnique<FGeoLightningRenderer>();
 }
 
 void UGeoWeatherSubsystem::Deinitialize()
@@ -98,6 +99,8 @@ void UGeoWeatherSubsystem::Deinitialize()
 	// Via le particelle, e la nebbia del livello torna com'era.
 	if (Renderer) { Renderer->Shutdown(); }
 	Renderer.Reset();
+	if (LightningRenderer) { LightningRenderer->Shutdown(); }
+	LightningRenderer.Reset();
 	Super::Deinitialize();
 }
 
@@ -297,6 +300,7 @@ void UGeoWeatherSubsystem::Tick(float DeltaTime)
 	Field.Advance(Step, Observer.LatDeg);
 	UpdateObserver();
 	UpdatePrecipitation(Step);
+	UpdateLightning(Step);
 	if (bShowDebugOverlay)
 	{
 		DrawDebugOverlay();
@@ -406,6 +410,84 @@ void UGeoWeatherSubsystem::UpdatePrecipitation(double DeltaSeconds)
 	}
 	const double GroundZ = (Observer.GroundHeightM - Observer.HeightM) * Units::MetersToUu + ViewLocation.Z;
 	Renderer->Update(GetWorld(), ViewLocation, Particles, Parameters, Here.VisibilityM, bDriveFog && Observer.bValid, GroundZ);
+}
+
+// ---------------------------------------------------------------------------
+//  I fulmini
+// ---------------------------------------------------------------------------
+
+void UGeoWeatherSubsystem::SetLightningActivity(double Activity)
+{
+	Weather::FLightningSettings Settings = Lightning.GetSettings();
+	Settings.Activity = Activity;
+	Lightning.SetSettings(Settings);
+}
+
+void UGeoWeatherSubsystem::UpdateLightning(double DeltaSeconds)
+{
+	// Senza camera si fa solo passare il tempo (con una mappa senza pioggia).
+	static const Weather::FPrecipitationField NoRain;
+	std::vector<Weather::FLightningStrike> Born;
+	Lightning.Advance(DeltaSeconds, Observer.LatDeg, Observer.LonDeg, Observer.bValid ? Precipitation : NoRain, Born);
+	// Un frame lunghissimo non deve sparare decine di fulmini insieme.
+	for (size_t Index = 0; Index < Born.size() && Index < 4; ++Index) { FireStrike(Born[Index]); }
+
+	const double Now = Lightning.GetTime();
+	RecentStrikeTimes.RemoveAll([Now](double When) { return Now - When > 60.0; });
+	const UGeoreferenceSubsystem* Georeference = GetWorld() ? GetWorld()->GetSubsystem<UGeoreferenceSubsystem>() : nullptr;
+	if (LightningRenderer && Georeference) { LightningRenderer->Update(GetWorld(), Georeference->GetSnapshot(), Now); }
+}
+
+void UGeoWeatherSubsystem::FireStrike(const Weather::FLightningStrike& Strike)
+{
+	UWorld* World = GetWorld();
+	const UGeoreferenceSubsystem* Georeference = World ? World->GetSubsystem<UGeoreferenceSubsystem>() : nullptr;
+	if (!Georeference || !LightningRenderer || !Observer.bValid) { return; }
+	const FGeoreferenceSnapshot Snapshot = Georeference->GetSnapshot();
+
+	// Il suolo nel punto: le quote in memoria (lontano, quelle grossolane), o il mare.
+	const double Geoid = GeoidAt(Strike.LonDeg, Strike.LatDeg);
+	double GroundHeight = 0.0;
+	if (!TerrainHeightAt(Strike.LonDeg, Strike.LatDeg, true, GroundHeight)) { GroundHeight = Geoid; }
+	const double TemperatureC = Precipitation.TemperatureAt(GroundHeight - Geoid);
+
+	const double Distance = LightningRenderer->AddStrike(World, Snapshot, Strike, GroundHeight, ViewLocation, TemperatureC, Lightning.GetTime());
+	RecentStrikeTimes.Add(Strike.TimeSeconds);
+	LatestStrike = Strike;
+	bHaveLatestStrike = true;
+	LatestStrikeDistanceM = Distance;
+
+	const bool bToGround = Strike.Kind == Weather::ELightningKind::CloudToGround;
+	const FVector Location = Snapshot.GeodeticToUnreal(Core::FGeodetic::FromDegrees(Strike.LatDeg, Strike.LonDeg, GroundHeight));
+	OnLightningStrike.Broadcast(Location, bToGround, static_cast<float>(Distance));
+}
+
+bool UGeoWeatherSubsystem::ForceStrike(double DistanceM, bool bCloudToGround)
+{
+	const UGeoreferenceSubsystem* Georeference = GetWorld() ? GetWorld()->GetSubsystem<UGeoreferenceSubsystem>() : nullptr;
+	UGeoreferenceSubsystem::FActiveViewInfo View;
+	if (!Georeference || !Observer.bValid || !Georeference->GetActiveViewInfo(View)) { return false; }
+	// Davanti alla camera, in orizzontale: lo yaw di Unreal e' l'azimut (X nord, Y est).
+	const double Heading = FMath::DegreesToRadians(View.Rotation.Yaw);
+	const double LatDeg = Observer.LatDeg + DistanceM * FMath::Cos(Heading) / 111132.0;
+	const double LonDeg = Observer.LonDeg + DistanceM * FMath::Sin(Heading) / (111320.0 * FMath::Cos(FMath::DegreesToRadians(Observer.LatDeg)));
+	FireStrike(Lightning.Strike(bCloudToGround ? Weather::ELightningKind::CloudToGround : Weather::ELightningKind::IntraCloud, LatDeg, LonDeg));
+	return true;
+}
+
+UGeoWeatherSubsystem::FLightningReport UGeoWeatherSubsystem::GetLightningReport() const
+{
+	FLightningReport Report;
+	Report.LastMinute = RecentStrikeTimes.Num();
+	Report.bAny = bHaveLatestStrike;
+	if (bHaveLatestStrike)
+	{
+		Report.bCloudToGround = LatestStrike.Kind == Weather::ELightningKind::CloudToGround;
+		Report.DistanceM = LatestStrikeDistanceM;
+		Report.AgeSeconds = Lightning.GetTime() - LatestStrike.TimeSeconds;
+	}
+	Report.ThunderInSeconds = LightningRenderer ? LightningRenderer->NextThunderIn(Lightning.GetTime()) : -1.0;
+	return Report;
 }
 
 void UGeoWeatherSubsystem::OnGeoreferenceRebased(const FGeoreferenceSnapshot& Snapshot)
@@ -525,6 +607,25 @@ void UGeoWeatherSubsystem::DrawPrecipitationOverlay() const
 	}
 	const FString Problem = GetRenderProblem();
 	if (!Problem.IsEmpty()) { Line(FColor::Yellow, Problem); }
+
+	// --- I fulmini -------------------------------------------------------------
+	const Weather::FLightningSettings& Storm = Lightning.GetSettings();
+	if (Storm.Activity <= 0.0 && !bHaveLatestStrike) { return; }
+	const FLightningReport Flashes = GetLightningReport();
+	FString Latest = TEXT("nessuno ancora");
+	if (Flashes.bAny)
+	{
+		Latest = FString::Printf(TEXT("l'ultimo %s a %s, %.0f s fa"), Flashes.bCloudToGround ? TEXT("nube-suolo") : TEXT("nella nube"),
+			*Utf8(Format::Distance(Flashes.DistanceM)), Flashes.AgeSeconds);
+	}
+	Line(FColor::Green, FString::Printf(TEXT("Fulmini       : attivita' %.1f, %d nell'ultimo minuto entro %.0f km; %s%s"),
+		Storm.Activity, Flashes.LastMinute, Storm.RadiusM / 1000.0, *Latest,
+		Flashes.ThunderInSeconds >= 0.0 ? *FString::Printf(TEXT("; tuono fra %.1f s"), Flashes.ThunderInSeconds) : TEXT("")));
+	if (Storm.Activity > 0.0 && Sky.Coverage >= 0.999)
+	{
+		Line(FColor::Yellow, TEXT("Con la pioggia estesa i fulmini sono rari: i temporali sono rovesci (geo.Weather.Storm)"));
+	}
+	if (LightningRenderer && !LightningRenderer->GetProblem().IsEmpty()) { Line(FColor::Yellow, LightningRenderer->GetProblem()); }
 }
 
 void UGeoWeatherSubsystem::DrawArrows() const

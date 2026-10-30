@@ -171,6 +171,14 @@ void UGeoPositionHudSubsystem::Draw(UCanvas* Canvas, APlayerController* /*Contro
 			if (Soil.HasSnow()) { Text += ", neve sopra " + Format::Metres(Soil.GetSnowCoverM()); }
 			Add(TEXT("Suolo"), Text);
 		}
+		// L'ultimo fulmine, e quando arriva il suo tuono: "tre secondi per chilometro".
+		const UGeoWeatherSubsystem::FLightningReport Flashes = WeatherSubsystem->GetLightningReport();
+		if (Flashes.bAny && Flashes.AgeSeconds < 120.0)
+		{
+			std::string Strike = "a " + Format::Distance(Flashes.DistanceM) + ", " + Format::Number(Flashes.AgeSeconds, 0) + " s fa";
+			if (Flashes.ThunderInSeconds >= 0.0) { Strike += ", tuono fra " + Format::Number(Flashes.ThunderInSeconds, 0) + " s"; }
+			Add(TEXT("Fulmine"), Strike);
+		}
 	}
 
 	// --- Disegno --------------------------------------------------------------

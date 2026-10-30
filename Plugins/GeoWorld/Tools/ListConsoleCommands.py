@@ -42,7 +42,7 @@ GROUPS = [
     ("Imagery", "Le ortofoto", "Le foto sul terreno, e i materiali di tutto il progetto (Fase 6)."),
     ("Roads", "Strade, ferrovie, piste", "Dipinte sul terreno e 3D da vicino (Fase 8)."),
     ("Water", "L'acqua", "Mare, laghi, fiumi (Fase 9)."),
-    ("Weather", "Il meteo", "Vento, pioggia, neve, grandine."),
+    ("Weather", "Il meteo", "Vento, pioggia, neve, grandine, fulmini e tuono."),
     ("Fly", "La camera di volo", "Solo in Play: velocita' proporzionale alla quota."),
 ]
 
@@ -60,6 +60,7 @@ START_HERE = [
     ("volare (in Play)", "geo.Fly"),
     ("rifare i materiali dopo un aggiornamento", "geo.Imagery.CreateMaterial"),
     ("pioggia, neve, sereno", "geo.Weather.Rain 4   geo.Weather.Snow 1   geo.Weather.Clear"),
+    ("un temporale, o un fulmine subito", "geo.Weather.Storm   oppure   geo.Weather.Strike 1500"),
     ("vento", "geo.Weather.Wind 10 270"),
     ("capire perche' non vedo niente", "geo.Terrain.Diag   (poi viewmode wireframe, r.Fog 0)"),
     ("i comandi di un gruppo, dentro Unreal", "geo.Help Weather"),

@@ -22,11 +22,27 @@
   la camera che si muove non le trascina, nessun salto fra un frame e l'altro;
   la mesh (4 vertici nello stesso punto, tutti nella scatola).
 
+**I fulmini** (sezioni 11–13, 19 test):
+
+- dove e quanti: in un'ora, quanti la densità nei nuclei promette (5.806
+  contro 5.951 attesi); tutti nei nuclei e entro 30 km; uno su tre al suolo;
+  attività 3 il triplo; un fronte (pioggia estesa) fulmina poco; niente senza
+  pioggia o con attività zero; stesso seme, stessi fulmini;
+- il lampo: un picco per ogni colpo di ritorno, buio prima e dopo; in media 3
+  colpi, a 30–90 ms l'uno dall'altro;
+- il canale: un filo continuo dalla nube al punto colpito, rami più deboli che
+  si fermano a mezz'aria, la cima che sfuma nella nube, stesso seme stessa
+  forma;
+- il tuono: arriva dopo distanza / velocità del suono (10,1 s a 3,45 km); da
+  vicino acuto, da lontano basso (quattro volte meno passaggi per lo zero); il
+  rombo dura quanto la differenza di distanza fra i pezzi del canale (8 s a
+  300 m); il volume cala con la distanza, oltre 25 km silenzio.
+
 Più i formati delle stampe (`geocore_tests`, sezione 10): "pioggia 4,2 mm/h",
 "neve e pioggia 1,0 mm/h", "350 m", "1,2 km".
 
 **Cosa non ho potuto provare:** la compilazione in Unreal, i materiali, le
-particelle e la nebbia a schermo. I controlli statici (sezione 4 di
+particelle, la nebbia, i fulmini a schermo e il suono del tuono. I controlli statici (sezione 4 di
 `docs/consegna.md`) sono verdi.
 
 ---
@@ -39,7 +55,7 @@ particelle e la nebbia a schermo. I controlli statici (sezione 4 di
 geo.Imagery.CreateMaterial
 ```
 
-Crea `MPC_GeoWeather` e `M_GeoPrecipitation` in `/GeoWorld/Materials`, e
+Crea `MPC_GeoWeather`, `M_GeoPrecipitation` e `M_GeoLightning` in `/GeoWorld/Materials`, e
 **rifà** `M_GeoTerrain` e `M_GeoRoad` con il nodo "Meteo sul suolo". Deve
 dire in verde tutti i materiali; un giallo "manca MPC_GeoWeather" vuol dire
 che la collezione non si è creata (mandami il log).
@@ -142,13 +158,59 @@ i rovesci passano.
 `geo.Weather.Hail 30 1` mette la grandine ovunque ci sia un nucleo, senza buchi
 fra i temporali.
 
-## 6. Da Blueprint
+## 6. I fulmini
+
+Il modo più rapido per vederne uno, senza aspettare un temporale (in **Play**,
+per sentire anche il tuono):
+
+```
+geo.Weather.Strike 1500
+```
+
+Un fulmine nube-suolo a 1,5 km davanti alla camera:
+
+1. **il canale**: un filo bianco-azzurro, tortuoso, con qualche ramo che si
+   ferma a mezz'aria; in alto sfuma nel nulla (lì ci sarebbe la nube);
+2. **sfarfalla**: due, tre, quattro lampi in un terzo di secondo (i colpi di
+   ritorno), poi buio;
+3. **il paesaggio si illumina** attorno al punto colpito, per un attimo;
+4. **il tuono**, dopo ~4,4 s (tre secondi per chilometro): uno schiocco secco
+   e un brontolio. La riga `Fulmine` delle stampe conta i secondi che mancano.
+
+Poi prova le distanze:
+
+- `geo.Weather.Strike 200`: il tuono arriva quasi subito, fortissimo, ed è
+  **lungo** (il canale sopra di te è a distanze molto diverse);
+- `geo.Weather.Strike 8000`: un lampo lontano, il tuono dopo ~24 s, basso e
+  piano;
+- `geo.Weather.Strike 3000 nube`: niente canale, si illumina tutto il cielo
+  (un lampo dentro la nube).
+
+E un temporale vero:
+
+```
+geo.Weather.Storm
+geo.Weather.Debug 1
+```
+
+Rovesci sparsi (35% del suolo) che viaggiano con il vento in quota, e i
+fulmini nei loro nuclei: l'overlay dice quanti nell'ultimo minuto (qualche
+decina entro 30 km, se ci sono dei nuclei vicini) e l'ultimo, a che distanza.
+Sotto un nucleo, fulmini vicini e tuoni forti; ai margini, lampi lontani.
+`geo.Weather.Lightning 3` per un temporale forte; `geo.Weather.Thunder 0.5`
+per abbassare il tuono; `geo.Weather.Clear` per finire.
+
+## 7. Da Blueprint
 
 Nel Level Blueprint: *Get GeoWeatherSubsystem* → *Get Precipitation At* con una
 posizione (es. quella del pawn) → *Break GeoPrecipitationInfo*: mm/h, le tre
 frazioni, la temperatura, la visibilità.
 
-## 7. Se qualcosa non va
+I fulmini: *Get GeoWeatherSubsystem* → *Bind Event to On Lightning Strike*: a
+ogni fulmine arrivano la posizione, se è arrivato al suolo e la distanza (m).
+Per un effetto in più, un suono tuo, una camera che trema da vicino.
+
+## 8. Se qualcosa non va
 
 | Sintomo | Causa probabile | Cosa fare |
 |---|---|---|
@@ -162,3 +224,8 @@ frazioni, la temperatura, la visibilità.
 | La nebbia resta fitta dopo `geo.Weather.Clear` | i valori originali non sono stati ripristinati | `geo.Weather.Fog 0` li rimette; dimmelo |
 | Da 8 km di quota non piove | voluto: sopra la cima delle nuvole (6 km, 10 per i temporali) non cade niente | scendi |
 | Il suolo è bagnato anche dove non piove | voluto: il bagnato è uno per il mondo, guidato da sotto la camera | `docs/meteo-design.md`, sezione 4 |
+| Il fulmine illumina ma il canale non si vede | manca `M_GeoLightning` (l'overlay lo dice in giallo) | `geo.Imagery.CreateMaterial` |
+| Il canale si vede, ma è un filo grigio spento | l'esposizione della scena è altissima (sole fisico molto forte) | dimmi l'intensità del sole del livello: il canale si misura su quella |
+| Il fulmine c'è ma il tuono no | fuori dal Play l'audio del mondo dell'editor può essere spento; o il volume (`geo.Weather.Thunder`) | prova in Play; `geo.Weather.Thunder 1` |
+| `geo.Weather.Storm` ma nessun fulmine per minuti | nessun nucleo entro 30 km (i temporali sono sparsi) | aspetta, `geo.Weather.Lightning 3`, o `geo.Weather.Strike` |
+| Con `geo.Weather.Rain` e `geo.Weather.Lightning 1` quasi nessun fulmine | voluto: la pioggia estesa (un fronte) ha pochi temporali | `geo.Weather.Storm` |
