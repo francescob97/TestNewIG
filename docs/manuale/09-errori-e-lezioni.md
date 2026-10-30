@@ -113,6 +113,8 @@ e organizza il codice.
 | `Detail::PriorityFromError` definita in un header senza `inline` | mai esploso, ma due `.cpp` fuori dallo stesso blocco unity avrebbero dato `LNK2005`: ora lo sorveglia la regola 3 di `CheckModuleExports.py` |
 | parametro `bEnabled` che nasconde il campo `bEnabled` | lo **shadowing** in Unreal è un errore, non un avviso |
 | `cannot open source file` su file appena aggiunti | bisogna **rigenerare i file di progetto** |
+| `C4458` su una `double Ground` locale, dopo aver aggiunto un membro `Ground` | anche una **variabile locale** non può avere il nome di un membro: ora `CheckShadowedParameters.py` guarda anche i `.cpp`, e i test standalone compilano con `-Werror=shadow` |
+| due "Teletrasporto riconosciuto" di fila, lag e terreno che lampeggia, in Play | la camera del `PlayerCameraManager` è una **cache aggiornata a fine frame**: subito dopo un rebase era nelle coordinate vecchie (`docs/residenza-design.md`, "Il teletrasporto") |
 
 **La difesa:** conoscere le regole (capitolo 1), e il principio che le aggira quasi
 tutte: **lo strato puro è header-only e non conosce Unreal.** Nessuna macro di

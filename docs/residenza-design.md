@@ -241,6 +241,23 @@ verso o nell'altro.
 | salita da 2.500 a 6.000 m in un frame | 3,5 km | 3 km | teletrasporto |
 | volo a 250 m/s, 60 fps | 4 m | 1,25 km | moto |
 | `geo.Fly` a 600 km di quota, 300 km/s | 5 km | 300 km | moto |
+| frame lento (0,3 s) a 5 km/s, a 2.500 m | 1,5 km | 1,25 km, ma la velocità ne spiega 1,5 | moto |
+
+**E il salto non dev'essere spiegato dalla velocità.** Oltre la soglia di quota,
+serve anche che lo spostamento sia almeno **tre volte** quello che la velocità
+di adesso farebbe in quel tempo (al massimo 2 s). Senza questa regola un frame
+lento in volo veloce (`geo.Fly.Speed 4`) diventava un "teletrasporto": la coda
+delle tile si svuotava proprio mentre si era già in ritardo, e il lag peggiorava.
+
+> ⚠️ **Trappola (successa): il rebase visto come un teletrasporto.** In Play la
+> posizione della camera viene dalla cache del `PlayerCameraManager`, che Unreal
+> ricalcola solo alla **fine** del frame. Nel frame di un rebase la cache era
+> ancora nelle coordinate vecchie: letta con l'origine nuova, la camera stava a
+> 10 km di distanza (tutto il rebase), e il frame dopo "tornava". Due
+> teletrasporti di fila, due code buttate, il terreno che lampeggiava. Ora
+> `UGeoreferenceSubsystem::CameraManagerLocation` corregge la cache finché Unreal
+> non la ricalcola, e il log del LOD dice di quanto è stato il salto e se è
+> arrivato subito dopo un rebase.
 
 **Cosa succede dopo un salto:** le code di lettura (quote e immagini) vengono
 svuotate, perché riguardano il posto da cui si è partiti; la velocità riparte da

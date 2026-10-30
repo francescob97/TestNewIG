@@ -144,6 +144,17 @@ namespace GeoWorld::Quadtree
 
 			/** Sotto questa distanza non e' mai un teletrasporto (quote bassissime). */
 			double TeleportMinDistanceMetres = 500.0;
+
+			/**
+			 * E non e' un teletrasporto un salto che la velocita' di adesso
+			 * spiega: deve essere almeno questo multiplo di (velocita' x tempo
+			 * trascorso, al massimo MaxExplainedSeconds). Un frame lento a
+			 * tutta velocita' (geo.Fly.Speed 4: 5 km/s a 2500 m) fa 1,5 km in
+			 * 0,3 s, oltre la soglia di quota: senza questa regola diventava un
+			 * "teletrasporto", buttava la coda delle tile e il lag peggiorava.
+			 */
+			double TeleportOverExpectedFactor = 3.0;
+			double MaxExplainedSeconds = 2.0;
 		};
 
 		FMotionPredictor() = default;
@@ -171,11 +182,14 @@ namespace GeoWorld::Quadtree
 			const double Height = std::max(0.0, Core::EcefToGeodetic(Position, Ellipsoid).HeightM);
 			const double Threshold = std::max(Settings.TeleportMinDistanceMetres,
 			                                  Settings.TeleportHeightFraction * Height);
-			if (Distance > Threshold)
+			const double Expected = Velocity.Length() * std::clamp(DeltaTime, 0.0, Settings.MaxExplainedSeconds);
+			if (Distance > Threshold && Distance > Settings.TeleportOverExpectedFactor * Expected)
 			{
 				Velocity = FEcef{ 0.0, 0.0, 0.0 };
 				Store(Position, TimeSeconds);
 				++TeleportCount;
+				LastJumpMetres = Distance;
+				LastJumpThresholdMetres = Threshold;
 				return true;
 			}
 
@@ -204,6 +218,9 @@ namespace GeoWorld::Quadtree
 		double GetSpeed() const { return Velocity.Length(); }
 		const FEcef& GetPosition() const { return LastPosition; }
 		int32_t GetTeleportCount() const { return TeleportCount; }
+		/** L'ultimo salto riconosciuto come teletrasporto, e la soglia di allora (m): per il log. */
+		double GetLastJumpMetres() const { return LastJumpMetres; }
+		double GetLastJumpThresholdMetres() const { return LastJumpThresholdMetres; }
 
 		/**
 		 * Dove sara' la camera fra SecondsAhead secondi, a velocita' costante.
@@ -231,6 +248,8 @@ namespace GeoWorld::Quadtree
 		double LastTime = 0.0;
 		bool bHasSample = false;
 		int32_t TeleportCount = 0;
+		double LastJumpMetres = 0.0;
+		double LastJumpThresholdMetres = 0.0;
 	};
 
 	// ======================================================================

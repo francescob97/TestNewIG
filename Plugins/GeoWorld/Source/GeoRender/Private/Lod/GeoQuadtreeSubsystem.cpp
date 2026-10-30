@@ -191,6 +191,16 @@ bool UGeoQuadtreeSubsystem::RunSelection()
 	// mondo si ferma con la pausa e segue il rallentatore, e nell'editor fuori
 	// dal Play non e' detto che avanzi. La camera invece si muove comunque, e
 	// la velocita' che interessa e' quella vera.
+	// Quanti frame dall'ultimo rebase: un "teletrasporto" proprio li' vuol dire
+	// che qualcuno ha letto la camera con l'origine sbagliata (vedi
+	// UGeoreferenceSubsystem::CameraManagerLocation), non che ci si e' mossi.
+	if (const UGeoreferenceSubsystem* Georeference = GetWorld() ? GetWorld()->GetSubsystem<UGeoreferenceSubsystem>() : nullptr)
+	{
+		const uint32 Generation = Georeference->GetSnapshot().Generation;
+		FramesSinceRebase = (Generation != LastSeenGeneration) ? 0 : FMath::Min(FramesSinceRebase + 1, 1000);
+		LastSeenGeneration = Generation;
+	}
+
 	if (bLiveView && Motion.Update(View.CameraEcef, FPlatformTime::Seconds()))
 	{
 		// Teletrasporto: tutto cio' che era in coda riguardava il posto da
@@ -199,7 +209,9 @@ bool UGeoQuadtreeSubsystem::RunSelection()
 		Streaming->CancelPendingRequests();
 		bPlanDirty = true;
 		UE_LOG(LogGeoWorld, Log,
-			TEXT("[GeoLod] Teletrasporto riconosciuto: richieste in coda annullate, piano da rifare."));
+			TEXT("[GeoLod] Teletrasporto riconosciuto: salto di %.2f km in un frame (soglia %.2f km)%s. Richieste in coda annullate, piano da rifare."),
+			Motion.GetLastJumpMetres() / 1000.0, Motion.GetLastJumpThresholdMetres() / 1000.0,
+			FramesSinceRebase <= 2 ? TEXT(", SUBITO DOPO UN REBASE: non dovrebbe succedere, mandalo a chi sviluppa") : TEXT(""));
 	}
 
 	const double Started = FPlatformTime::Seconds();

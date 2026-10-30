@@ -46,6 +46,7 @@ gia' incontrati e corretti, per riconoscerli se tornano:
 |---|---|
 | `cannot open source file "Unreal/..."` | tre moduli avevano tutti una cartella `Public/Unreal`. Ora si chiamano `Georeference`, `Streaming`, `Lod`. Se compare su file nuovi: **rigenera i project file di Visual Studio** |
 | errore su un parametro chiamato come un membro | Unreal tratta lo shadowing come ERRORE. Convenzione: prefisso `In` (`bInEnabled`). Lo intercetta `Tools/CheckShadowedParameters.py` |
+| In Play, a ogni rebase: due "[GeoLod] Teletrasporto riconosciuto" di fila, lag, terreno che lampeggia | la cache della camera (`PlayerCameraManager`) si aggiorna a fine frame: nel frame del rebase era nelle coordinate vecchie, e il LOD vedeva un salto di 10 km andata e ritorno. **Corretto** in `UGeoreferenceSubsystem::CameraManagerLocation`; il messaggio ora dice di quanto e' il salto e se e' subito dopo un rebase. Anche un frame lento in volo veloce non conta piu' come teletrasporto |
 | `C4458: declaration of 'X' hides class member` su una variabile locale | come sopra, ma per una variabile dentro una funzione membro, spesso perche' il MEMBRO e' arrivato dopo (successo con `Ground` in `UGeoWeatherSubsystem`). Ora `CheckShadowedParameters.py` guarda anche le variabili nei `.cpp` e le classi annidate; per lo strato puro i test standalone compilano con `-Werror=shadow` |
 | errori di `std::max`, `std::numeric_limits` | include della standard library che gcc tira dentro da solo e MSVC no |
 | `geo.Terrain.Demo` (o un altro `Open`/`Demo`) non apre un dataset il cui percorso ha degli spazi | la console di Unreal divide gli argomenti a ogni spazio, anche fra virgolette. **Corretto**: i comandi che aprono un dataset rimettono insieme i percorsi fra virgolette (`GeoCore/Public/GeoConsoleArgs.h`). Scrivi il percorso fra virgolette: `geo.Terrain.Demo "C:\Unreal Projects\...\dted"` |
@@ -106,7 +107,7 @@ cmake -S Plugins/GeoWorld/Tools/StandaloneTests -B build
 cmake --build build
 build\Debug\geocore_tests.exe                       :: 51 test
 build\Debug\geotiles_tests.exe dataset\test         :: 22 test
-build\Debug\geoquadtree_tests.exe                   :: 84 test
+build\Debug\geoquadtree_tests.exe                   :: 86 test
 build\Debug\geomesh_tests.exe                       :: 41 test
 build\Debug\geoimagery_tests.exe                    :: 52 test
 build\Debug\georoads_tests.exe                      :: 80 test (dalla radice del repository)

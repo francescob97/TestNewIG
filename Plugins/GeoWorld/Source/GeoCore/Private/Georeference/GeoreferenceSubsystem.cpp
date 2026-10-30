@@ -272,6 +272,21 @@ void UGeoreferenceSubsystem::ApplyRebase(const FGeodetic& RequestedOrigin)
 	}
 #endif
 
+	// La cache del PlayerCameraManager resta nelle coordinate vecchie fino
+	// alla fine del frame: si ricorda com'e' adesso e dove sta davvero, per
+	// correggerla finche' Unreal non la ricalcola (CameraManagerLocation).
+	const APlayerCameraManager* CameraManager = nullptr;
+	FEcef CameraCacheEcef{};
+	if (const APlayerController* PC = World->GetFirstPlayerController())
+	{
+		CameraManager = PC->PlayerCameraManager;
+		if (CameraManager)
+		{
+			// Gia' corretta, se due rebase cadessero prima di un ricalcolo.
+			CameraCacheEcef = Snapshot.UnrealToEcef(CameraManagerLocation(*CameraManager));
+		}
+	}
+
 	// --------------------------------------------------------------------
 	//  PASSO 2 - Cambiare origine.
 	// --------------------------------------------------------------------
@@ -279,6 +294,13 @@ void UGeoreferenceSubsystem::ApplyRebase(const FGeodetic& RequestedOrigin)
 		FRWScopeLock Lock(SnapshotLock, SLT_Write);
 		Snapshot.Georeference.SetOrigin(NewOrigin);
 		++Snapshot.Generation;
+	}
+
+	if (CameraManager)
+	{
+		StaleCameraLocation = CameraManager->GetCameraLocation();
+		CorrectedCameraLocation = Snapshot.EcefToUnreal(CameraCacheEcef);
+		bCameraCacheStale = true;
 	}
 
 	++RebaseCount;
@@ -387,6 +409,19 @@ void UGeoreferenceSubsystem::UnregisterGeoComponent(UGeoTransformComponent* Comp
 //  Camera
 // ============================================================================
 
+FVector UGeoreferenceSubsystem::CameraManagerLocation(const APlayerCameraManager& CameraManager) const
+{
+	const FVector Cached = CameraManager.GetCameraLocation();
+	// Identica, bit per bit, a quella letta al rebase: la cache non e' ancora
+	// stata ricalcolata ed e' nelle coordinate vecchie. Appena Unreal la
+	// ricalcola (dal pawn, gia' spostato) cambia, e si torna a usarla.
+	if (bCameraCacheStale && Cached == StaleCameraLocation)
+	{
+		return CorrectedCameraLocation;
+	}
+	return Cached;
+}
+
 bool UGeoreferenceSubsystem::GetActiveViewLocation(FVector& OutLocation) const
 {
 	const UWorld* World = GetWorld();
@@ -402,7 +437,7 @@ bool UGeoreferenceSubsystem::GetActiveViewLocation(FVector& OutLocation) const
 	{
 		if (const APlayerCameraManager* CameraManager = PC->PlayerCameraManager)
 		{
-			OutLocation = CameraManager->GetCameraLocation();
+			OutLocation = CameraManagerLocation(*CameraManager);
 			return true;
 		}
 	}
@@ -560,7 +595,7 @@ bool UGeoreferenceSubsystem::GetActiveViewInfo(FActiveViewInfo& OutInfo) const
 			// e restituiscono comunque il risultato gia' passato per tutti i
 			// modificatori, cioe' cio' che si sta davvero guardando e non cio'
 			// che il pawn avrebbe voluto inquadrare.
-			OutInfo.Location = CameraManager->GetCameraLocation();
+			OutInfo.Location = CameraManagerLocation(*CameraManager);
 			OutInfo.Rotation = CameraManager->GetCameraRotation();
 			OutInfo.HorizontalFovDegrees = CameraManager->GetFOVAngle();
 

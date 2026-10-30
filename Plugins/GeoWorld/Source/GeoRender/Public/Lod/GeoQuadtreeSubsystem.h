@@ -236,6 +236,9 @@ private:
 	static constexpr int32 MaxPrefetchInFlight = 128;
 
 	GeoWorld::Quadtree::FMotionPredictor Motion;
+	/** Per il log: un teletrasporto subito dopo un rebase e' un errore, non un salto vero. */
+	uint32 LastSeenGeneration = 0;
+	int32 FramesSinceRebase = 1000;
 	GeoWorld::Quadtree::FResidencySettings ResidencySettings;
 	GeoWorld::Quadtree::FResidencyPlan Plan;
 	TArray<GeoWorld::Quadtree::FTileRequest> RenderRequests;

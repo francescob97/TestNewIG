@@ -673,10 +673,31 @@ static void TestMotionPredictor()
 	Check(std::abs(Hitch.GetSpeed() - Speed) < 5.0, "un frame lento non altera la velocita'",
 		Fmt("%.2f m/s", Hitch.GetSpeed()));
 
+	// Un frame lento A TUTTA VELOCITA' non e' un teletrasporto: geo.Fly.Speed 4 a
+	// 2500 m sono 5 km/s, e 0,3 s fanno 1,5 km, oltre la soglia di quota (1250 m).
+	{
+		FMotionPredictor Fast;
+		const double FastSpeed = 5000.0;
+		double FastTime = 0.0;
+		bool bFastTeleport = false;
+		for (int Frame = 0; Frame < 120; ++Frame, FastTime += Dt)
+			bFastTeleport |= Fast.Update(NorthOf(41.5, 12.5, FastSpeed * FastTime / 1000.0, 2500.0), FastTime);
+		FastTime += 0.3;
+		bFastTeleport |= Fast.Update(NorthOf(41.5, 12.5, FastSpeed * FastTime / 1000.0, 2500.0), FastTime);
+		Check(!bFastTeleport, "un frame lento a tutta velocita' non e' un teletrasporto (il salto lo spiega la velocita')",
+			Fmt("%.0f m in un frame", FastSpeed * 0.3));
+	}
+
 	// Teletrasporto: geo.Goto da Roma a Milano.
-	Check(Motion.Update(GeodeticToEcef(FGeodetic::FromDegrees(45.46, 9.19, 2500.0)), 5.0 + Dt),
+	const FEcef BeforeJump = Motion.GetPosition();
+	const FEcef Milano = GeodeticToEcef(FGeodetic::FromDegrees(45.46, 9.19, 2500.0));
+	Check(Motion.Update(Milano, 5.0 + Dt),
 		"un salto Roma -> Milano e' riconosciuto come teletrasporto");
 	Check(Motion.GetSpeed() == 0.0, "e la velocita' riparte da zero, invece di valere 30.000 km/s");
+	Check(std::abs(Motion.GetLastJumpMetres() - (Milano - BeforeJump).Length()) < 1e-6
+		&& std::abs(Motion.GetLastJumpThresholdMetres() - 1250.0) < 1e-3,
+		"il salto e la soglia si ricordano, per dirli nel log",
+		Fmt("salto %.0f km", Motion.GetLastJumpMetres() / 1000.0) + Fmt(", soglia %.0f m", Motion.GetLastJumpThresholdMetres()));
 
 	// Salire da 2500 a 6000 m sullo stesso punto e' un salto (cambia tutto il set)...
 	FMotionPredictor Climb;

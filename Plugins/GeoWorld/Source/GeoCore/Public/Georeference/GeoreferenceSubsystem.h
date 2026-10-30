@@ -15,6 +15,7 @@
 #include "GeoreferenceSubsystem.generated.h"
 
 class UGeoTransformComponent;
+class APlayerCameraManager;
 
 /** Notifica di rebase avvenuto. Delegate C++ (non dynamic): piu' veloce e non
  *  richiede che il parametro sia una USTRUCT riflessa. */
@@ -194,6 +195,21 @@ private:
 	/** Sposta l'origine sul punto dato, ma sempre a QUOTA ZERO (vedi il .cpp). */
 	void ApplyRebase(const FGeodetic& RequestedOrigin);
 	void RefreshRegisteredComponents();
+
+	/**
+	 * La posizione della camera dal PlayerCameraManager, CORRETTA se la sua
+	 * cache e' di prima dell'ultimo rebase.
+	 *
+	 * NOTA UE: il PlayerCameraManager ricalcola la camera solo alla FINE del
+	 * frame (UpdateCamera, dopo tutti i tick). Fra un rebase e quel momento
+	 * GetCameraLocation() restituisce la posizione nelle coordinate VECCHIE:
+	 * letta con l'origine nuova, la camera sembra a chilometri di distanza
+	 * (tutto il salto del rebase), e il frame dopo "torna". Il LOD lo
+	 * prendeva per due teletrasporti di fila, buttava due volte le tile in
+	 * coda, e il terreno lampeggiava (in Play; nell'editor il viewport si
+	 * sposta subito e il problema non c'e').
+	 */
+	FVector CameraManagerLocation(const APlayerCameraManager& CameraManager) const;
 	void DrawDebugOverlay() const;
 
 	/**
@@ -222,6 +238,11 @@ private:
 	bool   bAutoRebase             = true;
 	bool   bMoveViewTargetOnRebase = true;
 	bool   bShowDebugOverlay       = false;
+
+	/** La cache della camera al momento del rebase (vedi CameraManagerLocation). */
+	FVector StaleCameraLocation = FVector::ZeroVector;
+	FVector CorrectedCameraLocation = FVector::ZeroVector;
+	bool bCameraCacheStale = false;
 
 	/** Statistiche per l'HUD. */
 	double LastRebaseDistanceMeters = 0.0;
