@@ -303,7 +303,7 @@ def cut_block(task: tuple) -> dict:
 def expand_inputs(patterns: list[str]) -> list[str]:
     files: list[str] = []
     for pattern in patterns:
-        matched = sorted(glob.glob(pattern))
+        matched = sorted(glob.glob(pattern, recursive=True))
         if matched:
             files.extend(matched)
         elif os.path.exists(pattern):

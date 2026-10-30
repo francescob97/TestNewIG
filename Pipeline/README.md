@@ -76,6 +76,28 @@ Note per Windows, in ogni caso:
   centinaia di migliaia di file piccoli. Vale la pena escludere la cartella di
   output.
 
+## I tuoi DTED in un colpo: `costruisci-dted.bat`
+
+Doppio clic su `costruisci-dted.bat` (o trascinaci sopra la cartella dei `.dt2`):
+
+1. chiede la cartella e il nome del dataset;
+2. cerca i `.dt2` anche nelle sottocartelle (`dted\E016\N38.dt2`...);
+3. costruisce `Pipeline\dataset\<nome>` con il datum verticale dei DTED
+   (`--vertical-crs EPSG:5773`, EGM96) e lo verifica;
+4. mette negli appunti il comando per Unreal: nella console (tasto ~)
+   Ctrl+V e Invio.
+
+Da riga di comando: `costruisci-dted "D:\dati\dted" sud`. Interrotto, si
+rilancia uguale e riprende. E' lo stesso di:
+
+```bat
+geoworld build -i "D:\dati\dted\**\*.dt2" -o dataset\sud --vertical-crs EPSG:5773 --name "DTED2 sud"
+geoworld verify -o dataset\sud
+```
+
+`**` nei pattern scende in tutte le sottocartelle (vale per ogni comando che
+prende dei file: `build`, `build-imagery`, `build-roads`, `build-water`).
+
 ## Non hai ancora i dati?
 
 ```bat

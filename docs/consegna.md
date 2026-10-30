@@ -47,6 +47,7 @@ gia' incontrati e corretti, per riconoscerli se tornano:
 | `cannot open source file "Unreal/..."` | tre moduli avevano tutti una cartella `Public/Unreal`. Ora si chiamano `Georeference`, `Streaming`, `Lod`. Se compare su file nuovi: **rigenera i project file di Visual Studio** |
 | errore su un parametro chiamato come un membro | Unreal tratta lo shadowing come ERRORE. Convenzione: prefisso `In` (`bInEnabled`). Lo intercetta `Tools/CheckShadowedParameters.py` |
 | errori di `std::max`, `std::numeric_limits` | include della standard library che gcc tira dentro da solo e MSVC no |
+| `geo.Terrain.Demo` (o un altro `Open`/`Demo`) non apre un dataset il cui percorso ha degli spazi | la console di Unreal divide gli argomenti a ogni spazio, anche fra virgolette. **Corretto**: i comandi che aprono un dataset rimettono insieme i percorsi fra virgolette (`GeoCore/Public/GeoConsoleArgs.h`). Scrivi il percorso fra virgolette: `geo.Terrain.Demo "C:\Unreal Projects\...\dted"` |
 | `ModuleNotFoundError: No module named 'PIL'` lanciando un comando Python | manca Pillow, che serve solo alle ortofoto. Con `geoworld` non succede (c'e' in `environment.yml`); con un ambiente conda fatto a mano: `conda install -c conda-forge pillow` |
 | `C2084: function 'X' already has a body` su una funzione in un namespace anonimo | **build unity**: Unreal incolla piu' .cpp dello stesso modulo in una sola unita' di traduzione, e due namespace anonimi diventano lo stesso namespace. Non rinominare: metti la funzione in un header condiviso. Lo intercetta `Tools/CheckUnityCollisions.py` |
 | `C2039: 'X' is not a member of Y` su una classe nostra | nome di metodo sbagliato. Lo intercetta `Tools/CheckOwnApiCalls.py`, che suggerisce anche il nome giusto |
@@ -76,10 +77,11 @@ In PowerShell si scrive `.\geoworld`.
 ```bat
 cd Pipeline
 geoworld check-env                              :: SEMPRE per primo
+costruisci-dted                                 :: i tuoi .dt2 -> dataset, in un colpo (chiede la cartella)
 geoworld fetch --area test -o dati/copernicus   :: DEM libero, 19 MB
 geoworld build -i "dati/copernicus/*.tif" -o dataset/test
 geoworld verify -o dataset/test
-geoworld test                                        :: 188 test
+geoworld test                                        :: 192 test
 
 :: Fase 8: strade su Torino (dettagli in docs/fase8-verifica.md)
 geoworld fetch-osm --area torino -o dati/osm

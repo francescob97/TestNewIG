@@ -5,6 +5,7 @@
 #include "Modules/ModuleManager.h"
 
 #include "GeoCoreModule.h"
+#include "GeoConsoleArgs.h"
 #include "Streaming/GeoTileStreamingSubsystem.h"
 #include "Georeference/GeoreferenceSubsystem.h"
 #include "Georeference/GeoWorldTypes.h"
@@ -36,8 +37,10 @@ static FAutoConsoleCommandWithWorldAndArgs GeoTilesOpenCommand(
 	TEXT("geo.Tiles.Open"),
 	TEXT("geo.Tiles.Open <cartella> - apre un dataset prodotto dalla pipeline."),
 	FConsoleCommandWithWorldAndArgsDelegate::CreateStatic(
-		[](const TArray<FString>& Args, UWorld* World)
+		[](const TArray<FString>& RawArgs, UWorld* World)
 	{
+		// I percorsi fra virgolette restano interi anche con gli spazi (GeoConsoleArgs.h).
+		const TArray<FString> Args = GeoWorld::Console::QuotedArgs(RawArgs);
 		UGeoTileStreamingSubsystem* Streaming = GeoTilesConsole::Get(World);
 		if (!Streaming) { return; }
 

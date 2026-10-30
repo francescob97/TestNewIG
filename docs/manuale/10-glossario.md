@@ -329,6 +329,7 @@ il primo comando da provare quando non si vede niente. (6)
 |---|---|
 | `GeoCore.Build.cs` | dipendenze; `UnrealEd` solo per l'editor |
 | `Public/GeoCoreModule.h` | la categoria di log `LogGeoWorld` |
+| `Public/GeoConsoleArgs.h` | argomenti dei comandi console: i percorsi fra virgolette restano interi anche con gli spazi |
 | `Public/Geo/GeoTypes.h` | `FGeodetic`, `FEcef`, `FEnu`, `FMat3` |
 | `Public/Geo/Ellipsoid.h` | WGS84, conversioni, basi ENU/NEU |
 | `Public/Geo/EnuFrame.h` | frame locale ENU |

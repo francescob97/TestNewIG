@@ -66,7 +66,7 @@ def expand_inputs(patterns: list[str]) -> list[str]:
                 if entry.startswith("/vsi") or os.path.exists(entry):
                     files.append(entry)
             continue
-        matched = sorted(glob.glob(pattern))
+        matched = sorted(glob.glob(pattern, recursive=True))
         if matched:
             files.extend(matched)
         elif os.path.exists(pattern):

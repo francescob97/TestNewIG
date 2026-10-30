@@ -108,7 +108,7 @@ le classi di errore di compilazione gia' incontrate su Windows -- shadowing,
 simboli non esportati fra moduli, tipi di comando console inesistenti,
 collisioni da build unity, metodi inesistenti chiamati sulle nostre classi.
 
-451 test C++ in totale, piu' 188 test Python della pipeline.
+451 test C++ in totale, piu' 192 test Python della pipeline.
 
 **Dopo la prima prova su Torino** (materiale, scene Sentinel, prestazioni): `docs/prova-torino.md`.
 **Dopo la seconda** (troppi triangoli, RAM): `docs/prova-torino-2.md`.
@@ -126,6 +126,7 @@ geoworld check-env                            :: diagnosi: GDAL, PROJ, griglie
 geoworld fetch --area test -o dati/copernicus :: scarica un DEM libero
 geoworld build -i "dati/copernicus/*.tif" -o dataset/test
 geoworld verify -o dataset/test
+costruisci-dted                                :: i tuoi DTED (.dt2): chiede la cartella, fa tutto
 
 :: ortofoto (Fase 6): stessa struttura, dataset separato
 geoworld fetch-imagery --area roma -o dati/sentinel
@@ -141,7 +142,7 @@ geoworld fetch-water -o dati/acqua
 geoworld build-water --osm dati/osm/nord-ovest-latest.osm.pbf --sea dati/acqua/water-polygons-split-4326.zip --terrain dataset/terreno -o dataset/acqua
 geoworld verify-water -o dataset/acqua
 
-geoworld test                                      :: 188 test, sorgente sintetico
+geoworld test                                      :: 192 test, sorgente sintetico
 ```
 
 Installazione, opzioni e conda a mano (se lo preferisci): `Pipeline/README.md`.

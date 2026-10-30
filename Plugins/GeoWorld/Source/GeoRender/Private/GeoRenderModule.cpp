@@ -22,6 +22,7 @@
 #include "Georeference/GeoPlaces.h"
 #include "Georeference/GeoWorldTypes.h"
 #include "GeoCoreModule.h"
+#include "GeoConsoleArgs.h"
 
 #include "Engine/Engine.h"
 #include "Engine/World.h"
@@ -704,8 +705,10 @@ static FAutoConsoleCommandWithWorldAndArgs GeoImageryOpenCommand(
 	TEXT("geo.Imagery.Open"),
 	TEXT("geo.Imagery.Open <cartella> - apre un dataset di ortofoto."),
 	FConsoleCommandWithWorldAndArgsDelegate::CreateStatic(
-		[](const TArray<FString>& Args, UWorld* World)
+		[](const TArray<FString>& RawArgs, UWorld* World)
 	{
+		// I percorsi fra virgolette restano interi anche con gli spazi (GeoConsoleArgs.h).
+		const TArray<FString> Args = GeoWorld::Console::QuotedArgs(RawArgs);
 		UGeoImageryStreamingSubsystem* Streaming = GeoImageryConsole::GetStreaming(World);
 		if (!Streaming) { return; }
 
@@ -820,8 +823,10 @@ static FAutoConsoleCommandWithWorldAndArgs GeoImageryDemoCommand(
 	TEXT("geo.Imagery.Demo"),
 	TEXT("geo.Imagery.Demo <cartella_terreno> <cartella_ortofoto> - apre tutto e accende."),
 	FConsoleCommandWithWorldAndArgsDelegate::CreateStatic(
-		[](const TArray<FString>& Args, UWorld* World)
+		[](const TArray<FString>& RawArgs, UWorld* World)
 	{
+		// I percorsi fra virgolette restano interi anche con gli spazi (GeoConsoleArgs.h).
+		const TArray<FString> Args = GeoWorld::Console::QuotedArgs(RawArgs);
 		UGeoTerrainSubsystem* Terrain = GeoTerrainConsole::Get(World);
 		UGeoImagerySubsystem* Imagery = GeoImageryConsole::Get(World);
 		UGeoImageryStreamingSubsystem* ImageStreaming = GeoImageryConsole::GetStreaming(World);
@@ -1336,8 +1341,10 @@ static FAutoConsoleCommandWithWorldAndArgs GeoTerrainDemoCommand(
 	TEXT("geo.Terrain.Demo"),
 	TEXT("geo.Terrain.Demo <cartella> - apre un dataset e disegna il terreno."),
 	FConsoleCommandWithWorldAndArgsDelegate::CreateStatic(
-		[](const TArray<FString>& Args, UWorld* World)
+		[](const TArray<FString>& RawArgs, UWorld* World)
 	{
+		// I percorsi fra virgolette restano interi anche con gli spazi (GeoConsoleArgs.h).
+		const TArray<FString> Args = GeoWorld::Console::QuotedArgs(RawArgs);
 		UGeoTerrainSubsystem* Terrain = GeoTerrainConsole::Get(World);
 		UGeoTileStreamingSubsystem* Streaming = World ? World->GetSubsystem<UGeoTileStreamingSubsystem>() : nullptr;
 		UGeoreferenceSubsystem* Georeference = World ? World->GetSubsystem<UGeoreferenceSubsystem>() : nullptr;
@@ -1451,8 +1458,10 @@ static FAutoConsoleCommandWithWorldAndArgs GeoRoadsOpenCommand(
 	TEXT("geo.Roads.Open"),
 	TEXT("geo.Roads.Open <cartella> - apre un dataset di strade (python run.py build-roads)."),
 	FConsoleCommandWithWorldAndArgsDelegate::CreateStatic(
-		[](const TArray<FString>& Args, UWorld* World)
+		[](const TArray<FString>& RawArgs, UWorld* World)
 	{
+		// I percorsi fra virgolette restano interi anche con gli spazi (GeoConsoleArgs.h).
+		const TArray<FString> Args = GeoWorld::Console::QuotedArgs(RawArgs);
 		if (Args.Num() < 1)
 		{
 			GeoTerrainConsole::Report(TEXT("Uso: geo.Roads.Open <cartella del dataset>"), FColor::Red);
@@ -1752,8 +1761,10 @@ static FAutoConsoleCommandWithWorldAndArgs GeoWaterOpenCommand(
 	TEXT("geo.Water.Open"),
 	TEXT("geo.Water.Open <cartella> - apre un dataset d'acqua (python run.py build-water) e rifa' il terreno scavato."),
 	FConsoleCommandWithWorldAndArgsDelegate::CreateStatic(
-		[](const TArray<FString>& Args, UWorld* World)
+		[](const TArray<FString>& RawArgs, UWorld* World)
 	{
+		// I percorsi fra virgolette restano interi anche con gli spazi (GeoConsoleArgs.h).
+		const TArray<FString> Args = GeoWorld::Console::QuotedArgs(RawArgs);
 		if (Args.Num() < 1)
 		{
 			GeoTerrainConsole::Report(TEXT("Uso: geo.Water.Open <cartella del dataset d'acqua>"), FColor::Red);
@@ -2105,8 +2116,10 @@ static FAutoConsoleCommandWithWorldAndArgs GeoWaterDemoCommand(
 	TEXT("geo.Water.Demo"),
 	TEXT("geo.Water.Demo <terreno> <ortofoto|-> <acqua> [strade|-] - apre tutto, accende e si mette sopra l'acqua."),
 	FConsoleCommandWithWorldAndArgsDelegate::CreateStatic(
-		[](const TArray<FString>& Args, UWorld* World)
+		[](const TArray<FString>& RawArgs, UWorld* World)
 	{
+		// I percorsi fra virgolette restano interi anche con gli spazi (GeoConsoleArgs.h).
+		const TArray<FString> Args = GeoWorld::Console::QuotedArgs(RawArgs);
 		UGeoTerrainSubsystem* Terrain = GeoTerrainConsole::Get(World);
 		UGeoImagerySubsystem* Imagery = World ? World->GetSubsystem<UGeoImagerySubsystem>() : nullptr;
 		UGeoImageryStreamingSubsystem* ImageStreaming = World ? World->GetSubsystem<UGeoImageryStreamingSubsystem>() : nullptr;

@@ -85,6 +85,16 @@ def human_bytes(count: float) -> str:
 
 # --- comando principale ----------------------------------------------------
 
+def expand_source_patterns(patterns: list[str]) -> list[str]:
+    """
+    I file sorgente del terreno, dai pattern della riga di comando: ordinati e
+    senza doppioni. "**" scende in tutte le sottocartelle: i DTED stanno
+    spesso in una cartella per longitudine (dted/E016/N38.dt2), e con
+    "dted/**/*.dt2" si prendono tutti, a qualunque profondita'.
+    """
+    return sorted({path for pattern in patterns for path in glob.glob(pattern, recursive=True)})
+
+
 def command_build(args: argparse.Namespace) -> int:
     # Fallire subito e con un messaggio utile, invece di un ImportError nudo
     # dopo che l'utente ha gia' lanciato un'elaborazione da ore.
@@ -96,7 +106,7 @@ def command_build(args: argparse.Namespace) -> int:
         log("Lancia 'python run.py check-env' per la diagnosi e le istruzioni.")
         return 4
 
-    inputs = sorted({path for pattern in args.input for path in glob.glob(pattern)})
+    inputs = expand_source_patterns(args.input)
     if not inputs:
         log(f"Nessun file corrisponde a {args.input}")
         return 2
@@ -783,7 +793,7 @@ def command_build_water(args: argparse.Namespace) -> int:
     bbox = tuple(args.bbox) if args.bbox else None
     osm = []
     for pattern in args.osm or []:
-        matches = sorted(glob.glob(pattern))
+        matches = sorted(glob.glob(pattern, recursive=True))
         osm.extend(matches if matches else [pattern])
     if not osm and not args.sea:
         log("ERRORE: servono --osm (laghi e fiumi) e/o --sea (il mare)")
@@ -844,7 +854,8 @@ def build_parser() -> argparse.ArgumentParser:
 
     build = subparsers.add_parser("build", help="esegue la pipeline completa")
     build.add_argument("-i", "--input", nargs="+", required=True,
-                       help="GeoTIFF sorgente (accetta glob, es. 'tinitaly/*.tif')")
+                       help="DEM sorgente (accetta glob, es. 'tinitaly/*.tif'; '**' scende "
+                            "nelle sottocartelle, es. 'dted/**/*.dt2')")
     build.add_argument("-o", "--output", required=True, help="cartella radice del dataset")
     build.add_argument("--work", help="cartella degli intermedi (default: <output>/_work)")
     build.add_argument("--name", default="senza nome",
