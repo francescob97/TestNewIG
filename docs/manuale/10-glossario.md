@@ -42,6 +42,8 @@ direttamente. Non usata oggi; il formato è pronto per aggiungerla. (7)
 Il filtro della scheda video legge anche i texel accanto a quello chiesto; senza banda, il
 bordo di una superficie prende il colore della vicina. (12)
 
+**Billboard** — un quadrato che si gira sempre verso la camera: lo fa il World Position Offset, con la destra e l'alto della vista. I punti luce dei lampioni lo sono. (19)
+
 **Bounds** — il volume che contiene una primitiva. Il renderer lo usa per decidere
 se è visibile. (1, 6)
 
@@ -58,7 +60,13 @@ lato. Serve perché una strada larga lungo il bordo compaia anche nella tile acc
 **Build unity** — Unreal compila più `.cpp` dello stesso modulo come un file solo,
 per fare prima. Fa scontrare le funzioni omonime nei namespace anonimi. (1)
 
+**Candela** — l'unita' dell'intensita' di una luce in una direzione: una lampada da I candele illumina con I / d² lux una superficie a d metri. Le luci vere dei lampioni sono in candele. (19)
+
+**Catena (di linee)** — linee di OSM ricucite dove due, e solo due, si toccano con lo stesso stile: una via spezzata in pezzi torna intera, e i lampioni si contano lungo tutta lei. (19)
+
 **Catabatica** — l'aria fredda che la notte scivola giù per i pendii: pochi metri di spessore, un paio di m/s, si raccoglie nei fondovalle. (14)
+
+**Circuito (dei lampioni)** — i lampioni accesi dalla stessa fotocellula: qui una cella di ~300 m. Una via si accende tutta insieme, quella accanto qualche minuto dopo. (19)
 
 **CDO** (*Class Default Object*) — l'oggetto "prototipo" che Unreal crea per ogni
 classe `UCLASS`, con i valori di default. I file `.ini` vengono applicati a lui. (1)
@@ -89,6 +97,8 @@ dall'ortofoto. (7)
 possano leggere pezzi via rete senza scaricarlo tutto. (7)
 
 **Cumulo** — la nuvola di bel tempo: una chiazza con la base piatta (dove l'aria che sale condensa, alla stessa quota per tutte) e la cima a cupola. Quanti, lo dice la copertura (`geo.Weather.Clouds`). (15)
+
+**Densita' della rete di casa** — la lunghezza delle strade residenziali, pedonali e "living street" attorno a un punto (in un quadrato di 500 m), divisa per l'area: km per km². Un paese 5–20, la campagna meno di 1. Dice dove una strada ha i lampioni. (19)
 
 **Delegato** — un meccanismo di Unreal per "avvisami quando succede X".
 `OnGeoreferenceRebased` è un delegato. (2)
@@ -141,6 +151,8 @@ del LOD. Soglia di default: 8 pixel (era 4: vedi `docs/prova-torino-2.md`). (5)
 **Flow map** — far scorrere una texture lungo una corrente con due fasi sfalsate di mezzo ciclo, ognuna che ricomincia quando ha peso zero: un flusso continuo senza che la texture si stiri. (13)
 
 **FMeshDescription** — il formato "modificabile" delle mesh in Unreal: vertici, istanze di vertice (normale, colore, UV), triangoli, gruppi di materiale. Da qui `BuildFromMeshDescriptions` fa una `UStaticMesh`, anche a runtime. (16)
+
+**Fotocellula** — il sensore che accende un lampione quando la luce scende sotto una soglia (15–60 lux qui). La mattina spegne a una luce piu' alta: l'isteresi. (19)
 
 **Frame locale** — un sistema di assi appoggiato sulla superficie in un punto.
 Nel progetto è sempre NEU. (2, 6)
@@ -291,6 +303,8 @@ trasforma mesh astratte in qualcosa che Unreal disegna. (6)
 **Proxy di scena** (`FPrimitiveSceneProxy`) — la copia di una primitiva che vive
 sul thread di rendering. (1)
 
+**Punto luce** — un lampione visto da lontano: un quadratino aperto verso la camera (billboard), additivo, mai piu' piccolo di 2,5 pixel. (19)
+
 **Quadtree** — albero in cui ogni nodo ha quattro figli. La piramide delle tile. (5)
 
 **Quadrato degenere** — un quadrato con i quattro vertici nello stesso punto: non si vede. Le particelle della pioggia sono quadrati degeneri che il materiale apre (World Position Offset) solo dove serve. (15)
@@ -322,9 +336,13 @@ quote) o un'area (i pixel). Decide se il bordo è condiviso. (3, 7)
 
 **Sagoma** (*footprint*) — il contorno di un edificio visto dall'alto, con i cortili come buchi. È quello che OSM disegna. (17)
 
+**Riduzione del flusso** — la luce dei lampioni abbassata nel cuore della notte per risparmiare: qui -30% fra le 00:30 e le 04:30. (19)
+
 **Rifrazione** — l'aria piega la luce: un astro all'orizzonte sembra mezzo grado più alto di dove è. Al tramonto il sole è già sotto quando lo vediamo toccare l'orizzonte. (18)
 
 **Scavo** — abbassare le quote del terreno sotto l'acqua fino al fondale prima di costruirne la mesh, così l'acqua ha una profondità vera. Lo fa il terreno, con la funzione che gli consegna l'acqua (`SetHeightEditor`). (13)
+
+**Sodio (lampada al)** — la lampada arancione dei lampioni di una volta (sodio ad alta pressione). Tre comuni su quattro sono passati ai LED, bianchi: neutri sulle strade principali, caldi nei quartieri. (19)
 
 **SCL** (*Scene Classification Layer*) — il file di Sentinel-2 L2A che classifica ogni pixel da 20 m: nuvole, ombre di nuvole, cirri, neve, acqua... Serve a togliere le nuvole dalle ortofoto. (7)
 
@@ -370,6 +388,8 @@ testabile e codice che usa il motore. (0)
 **Teletrasporto** — uno spostamento, in un aggiornamento solo, oltre metà della quota. Svuota le code, azzera la velocità, fa partire il riscaldamento. (11)
 
 **Tick** — il metodo chiamato a ogni frame. (1)
+
+**Tag lit** — il tag di OSM che dice se una strada e' illuminata (`yes`, `no`, un orario). Sta nel byte dell'illuminazione del record di una linea: 0 non si sa, 1 lampioni, 2 buio. (12, 19)
 
 **Tile** — un pezzo quadrato della piramide: 129 × 129 quote o 256 × 256 pixel. (3, 7)
 
@@ -524,8 +544,10 @@ il primo comando da provare quando non si vede niente. (6)
 | `Public/Buildings/GeoBuildingsSubsystem.h`, `GeoBuildingSettings.h` | il subsystem degli edifici in Unreal, la libreria dei monumenti (Project Settings) |
 | `Public/Sky/Astronomy.h`, `DayLight.h`, `NightSkyShader.inl` | il cielo (puro): sole, luna, ora locale, luce del giorno e della notte; stelle e luna (HLSL e C++) |
 | `Public/Sky/GeoSkySubsystem.h`, `GeoSkySettings.h` | il giorno e la notte in Unreal: il sole del livello, la luna, l'esposizione, la nebbia, le stelle; le impostazioni |
+| `Public/Roads/StreetLights.h`, `StreetLightShader.inl` | i lampioni (puro): quali strade, dove, quando si accendono, le forme; lo shader dei punti luce e del vetro (HLSL e C++) |
+| `Public/Roads/GeoStreetLightsSubsystem.h` | i lampioni in Unreal: celle, punti luce, pali, luci vere |
 | `Public/GeoPositionHudSubsystem.h` | le stampe della posizione |
-| `Private/GeoRenderModule.cpp` | comandi `geo.Lod.*`, `geo.Terrain.*`, `geo.Imagery.*`, `geo.Roads.*`, `geo.Water.*`, `geo.Weather.*`, `geo.Hud`, `geo.Fly*` |
+| `Private/GeoRenderModule.cpp` | comandi `geo.Lod.*`, `geo.Terrain.*`, `geo.Imagery.*`, `geo.Roads.*`, `geo.Lights.*`, `geo.Water.*`, `geo.Weather.*`, `geo.Hud`, `geo.Fly*` |
 | `Private/**/*.cpp` | le implementazioni |
 
 ### GeoWorldEditor — solo nell'editor
@@ -535,7 +557,7 @@ il primo comando da provare quando non si vede niente. (6)
 | `GeoWorldEditor.Build.cs` | `MaterialEditor`, `AssetTools` |
 | `Private/GeoWorldEditorModule.cpp` | il modulo |
 | `Private/GeoVegetationModelFactory.cpp` | `geo.Vegetation.CreateModels`: i modelli Nanite degli alberi |
-| `Private/GeoTerrainMaterialFactory.cpp` | `geo.Imagery.CreateMaterial`: `M_GeoTerrain`, `M_GeoRoad`, `M_GeoWater`, `MPC_GeoWater`, `MPC_GeoWeather`, `M_GeoPrecipitation`, `M_GeoLightning`, `M_GeoClouds`, `M_GeoVegetation`, `M_GeoBuilding`, `M_GeoNightSky` |
+| `Private/GeoTerrainMaterialFactory.cpp` | `geo.Imagery.CreateMaterial`: `M_GeoTerrain`, `M_GeoRoad`, `M_GeoWater`, `MPC_GeoWater`, `MPC_GeoWeather`, `M_GeoPrecipitation`, `M_GeoLightning`, `M_GeoClouds`, `M_GeoVegetation`, `M_GeoBuilding`, `M_GeoNightSky`, `M_GeoStreetLight`, `M_GeoStreetLamp` |
 
 ### Strumenti
 
@@ -600,6 +622,8 @@ il primo comando da provare quando non si vede niente. (6)
 | `docs/edifici-verifica.md` | come provare gli edifici |
 | `docs/cielo-design.md` | il cielo: l'astronomia, la luce, la notte, cosa tocca del livello |
 | `docs/cielo-verifica.md` | come provare il giorno e la notte |
+| `docs/lampioni-design.md` | i lampioni: quali strade, dove, quando si accendono, Unreal |
+| `docs/lampioni-verifica.md` | come provare i lampioni |
 | `docs/residenza-design.md` | cosa tenere pronto: posizione, velocità, mesh nascoste |
 | `docs/residenza-verifica.md` | come verificare la residenza |
 | `docs/prova-torino.md` | la prima prova vera: cause del mosaico, prestazioni, tutta Italia |

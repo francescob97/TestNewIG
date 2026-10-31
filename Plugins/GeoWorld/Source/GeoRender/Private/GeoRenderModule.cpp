@@ -12,6 +12,7 @@
 #include "Imagery/GeoImagerySubsystem.h"
 #include "Lod/GeoQuadtreeSubsystem.h"
 #include "Roads/GeoRoadsSubsystem.h"
+#include "Roads/GeoStreetLightsSubsystem.h"
 #include "Sky/GeoSkySubsystem.h"
 #include "Terrain/GeoTerrainSubsystem.h"
 #include "Streaming/GeoBuildingStreamingSubsystem.h"
@@ -1442,6 +1443,8 @@ namespace GeoRoadsConsole
 		}
 		// Le texture disegnate dal dataset di prima non valgono piu'.
 		Roads->InvalidateAll();
+		// Nemmeno i lampioni, che stanno lungo le stesse strade.
+		if (UGeoStreetLightsSubsystem* Lights = World->GetSubsystem<UGeoStreetLightsSubsystem>()) { Lights->OnDatasetChanged(); }
 
 		const FGeoVectorDataset& Dataset = Streaming->GetDataset();
 		double West, South, East, North;
@@ -3232,4 +3235,191 @@ static FAutoConsoleCommandWithWorldAndArgs GeoSkyDemoCommand(
 		GeoTerrainConsole::Report(TEXT("Un giorno di corsa: l'alba, il sole che gira (e le ombre con lui), il tramonto, la notte con la luna e le finestre accese."));
 		GeoTerrainConsole::Report(TEXT("Fermarsi: geo.Sky.Speed 0. Un'ora precisa: geo.Sky.Time 18:30. Le ombre delle montagne: geo.Terrain.Shadows 1"));
 		GeoSkyConsole::ReportState(Sky);
+	}));
+
+// ============================================================================
+//  I lampioni (Roads/GeoStreetLightsSubsystem.h)
+// ============================================================================
+
+namespace GeoLightsConsole
+{
+	static UGeoStreetLightsSubsystem* Get(UWorld* World)
+	{
+		UGeoStreetLightsSubsystem* Lights = World ? World->GetSubsystem<UGeoStreetLightsSubsystem>() : nullptr;
+		if (!Lights) { GeoTerrainConsole::Report(TEXT("Lampioni non disponibili in questo mondo."), FColor::Red); }
+		return Lights;
+	}
+
+	static void ReportState(const UGeoStreetLightsSubsystem* Lights)
+	{
+		const FString Text = Lights->Describe();
+		if (Text.IsEmpty())
+		{
+			GeoTerrainConsole::Report(TEXT("Lampioni: serve il dataset delle strade (geo.Roads.Open <cartella>): stanno lungo quelle."), FColor::Yellow);
+			return;
+		}
+		const FGeoStreetLightsStats Stats = Lights->GetStats();
+		GeoTerrainConsole::Report(FString::Printf(TEXT("Lampioni: %s"), *Text));
+		GeoTerrainConsole::Report(FString::Printf(
+			TEXT("  luce %.1f lux; punti luce fino a %.0f m, pali fino a %.0f m; %d celle vicine, %d lontane, %d vuote, %d in attesa; %d pali"),
+			Lights->GetAmbientLux(), Lights->GetRadiusM(), Lights->GetPoleRadiusM(), Stats.CelleVicine, Stats.CelleLontane,
+			Stats.CelleVuote, Stats.CelleInAttesa, Stats.Pali));
+		const FString Problem = Lights->GetMaterialProblem();
+		if (!Problem.IsEmpty()) { GeoTerrainConsole::Report(Problem, FColor::Red); }
+	}
+}
+
+static FAutoConsoleCommandWithWorldAndArgs GeoLightsEnableCommand(
+	TEXT("geo.Lights.Enable"),
+	TEXT("geo.Lights.Enable <0|1> - accende e spegne i lampioni lungo le strade (il dataset delle strade resta aperto)."),
+	FConsoleCommandWithWorldAndArgsDelegate::CreateStatic(
+		[](const TArray<FString>& Args, UWorld* World)
+	{
+		UGeoStreetLightsSubsystem* Lights = GeoLightsConsole::Get(World);
+		if (!Lights) { return; }
+		if (Args.Num() >= 1) { Lights->SetEnabled(FCString::Atoi(*Args[0]) != 0); }
+		GeoTerrainConsole::Report(FString::Printf(TEXT("Lampioni: %s"), Lights->IsEnabled() ? TEXT("si'") : TEXT("no")));
+	}));
+
+static FAutoConsoleCommandWithWorldAndArgs GeoLightsRadiusCommand(
+	TEXT("geo.Lights.Radius"),
+	TEXT("geo.Lights.Radius <m> [pali m] - fin dove si vedono i punti luce (default 8000) e i pali (default 700)."),
+	FConsoleCommandWithWorldAndArgsDelegate::CreateStatic(
+		[](const TArray<FString>& Args, UWorld* World)
+	{
+		UGeoStreetLightsSubsystem* Lights = GeoLightsConsole::Get(World);
+		if (!Lights) { return; }
+		if (Args.Num() >= 1) { Lights->SetRadiusM(FCString::Atod(*Args[0])); }
+		if (Args.Num() >= 2) { Lights->SetPoleRadiusM(FCString::Atod(*Args[1])); }
+		GeoTerrainConsole::Report(FString::Printf(TEXT("Lampioni: punti luce fino a %.0f m, pali fino a %.0f m"),
+			Lights->GetRadiusM(), Lights->GetPoleRadiusM()));
+	}));
+
+static FAutoConsoleCommandWithWorldAndArgs GeoLightsCountCommand(
+	TEXT("geo.Lights.Count"),
+	TEXT("geo.Lights.Count <n> - quante luci vere (spot) sui lampioni accesi piu' vicini: fanno le pozze di luce (default 48, 0 nessuna)."),
+	FConsoleCommandWithWorldAndArgsDelegate::CreateStatic(
+		[](const TArray<FString>& Args, UWorld* World)
+	{
+		UGeoStreetLightsSubsystem* Lights = GeoLightsConsole::Get(World);
+		if (!Lights) { return; }
+		if (Args.Num() >= 1) { Lights->SetLightCount(FCString::Atoi(*Args[0])); }
+		GeoTerrainConsole::Report(FString::Printf(TEXT("Lampioni: %d luci vere"), Lights->GetLightCount()));
+	}));
+
+static FAutoConsoleCommandWithWorldAndArgs GeoLightsBrightnessCommand(
+	TEXT("geo.Lights.Brightness"),
+	TEXT("geo.Lights.Brightness <x> - quanta luce fanno (1: al piede del palo 1/50 del sole del livello, venti lune piene)."),
+	FConsoleCommandWithWorldAndArgsDelegate::CreateStatic(
+		[](const TArray<FString>& Args, UWorld* World)
+	{
+		UGeoStreetLightsSubsystem* Lights = GeoLightsConsole::Get(World);
+		if (!Lights) { return; }
+		if (Args.Num() >= 1) { Lights->SetBrightness(FCString::Atod(*Args[0])); }
+		GeoTerrainConsole::Report(FString::Printf(TEXT("Lampioni: luce x%.2f"), Lights->GetBrightness()));
+	}));
+
+static FAutoConsoleCommandWithWorldAndArgs GeoLightsDimmingCommand(
+	TEXT("geo.Lights.Dimming"),
+	TEXT("geo.Lights.Dimming <0..1> - la riduzione del flusso nel cuore della notte, dalle 00:30 alle 04:30 (default 0,3: -30%)."),
+	FConsoleCommandWithWorldAndArgsDelegate::CreateStatic(
+		[](const TArray<FString>& Args, UWorld* World)
+	{
+		UGeoStreetLightsSubsystem* Lights = GeoLightsConsole::Get(World);
+		if (!Lights) { return; }
+		if (Args.Num() >= 1) { Lights->SetDimming(FCString::Atod(*Args[0])); }
+		GeoTerrainConsole::Report(FString::Printf(TEXT("Lampioni: di notte il flusso scende del %.0f%%"), Lights->GetDimming() * 100.0));   /* percentuale, non-unita */
+	}));
+
+static FAutoConsoleCommandWithWorldAndArgs GeoLightsShadowsCommand(
+	TEXT("geo.Lights.Shadows"),
+	TEXT("geo.Lights.Shadows <0|1> - le luci vere fanno ombra (costa: una mappa d'ombra per luce; default no)."),
+	FConsoleCommandWithWorldAndArgsDelegate::CreateStatic(
+		[](const TArray<FString>& Args, UWorld* World)
+	{
+		UGeoStreetLightsSubsystem* Lights = GeoLightsConsole::Get(World);
+		if (!Lights) { return; }
+		if (Args.Num() >= 1) { Lights->SetShadows(FCString::Atoi(*Args[0]) != 0); }
+		GeoTerrainConsole::Report(FString::Printf(TEXT("Lampioni: ombre %s"), Lights->AreShadowsEnabled() ? TEXT("si'") : TEXT("no")));
+	}));
+
+static FAutoConsoleCommandWithWorldAndArgs GeoLightsForceCommand(
+	TEXT("geo.Lights.Force"),
+	TEXT("geo.Lights.Force <auto|on|off> - auto: la fotocellula (dopo il tramonto); on: sempre accesi (per guardarli di giorno); off: sempre spenti."),
+	FConsoleCommandWithWorldAndArgsDelegate::CreateStatic(
+		[](const TArray<FString>& Args, UWorld* World)
+	{
+		UGeoStreetLightsSubsystem* Lights = GeoLightsConsole::Get(World);
+		if (!Lights) { return; }
+		if (Args.Num() >= 1)
+		{
+			const FString Mode = Args[0].ToLower();
+			Lights->SetForce((Mode == TEXT("on") || Mode == TEXT("1")) ? 1 : ((Mode == TEXT("off") || Mode == TEXT("0")) ? 0 : -1));
+		}
+		static const TCHAR* Names[3] = { TEXT("auto (la fotocellula)"), TEXT("sempre spenti"), TEXT("sempre accesi") };
+		GeoTerrainConsole::Report(FString::Printf(TEXT("Lampioni: %s"), Names[FMath::Clamp(Lights->GetForce() + 1, 0, 2)]));
+	}));
+
+static FAutoConsoleCommandWithWorldAndArgs GeoLightsDensityCommand(
+	TEXT("geo.Lights.Density"),
+	TEXT("geo.Lights.Density <km/km2> [residenziali] - quanto deve essere fitta la rete di strade di casa perche' una strada abbia i lampioni (default 3 le principali, 1 le residenziali)."),
+	FConsoleCommandWithWorldAndArgsDelegate::CreateStatic(
+		[](const TArray<FString>& Args, UWorld* World)
+	{
+		UGeoStreetLightsSubsystem* Lights = GeoLightsConsole::Get(World);
+		if (!Lights) { return; }
+		GeoWorld::StreetLights::FStreetLightSettings Settings = Lights->GetPlacement();
+		if (Args.Num() >= 1) { Settings.UrbanDensity = FMath::Clamp(FCString::Atod(*Args[0]), 0.0, 100.0); }
+		if (Args.Num() >= 2) { Settings.HamletDensity = FMath::Clamp(FCString::Atod(*Args[1]), 0.0, 100.0); }
+		if (Args.Num() >= 1) { Lights->SetPlacement(Settings); }
+		GeoTerrainConsole::Report(FString::Printf(TEXT("Lampioni: sulle principali da %.1f km/km2 di strade di casa, sulle residenziali da %.1f"),
+			Lights->GetPlacement().UrbanDensity, Lights->GetPlacement().HamletDensity));
+	}));
+
+static FAutoConsoleCommandWithWorldAndArgs GeoLightsDebugCommand(
+	TEXT("geo.Lights.Debug"),
+	TEXT("geo.Lights.Debug <0|1> - overlay dei lampioni: la luce, le celle (verdi con i pali, arancio solo punti luce), le luci vere (sfere gialle)."),
+	FConsoleCommandWithWorldAndArgsDelegate::CreateStatic(
+		[](const TArray<FString>& Args, UWorld* World)
+	{
+		UGeoStreetLightsSubsystem* Lights = GeoLightsConsole::Get(World);
+		if (!Lights) { return; }
+		Lights->SetDebugOverlayEnabled(Args.Num() >= 1 ? FCString::Atoi(*Args[0]) != 0 : !Lights->IsDebugOverlayEnabled());
+	}));
+
+static FAutoConsoleCommandWithWorld GeoLightsStatsCommand(
+	TEXT("geo.Lights.Stats"),
+	TEXT("I lampioni: accesi o spenti, quanti, la luce che c'e'."),
+	FConsoleCommandWithWorldDelegate::CreateStatic([](UWorld* World)
+	{
+		if (UGeoStreetLightsSubsystem* Lights = GeoLightsConsole::Get(World)) { GeoLightsConsole::ReportState(Lights); }
+	}));
+
+static FAutoConsoleCommandWithWorldAndArgs GeoLightsDemoCommand(
+	TEXT("geo.Lights.Demo"),
+	TEXT("geo.Lights.Demo [HH:MM] - porta il cielo alla sera (default 22:00), ferma l'orologio, accende i lampioni e l'overlay. Serve il dataset delle strade."),
+	FConsoleCommandWithWorldAndArgsDelegate::CreateStatic(
+		[](const TArray<FString>& Args, UWorld* World)
+	{
+		UGeoStreetLightsSubsystem* Lights = GeoLightsConsole::Get(World);
+		if (!Lights) { return; }
+		double Hours = 22.0;
+		if (Args.Num() >= 1 && !GeoWorld::Sky::ParseClock(TCHAR_TO_UTF8(*Args[0]), Hours))
+		{
+			GeoTerrainConsole::Report(TEXT("Uso: geo.Lights.Demo [HH:MM]"), FColor::Red);
+			return;
+		}
+		if (UGeoSkySubsystem* Sky = World->GetSubsystem<UGeoSkySubsystem>())
+		{
+			Sky->SetEnabled(true);
+			Sky->SetSpeed(0.0);
+			Sky->SetLocalHour(Hours);
+		}
+		Lights->SetEnabled(true);
+		Lights->SetForce(-1);
+		Lights->SetDebugOverlayEnabled(true);
+		GeoTerrainConsole::Report(FString::Printf(TEXT("Lampioni alle %02d:%02d: le file di punti luce da lontano, i pali e le pozze di luce da vicino."),
+			static_cast<int32>(Hours), static_cast<int32>(FMath::Fmod(Hours, 1.0) * 60.0 + 0.5) % 60));
+		GeoTerrainConsole::Report(TEXT("Quando si accendono: geo.Sky.Time 20:30 e geo.Sky.Speed 60. Di giorno, per guardarli: geo.Lights.Force on"));
+		GeoLightsConsole::ReportState(Lights);
 	}));

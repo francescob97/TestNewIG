@@ -5,6 +5,7 @@
 #include "Geo/GeoFormat.h"
 #include "Georeference/GeoreferenceSubsystem.h"
 #include "Mesh/TileMesh.h"
+#include "Roads/GeoStreetLightsSubsystem.h"
 #include "Streaming/GeoTileStreamingSubsystem.h"
 #include "Terrain/GeoTerrainSubsystem.h"
 #include "Vegetation/GeoVegetationSubsystem.h"
@@ -256,6 +257,15 @@ void UGeoPositionHudSubsystem::Draw(UCanvas* Canvas, APlayerController* /*Contro
 				Add(TEXT("Luna"), std::string(Sky.Bodies.bMoonWaxing ? "crescente " : "calante ")
 					+ Format::Number(100.0 * Sky.Bodies.MoonIllumination, 0) + "%, alta " + Format::Number(Sky.Bodies.Moon.AltitudeDeg, 0) + Format::Degree);   /* percentuale, non-unita */
 			}
+		}
+	}
+
+	// I lampioni: solo quando sono accesi (di giorno la riga non serve).
+	if (const UGeoStreetLightsSubsystem* StreetLights = GetWorld()->GetSubsystem<UGeoStreetLightsSubsystem>())
+	{
+		if (StreetLights->IsEnabled() && StreetLights->GetOnLevel() > 0.0 && StreetLights->GetStats().Lampioni > 0)
+		{
+			Add(TEXT("Lampioni"), std::string(TCHAR_TO_UTF8(*StreetLights->Describe())));
 		}
 	}
 

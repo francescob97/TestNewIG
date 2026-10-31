@@ -210,7 +210,8 @@ livello si muove. Se si salva il livello, si salva la rotazione del momento
   le stelle si spengono con la copertura delle nuvole, non nuvola per nuvola.
 - Niente pianeti, niente eclissi a schermo (la geometria c'è: i test la
   provano).
-- Le luci delle strade e delle auto non ci sono: solo le finestre.
+- Le luci delle strade sono arrivate (`docs/lampioni-design.md`); quelle delle
+  auto no.
 - Le brezze (di mare e di terra, di pendio, di valle) sono arrivate "con il
   sole": il vento legge l'orologio di questo cielo (`docs/vento-design.md`,
   sezione 2.6).

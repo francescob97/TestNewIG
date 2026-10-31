@@ -10,13 +10,17 @@
 //  sommando la copertura dei pixel lungo una sezione, e deve tornare in metri
 //  quella scritta nella tile, in orizzontale come in verticale.
 // =============================================================================
+#include "HlslShim.h"
 #include "Roads/RoadMesh.h"
 #include "Roads/RoadRasterizer.h"
+#include "Roads/StreetLights.h"
 #include "Tiles/ImageTileFormat.h"
 #include "Tiles/VectorTileFormat.h"
 
+#include <algorithm>
 #include <chrono>
 #include <cmath>
+#include <memory>
 #include <cstdio>
 #include <fstream>
 #include <iterator>
@@ -60,6 +64,8 @@ struct FTestLine
 	int8_t Layer;
 	uint16_t WidthDm;
 	std::vector<std::pair<int, int>> Points;
+	/** Il byte dell'illuminazione (RoadLit*): 0 nelle tile di prima. */
+	uint8_t Lit = 0;
 };
 
 static void PutU16(std::vector<uint8_t>& Out, uint32_t V) { Out.push_back(V & 0xFF); Out.push_back((V >> 8) & 0xFF); }
@@ -81,7 +87,7 @@ static std::vector<uint8_t> EncodeTile(const FTileKey& Key, const std::vector<FT
 		Out.push_back(static_cast<uint8_t>(Line.Class));
 		Out.push_back(Line.Flags);
 		Out.push_back(static_cast<uint8_t>(Line.Layer));
-		Out.push_back(0);
+		Out.push_back(Line.Lit);
 		PutU16(Out, Line.WidthDm); PutU16(Out, 0);
 		PutU32(Out, static_cast<uint32_t>(Line.Points.size()));
 	}
@@ -988,6 +994,580 @@ static void TestAtlasAndCost()
 }
 
 // ===========================================================================
+//  13. I lampioni: quali strade, dove (Roads/StreetLights.h)
+// ===========================================================================
+
+namespace LightsTest
+{
+	using namespace GeoWorld::StreetLights;
+
+	const FTileMetric& Metric()
+	{
+		static const FTileMetric Value = FTileMetric::For(TorinoKey, Tiles::VectorTileExtent);
+		return Value;
+	}
+	int UX(double Metres) { return static_cast<int>(std::lround(Metres / Metric().MetresPerUnitX)); }
+	int UY(double Metres) { return static_cast<int>(std::lround(Metres / Metric().MetresPerUnitY)); }
+
+	/** Una linea dritta in metri della tile (x est, y sud), in Pieces pezzi uguali. */
+	FTestLine Line(ERoadClass Class, double WidthM, double X0, double Y0, double X1, double Y1, uint8_t Lit = 0,
+	               uint8_t Flags = 0, int Pieces = 1)
+	{
+		FTestLine Out{ Class, Flags, 0, static_cast<uint16_t>(std::lround(WidthM * 10.0)), {}, Lit };
+		for (int Piece = 0; Piece <= Pieces; ++Piece)
+		{
+			const double T = static_cast<double>(Piece) / Pieces;
+			Out.Points.emplace_back(UX(X0 + (X1 - X0) * T), UY(Y0 + (Y1 - Y0) * T));
+		}
+		return Out;
+	}
+
+	/** Il punto di strada di un lampione, in metri della tile. */
+	void AnchorMetres(const FStreetLamp& Lamp, double& OutX, double& OutY)
+	{
+		const Tiles::FTileBounds& B = Metric().Bounds;
+		OutX = (Lamp.AnchorLonDeg - B.West) / B.SpanLon() * Metric().WidthM();
+		OutY = (B.North - Lamp.AnchorLatDeg) / B.SpanLat() * Metric().HeightM();
+	}
+	void PoleMetres(const FStreetLamp& Lamp, double& OutX, double& OutY)
+	{
+		const Tiles::FTileBounds& B = Metric().Bounds;
+		OutX = (Lamp.LonDeg - B.West) / B.SpanLon() * Metric().WidthM();
+		OutY = (B.North - Lamp.LatDeg) / B.SpanLat() * Metric().HeightM();
+	}
+
+	double DistanceToSegment(double X, double Y, double X0, double Y0, double X1, double Y1)
+	{
+		const double Dx = X1 - X0, Dy = Y1 - Y0;
+		const double T = std::clamp(((X - X0) * Dx + (Y - Y0) * Dy) / std::max(1e-9, Dx * Dx + Dy * Dy), 0.0, 1.0);
+		return std::hypot(X - (X0 + T * Dx), Y - (Y0 + T * Dy));
+	}
+
+	/** I lampioni nati sulla strada dritta (X0,Y0)-(X1,Y1): il loro punto di strada ci sta sopra. */
+	std::vector<FStreetLamp> On(const std::vector<FStreetLamp>& Lamps, double X0, double Y0, double X1, double Y1)
+	{
+		std::vector<FStreetLamp> Out;
+		for (const FStreetLamp& Lamp : Lamps)
+		{
+			double X = 0.0, Y = 0.0;
+			AnchorMetres(Lamp, X, Y);
+			if (DistanceToSegment(X, Y, X0, Y0, X1, Y1) < 0.3) { Out.push_back(Lamp); }
+		}
+		return Out;
+	}
+
+	/** Le posizioni lungo la strada (dal suo inizio), ordinate. */
+	std::vector<double> Along(const std::vector<FStreetLamp>& Lamps, double X0, double Y0, double X1, double Y1)
+	{
+		std::vector<double> Out;
+		const double Length = std::hypot(X1 - X0, Y1 - Y0);
+		for (const FStreetLamp& Lamp : Lamps)
+		{
+			double X = 0.0, Y = 0.0;
+			AnchorMetres(Lamp, X, Y);
+			Out.push_back(((X - X0) * (X1 - X0) + (Y - Y0) * (Y1 - Y0)) / Length);
+		}
+		std::sort(Out.begin(), Out.end());
+		return Out;
+	}
+
+	/**
+	 * Il paese di prova, nel quarto nord-ovest della tile: cinque vie da
+	 * ovest a est e quattro da nord a sud (residenziali, 5,5 m), una
+	 * provinciale larga che lo attraversa e prosegue in campagna, una
+	 * terziaria media da nord a sud.
+	 */
+	std::vector<FTestLine> Town()
+	{
+		std::vector<FTestLine> Lines;
+		for (const double Y : { 300.0, 420.0, 540.0, 660.0, 780.0 })
+		{
+			Lines.push_back(Line(ERoadClass::Residential, 5.5, 200.0, Y, 800.0, Y));
+		}
+		for (const double X : { 200.0, 400.0, 600.0, 800.0 })
+		{
+			Lines.push_back(Line(ERoadClass::Residential, 5.5, X, 300.0, X, 780.0));
+		}
+		return Lines;
+	}
+}
+
+static void TestStreetLightPlacement()
+{
+	using namespace LightsTest;
+	Section("13. I lampioni: quali strade e dove");
+
+	// Il byte dell'illuminazione nel record.
+	{
+		std::vector<FTestLine> Lines{ Line(ERoadClass::Residential, 5.5, 0, 0, 100, 0, Tiles::RoadLitYes),
+		                             Line(ERoadClass::Residential, 5.5, 0, 10, 100, 10, Tiles::RoadLitNo),
+		                             Line(ERoadClass::Residential, 5.5, 0, 20, 100, 20, 0),
+		                             Line(ERoadClass::Residential, 5.5, 0, 30, 100, 30, 9) };
+		const FVectorTile Tile = MakeTile(TorinoKey, Lines);
+		Check(Tile.Features.size() == 4 && Tile.Features[0].Lit == Tiles::RoadLitYes && Tile.Features[1].Lit == Tiles::RoadLitNo
+			&& Tile.Features[2].Lit == Tiles::RoadLitUnknown && Tile.Features[3].Lit == Tiles::RoadLitUnknown,
+			"il byte del tag lit si legge (si', no, non si sa; un valore strano e' 'non si sa')");
+	}
+
+	FStreetLightSettings Settings;
+	std::vector<FTestLine> Lines = Town();
+	// La provinciale: larga 18 m, da ovest a est a y = 480, dentro il paese e poi in campagna.
+	Lines.push_back(Line(ERoadClass::Primary, 18.0, 0.0, 480.0, 1700.0, 480.0));
+	// La terziaria media, 12 m, da nord a sud a x = 500.
+	Lines.push_back(Line(ERoadClass::Tertiary, 12.0, 500.0, 250.0, 500.0, 850.0));
+	// Una via spezzata in dieci pezzi da 15 m (x = 300, fra le vie a y = 300 e 450).
+	Lines.push_back(Line(ERoadClass::Residential, 5.5, 300.0, 300.0, 300.0, 450.0, 0, 0, 10));
+	// Una via con lit=no, una sterrata, un ponte, un sentiero con lit=yes, uno senza, un tratturo: nel paese.
+	Lines.push_back(Line(ERoadClass::Residential, 5.5, 220.0, 720.0, 380.0, 720.0, Tiles::RoadLitNo));
+	Lines.push_back(Line(ERoadClass::Residential, 5.5, 420.0, 720.0, 580.0, 720.0, 0, Tiles::RoadFlagUnpaved));
+	Lines.push_back(Line(ERoadClass::Residential, 5.5, 620.0, 720.0, 780.0, 720.0, 0, Tiles::RoadFlagBridge));
+	Lines.push_back(Line(ERoadClass::Path, 1.5, 220.0, 600.0, 380.0, 600.0, Tiles::RoadLitYes));
+	Lines.push_back(Line(ERoadClass::Path, 1.5, 420.0, 600.0, 580.0, 600.0));
+	Lines.push_back(Line(ERoadClass::Track, 3.0, 620.0, 600.0, 780.0, 600.0));
+	// In campagna: un'autostrada senza tag, una con lit=yes, una stradina residenziale isolata di 100 m.
+	Lines.push_back(Line(ERoadClass::Motorway, 11.0, 0.0, 1800.0, 1700.0, 1800.0));
+	Lines.push_back(Line(ERoadClass::Motorway, 11.0, 0.0, 2000.0, 1700.0, 2000.0, Tiles::RoadLitYes));
+	Lines.push_back(Line(ERoadClass::Residential, 5.5, 1400.0, 2200.0, 1500.0, 2200.0));
+	const FVectorTile Tile = MakeTile(TorinoKey, Lines);
+
+	FUrbanDensity Density;
+	Density.Build(Tile, Metric(), Settings.DensityRadiusM);
+	const double InTown = Density.At(UX(500.0), UY(540.0));
+	const double Country = Density.At(UX(1400.0), UY(1000.0));
+	Check(InTown > 8.0 && Country < 0.5, "la rete di casa: fitta in paese, nulla in campagna",
+		Fmt("%.1f e %.2f km/km2", InTown, Country));
+
+	std::vector<FStreetLamp> Lamps;
+	FPlacementStats Stats;
+	PlaceTileLamps(Tile, Settings, Lamps, &Stats);
+	std::printf("  %d linee illuminabili, %d catene, %d lampioni (sbraccio %d, palo %d, lanterna %d), %d tolti agli incroci, %d al buio\n",
+		Stats.LitFeatures, Stats.Chains, Stats.Lamps, Stats.ByKind[0], Stats.ByKind[1], Stats.ByKind[2], Stats.Blocked, Stats.Dark);
+
+	// Una via di quartiere: un palo ogni ~26 m, sul marciapiede, lo sbraccio verso la strada.
+	const std::vector<FStreetLamp> Street = On(Lamps, 200.0, 660.0, 800.0, 660.0);
+	const std::vector<double> Positions = Along(Street, 200.0, 660.0, 800.0, 660.0);
+	double MinGap = 1e9, MaxGap = 0.0;
+	for (size_t Index = 1; Index < Positions.size(); ++Index)
+	{
+		MinGap = std::min(MinGap, Positions[Index] - Positions[Index - 1]);
+		MaxGap = std::max(MaxGap, Positions[Index] - Positions[Index - 1]);
+	}
+	Check(Street.size() >= 18 && Street.size() <= 24, "via di 600 m: una ventina di lampioni", Fmt("%.0f", static_cast<double>(Street.size())));
+	Check(MinGap > 25.0 && MaxGap < 2.0 * 26.0 + 1.0, "passo di 26 m (al piu' uno saltato a un incrocio)", Fmt("%.1f .. %.1f m", MinGap, MaxGap));
+	bool bPosts = !Street.empty(), bOffset = !Street.empty(), bArm = !Street.empty(), bOneSide = !Street.empty();
+	for (const FStreetLamp& Lamp : Street)
+	{
+		double X = 0.0, Y = 0.0, AX = 0.0, AY = 0.0;
+		PoleMetres(Lamp, X, Y);
+		AnchorMetres(Lamp, AX, AY);
+		bPosts = bPosts && Lamp.Kind == ELampKind::Post && std::fabs(Lamp.HeightM - 7.5) < 1e-3;
+		// 2,75 di mezza carreggiata + 0,5 sul marciapiede (le residenziali lo hanno di default).
+		bOffset = bOffset && std::fabs(std::fabs(Y - AY) - 3.25) < 0.01;
+		// Lo sbraccio guarda la strada: la luce e' piu' vicina al centro della base.
+		const double LightNorth = std::cos(Lamp.YawRad), LightSouth = -LightNorth;
+		bArm = bArm && ((Y > 660.0) == (LightSouth < 0.0));
+		bOneSide = bOneSide && (Y > 660.0);
+		(void)AX;
+	}
+	Check(bPosts, "pali medi di 7,5 m");
+	Check(bOffset, "il palo a 3,25 m dal centro (mezza carreggiata + mezzo metro)");
+	Check(bArm, "lo sbraccio guarda la strada");
+	Check(bOneSide, "tutti dallo stesso lato (la destra nel verso della linea, verso est: il sud)");
+
+	// La provinciale larga: a coppie in paese, niente in campagna.
+	const std::vector<FStreetLamp> Main = On(Lamps, 0.0, 480.0, 1700.0, 480.0);
+	int32_t TownLamps = 0, CountryLamps = 0, North = 0, South = 0;
+	for (const FStreetLamp& Lamp : Main)
+	{
+		double X = 0.0, Y = 0.0, PX = 0.0, PY = 0.0;
+		AnchorMetres(Lamp, X, Y);
+		PoleMetres(Lamp, PX, PY);
+		TownLamps += (X > 150.0 && X < 850.0) ? 1 : 0;
+		CountryLamps += (X > 1150.0) ? 1 : 0;
+		(PY < 480.0 ? North : South)++;
+	}
+	Check(TownLamps >= 30 && CountryLamps == 0, "la provinciale: illuminata in paese, buia in campagna",
+		Fmt("%.0f in paese, %.0f in campagna", TownLamps, CountryLamps));
+	Check(North == South && Main.size() > 0 && Main.front().Kind == ELampKind::Arm, "larga 18 m: a coppie, pali con lo sbraccio",
+		Fmt("%.0f a nord, %.0f a sud", North, South));
+
+	// La terziaria media: alternati.
+	const std::vector<FStreetLamp> Medium = On(Lamps, 500.0, 250.0, 500.0, 850.0);
+	std::vector<std::pair<double, int>> Sides;
+	for (const FStreetLamp& Lamp : Medium)
+	{
+		double X = 0.0, Y = 0.0, PX = 0.0, PY = 0.0;
+		AnchorMetres(Lamp, X, Y);
+		PoleMetres(Lamp, PX, PY);
+		Sides.emplace_back(Y, PX > 500.0 ? 1 : -1);
+	}
+	std::sort(Sides.begin(), Sides.end());
+	int32_t Alternations = 0, Pairs = 0;
+	for (size_t Index = 1; Index < Sides.size(); ++Index)
+	{
+		if (Sides[Index].first - Sides[Index - 1].first < 31.0) { ++Pairs; Alternations += Sides[Index].second != Sides[Index - 1].second ? 1 : 0; }
+	}
+	Check(Medium.size() >= 10 && Pairs > 0 && Alternations == Pairs, "larga 12 m: alternati (uno a destra, il successivo a sinistra)",
+		Fmt("%.0f lampioni, %.0f cambi su %.0f", static_cast<double>(Medium.size()), Alternations, Pairs));
+
+	// Mai su un'altra carreggiata.
+	bool bClear = true;
+	for (const FStreetLamp& Lamp : Lamps)
+	{
+		double X = 0.0, Y = 0.0;
+		PoleMetres(Lamp, X, Y);
+		for (const FTestLine& Road : Lines)
+		{
+			if (Road.Class == ERoadClass::Path) { continue; }
+			const double HalfWidth = Road.WidthDm * 0.05;
+			const double X0 = Road.Points.front().first * Metric().MetresPerUnitX, Y0 = Road.Points.front().second * Metric().MetresPerUnitY;
+			const double X1 = Road.Points.back().first * Metric().MetresPerUnitX, Y1 = Road.Points.back().second * Metric().MetresPerUnitY;
+			if (DistanceToSegment(X, Y, X0, Y0, X1, Y1) < HalfWidth) { bClear = false; }
+		}
+	}
+	Check(bClear && Stats.Blocked > 0, "nessun palo su una carreggiata (agli incroci si salta)", Fmt("%.0f saltati", Stats.Blocked));
+
+	// La via spezzata in dieci pezzi da 15 m: ricucita, si cammina intera.
+	const std::vector<double> Broken = Along(On(Lamps, 300.0, 300.0, 300.0, 450.0), 300.0, 300.0, 300.0, 450.0);
+	double BrokenGap = 1e9;
+	for (size_t Index = 1; Index < Broken.size(); ++Index) { BrokenGap = std::min(BrokenGap, Broken[Index] - Broken[Index - 1]); }
+	Check(Broken.size() >= 5 && Broken.size() <= 6 && BrokenGap > 25.0, "una via spezzata in 10 pezzi: ricucita, 26 m di passo (non uno ogni pezzo)",
+		Fmt("%.0f lampioni, passo minimo %.1f m", static_cast<double>(Broken.size()), BrokenGap));
+
+	Check(On(Lamps, 220.0, 720.0, 380.0, 720.0).empty(), "lit=no: niente lampioni");
+	Check(On(Lamps, 420.0, 720.0, 580.0, 720.0).empty(), "sterrata senza tag: niente");
+	Check(On(Lamps, 620.0, 720.0, 780.0, 720.0).empty(), "sul ponte: niente (la luce starebbe in fondo alla valle)");
+	const std::vector<FStreetLamp> LitPath = On(Lamps, 220.0, 600.0, 380.0, 600.0);
+	Check(!LitPath.empty() && LitPath.front().Kind == ELampKind::Lantern, "sentiero con lit=yes: lanterne",
+		Fmt("%.0f", static_cast<double>(LitPath.size())));
+	Check(On(Lamps, 420.0, 600.0, 580.0, 600.0).empty() && On(Lamps, 620.0, 600.0, 780.0, 600.0).empty(),
+		"sentiero e tratturo senza tag: niente");
+	Check(On(Lamps, 0.0, 1800.0, 1700.0, 1800.0).empty(), "autostrada senza tag: buia");
+	const std::vector<FStreetLamp> Motorway = On(Lamps, 0.0, 2000.0, 1700.0, 2000.0);
+	Check(Motorway.size() >= 35 && Motorway.front().Kind == ELampKind::Arm && std::fabs(Motorway.front().HeightM - 12.0) < 1e-3,
+		"autostrada con lit=yes: pali da 12 m ogni 42 m", Fmt("%.0f", static_cast<double>(Motorway.size())));
+	Check(On(Lamps, 1400.0, 2200.0, 1500.0, 2200.0).empty(), "una stradina isolata di 100 m in campagna: buia");
+
+	// Le soglie e i colori.
+	bool bSwitch = true, bColours = true;
+	for (const FStreetLamp& Lamp : Lamps)
+	{
+		bSwitch = bSwitch && Lamp.SwitchLux >= 15.0f && Lamp.SwitchLux <= 60.0f;
+		const bool bLed = Lamp.Colour != ELampColour::Sodium;
+		if (bLed) { bColours = bColours && (Lamp.Kind == ELampKind::Arm) == (Lamp.Colour == ELampColour::NeutralLed); }
+	}
+	Check(bSwitch, "le fotocellule fra 15 e 60 lux");
+	Check(bColours, "LED neutro sulle principali, caldo nei quartieri");
+	int32_t Led = 0, Cells = 0;
+	for (int Row = 0; Row < 60; ++Row)
+	{
+		for (int Column = 0; Column < 60; ++Column)
+		{
+			FLampStyle Style;
+			Style.Kind = ELampKind::Post;
+			Led += StreetDetail::ChooseColour(40.0 + Row * 0.02, 8.0 + Column * 0.02, Style, Settings) != ELampColour::Sodium ? 1 : 0;
+			++Cells;
+		}
+	}
+	const double LedShare = static_cast<double>(Led) / Cells;
+	Check(LedShare > 0.71 && LedShare < 0.79, "tre comuni su quattro sono passati ai LED", Fmt("%.3f", LedShare));
+	Check(StreetDetail::CircuitSwitchLux(45.0001, 7.6501, 1) == StreetDetail::CircuitSwitchLux(45.0002, 7.6503, 1),
+		"due lampioni vicini, stesso circuito: si accendono insieme");
+
+	std::vector<FStreetLamp> Again;
+	PlaceTileLamps(Tile, Settings, Again);
+	bool bSame = Again.size() == Lamps.size();
+	for (size_t Index = 0; bSame && Index < Lamps.size(); ++Index)
+	{
+		bSame = Again[Index].LatDeg == Lamps[Index].LatDeg && Again[Index].LonDeg == Lamps[Index].LonDeg && Again[Index].SwitchLux == Lamps[Index].SwitchLux;
+	}
+	Check(bSame, "deterministico: due volte, gli stessi lampioni");
+
+	// Il confine fra due tile: la stessa via nelle due, ognuna con il suo buffer.
+	{
+		const FTileKey EastKey{ TorinoKey.Level, TorinoKey.X + 1, TorinoKey.Y };
+		const int32_t Extent = Tiles::VectorTileExtent;
+		FTestLine West{ ERoadClass::Residential, 0, 0, 55, { { UX(1000.0), UY(1000.0) }, { Extent + 2000, UY(1000.0) } } };
+		FTestLine East{ ERoadClass::Residential, 0, 0, 55, { { -2000, UY(1000.0) }, { UX(1200.0), UY(1000.0) } } };
+		std::vector<FStreetLamp> A, B;
+		PlaceTileLamps(MakeTile(TorinoKey, { West }), Settings, A);
+		PlaceTileLamps(MakeTile(EastKey, { East }), Settings, B);
+		std::vector<double> Xs;
+		for (const FStreetLamp& Lamp : A) { double X = 0.0, Y = 0.0; AnchorMetres(Lamp, X, Y); Xs.push_back(X); }
+		const FTileMetric EastMetric = FTileMetric::For(EastKey, Extent);
+		for (const FStreetLamp& Lamp : B) { Xs.push_back(Metric().WidthM() + (Lamp.AnchorLonDeg - EastMetric.Bounds.West) / EastMetric.Bounds.SpanLon() * EastMetric.WidthM()); }
+		std::sort(Xs.begin(), Xs.end());
+		double Low = 1e9, High = 0.0;
+		bool bBothSides = false;
+		for (size_t Index = 1; Index < Xs.size(); ++Index)
+		{
+			Low = std::min(Low, Xs[Index] - Xs[Index - 1]);
+			High = std::max(High, Xs[Index] - Xs[Index - 1]);
+			bBothSides = bBothSides || (Xs[Index - 1] < Metric().WidthM() && Xs[Index] > Metric().WidthM());
+		}
+		Check(bBothSides && Low >= 13.0 - 1e-6 && High <= 39.0 + 1e-6, "sul confine fra due tile: nessun doppione, buco al piu' di un passo e mezzo",
+			Fmt("passo fra %.1f e %.1f m (26 m)", Low, High));
+	}
+}
+
+// ===========================================================================
+//  14. I lampioni: quando si accendono, le celle, le forme, i materiali
+// ===========================================================================
+
+#define GEO_STREETLIGHT_SPRITE(...) __VA_ARGS__
+#define GEO_STREETLIGHT_GLOW(...)
+#define GEO_STREETLIGHT_LAMP(...)
+static HlslShim::float3 RunLampSprite(const HlslShim::float3& Pos, const HlslShim::float3& Cam, const HlslShim::float4& Corner,
+                                      const HlslShim::float4& View, float UuPerMetre)
+{
+	using namespace HlslShim;
+#include "Roads/StreetLightShader.inl"
+}
+#undef GEO_STREETLIGHT_SPRITE
+#undef GEO_STREETLIGHT_GLOW
+#undef GEO_STREETLIGHT_LAMP
+
+#define GEO_STREETLIGHT_SPRITE(...)
+#define GEO_STREETLIGHT_GLOW(...) __VA_ARGS__
+#define GEO_STREETLIGHT_LAMP(...)
+static HlslShim::float3 RunLampGlow(const HlslShim::float4& Corner, const HlslShim::float3& Pos, const HlslShim::float3& Cam,
+                                    const HlslShim::float3& Tint, float Switch, const HlslShim::float4& Lights,
+                                    const HlslShim::float4& View, float UuPerMetre)
+{
+	using namespace HlslShim;
+#include "Roads/StreetLightShader.inl"
+}
+#undef GEO_STREETLIGHT_SPRITE
+#undef GEO_STREETLIGHT_GLOW
+#undef GEO_STREETLIGHT_LAMP
+
+#define GEO_STREETLIGHT_SPRITE(...)
+#define GEO_STREETLIGHT_GLOW(...)
+#define GEO_STREETLIGHT_LAMP(...) __VA_ARGS__
+static HlslShim::float3 RunLampGlass(const HlslShim::float4& Paint, const HlslShim::float3& Tint, float Switch, const HlslShim::float4& Lights)
+{
+	using namespace HlslShim;
+#include "Roads/StreetLightShader.inl"
+}
+#undef GEO_STREETLIGHT_SPRITE
+#undef GEO_STREETLIGHT_GLOW
+#undef GEO_STREETLIGHT_LAMP
+
+static void TestStreetLightTimesAndShapes()
+{
+	using namespace LightsTest;
+	Section("14. I lampioni: quando si accendono, le celle, le forme, i materiali");
+
+	// La luce che vede la fotocellula.
+	const double Noon = AmbientLux(60.0, 0.0), Sunset = AmbientLux(0.0, 0.0), Dusk = AmbientLux(-3.0, 0.0);
+	Check(Noon > 50000.0 && Sunset > 300.0 && Sunset < 600.0 && Dusk > 30.0 && Dusk < 70.0,
+		"la luce: giorno pieno, tramonto ~440 lux, a -3 gradi ~50", Fmt("%.0f, %.0f, %.0f lux", Noon, Sunset, Dusk));
+	Check(std::fabs(AmbientLux(-3.0, 1.0) / Dusk - 0.25) < 1e-9, "con il cielo coperto un quarto della luce");
+	Check(LampOnLevel(10.0, 30.0, false) == 1.0 && LampOnLevel(40.0, 30.0, false) == 0.0
+		&& LampOnLevel(32.0, 30.0, false) > 0.0 && LampOnLevel(32.0, 30.0, false) < 1.0,
+		"acceso sotto la soglia, spento sopra il 15% in piu', una rampa in mezzo");
+	Check(LampOnLevel(40.0, 30.0, true) == 1.0, "la mattina si spegne a una luce piu' alta (isteresi)");
+
+	// Torino, 21 giugno 2026: il tramonto, poi i circuiti che si accendono.
+	const double LatDeg = 45.07, LonDeg = 7.68;
+	const double Start = Sky::JulianDay(2026, 6, 21.0) + 18.0 / 24.0;      // 18:00 UT, 20:00 locali
+	double SunsetJd = 0.0, On60 = 0.0, On15 = 0.0, OnCloudy = 0.0;
+	for (int Minute = 0; Minute < 240; ++Minute)
+	{
+		const double Jd = Start + Minute / 1440.0;
+		const double Altitude = SunAltitudeDeg(Jd, LatDeg, LonDeg);
+		if (SunsetJd == 0.0 && Altitude < -0.833) { SunsetJd = Jd; }
+		const double Light = AmbientLux(Altitude, 0.0);
+		if (On60 == 0.0 && LampOnLevel(Light, 60.0, false) >= 1.0) { On60 = Jd; }
+		if (On15 == 0.0 && LampOnLevel(Light, 15.0, false) >= 1.0) { On15 = Jd; }
+		if (OnCloudy == 0.0 && LampOnLevel(AmbientLux(Altitude, 1.0), 60.0, false) >= 1.0) { OnCloudy = Jd; }
+	}
+	const double After60 = (On60 - SunsetJd) * 1440.0, After15 = (On15 - SunsetJd) * 1440.0, AfterCloudy = (OnCloudy - SunsetJd) * 1440.0;
+	Check(SunsetJd > 0.0 && After60 > 5.0 && After60 < 25.0, "il circuito piu' sensibile (60 lux) si accende 5-25 minuti dopo il tramonto",
+		Fmt("%.0f minuti (tramonto alle %.2f UT)", After60, std::fmod(SunsetJd + 0.5, 1.0) * 24.0));
+	Check(After15 > After60 && After15 < 45.0, "il meno sensibile (15 lux) poco dopo", Fmt("%.0f minuti", After15));
+	Check(AfterCloudy < After60, "con il cielo coperto prima", Fmt("%.0f minuti", AfterCloudy));
+	Check(IsMorning(Sky::JulianDay(2026, 6, 21.0) + 4.0 / 24.0, LatDeg, LonDeg)
+		&& !IsMorning(Sky::JulianDay(2026, 6, 21.0) + 18.0 / 24.0, LatDeg, LonDeg), "la mattina il sole sale, la sera scende");
+
+	Check(NightDimming(21.0, 0.3) == 1.0 && std::fabs(NightDimming(2.0, 0.3) - 0.7) < 1e-9
+		&& std::fabs(NightDimming(0.0, 0.3) - 0.85) < 1e-9 && std::fabs(NightDimming(5.0, 0.3) - 0.85) < 1e-9 && NightDimming(12.0, 0.3) == 1.0,
+		"la riduzione del flusso: piena la sera, -30% dalle 00:30 alle 04:30, rampe di un'ora");
+
+	const FSpotLight Spot = SpotFor(8.0, 0.7, 0.2, 1.0, 1.0);
+	Check(std::fabs(Spot.Candela / 64.0 - 0.14) < 1e-9 && Spot.RadiusM == 36.0, "la luce vera: al piede (8 m sotto) la luce della scena per l'Output");
+	Check(SpotFor(8.0, 0.7, 0.2, 0.0, 1.0).Candela == 0.0, "spento: zero");
+	Check(std::fabs(FootLux(10.0, 1.0) - 0.2) < 1e-12, "al piede 1/50 del sole del livello (venti lune piene)");
+
+	// Le luci vere: i piu' vicini, con il peso che scende in fondo.
+	std::vector<FLightCandidate> Candidates;
+	for (int Index = 0; Index < 200; ++Index) { Candidates.push_back(FLightCandidate{ static_cast<uint64_t>(1000 + Index), 500.0 - 2.0 * Index }); }
+	std::vector<FLightChoice> Choice;
+	SelectLights(Candidates, 32, Choice);
+	bool bNearest = Choice.size() == 32;
+	for (const FLightChoice& Item : Choice) { bNearest = bNearest && Candidates[Item.Candidate].DistanceM <= 500.0 - 2.0 * 168.0; }
+	Check(bNearest && Choice.front().Id == 1199 && Choice.front().Weight == 1.0 && Choice.back().Weight < 0.15,
+		"32 luci vere sui lampioni piu' vicini, sfumate in fondo alla lista", Fmt("ultimo peso %.3f", Choice.back().Weight));
+
+	// Le celle: i quattro quarti (livello 14) della tile dividono i lampioni, sul terreno.
+	{
+		const std::vector<FTestLine> Lines = Town();
+		std::vector<FStreetLamp> Lamps;
+		PlaceTileLamps(MakeTile(TorinoKey, Lines), FStreetLightSettings{}, Lamps);
+		auto Flat = std::make_shared<Tiles::FHeightTile>();
+		Flat->Key = TorinoKey;
+		Flat->Heights.assign(static_cast<size_t>(Tiles::TilePosts) * Tiles::TilePosts, 250.0f);
+		Flat->MinHeight = Flat->MaxHeight = 250.0f;
+		Cells::FGroundSurfaces Ground;
+		Ground.Add(Flat, 1);
+		size_t Total = 0;
+		bool bHeights = true, bUnique = true;
+		std::vector<uint64_t> Ids;
+		for (uint32_t Y = 0; Y < 2; ++Y)
+		{
+			for (uint32_t X = 0; X < 2; ++X)
+			{
+				const FTileKey CellKey{ 14, TorinoKey.X * 2 + X, TorinoKey.Y * 2 + Y };
+				std::vector<FLampInstance> Instances;
+				BuildCellLamps(Tiles::GetTileBounds(CellKey.Level, CellKey.X, CellKey.Y), Lamps, Ground, Instances);
+				Total += Instances.size();
+				for (const FLampInstance& Instance : Instances)
+				{
+					bHeights = bHeights && std::fabs(Instance.Base[2] - 250.0f) < 1.0f && std::fabs(Instance.Light[2] - Instance.Base[2] - Instance.HeightM) < 1e-3f
+						&& std::fabs(std::hypot(Instance.Light[0] - Instance.Base[0], Instance.Light[1] - Instance.Base[1]) - 0.7f * Instance.Scale) < 1e-3f;
+					Ids.push_back(Instance.Id);
+				}
+			}
+		}
+		std::sort(Ids.begin(), Ids.end());
+		bUnique = std::adjacent_find(Ids.begin(), Ids.end()) == Ids.end();
+		Check(Total == Lamps.size() && !Lamps.empty(), "le quattro celle della tile: ogni lampione in una sola",
+			Fmt("%.0f lampioni, %.0f nelle celle", static_cast<double>(Lamps.size()), static_cast<double>(Total)));
+		Check(bHeights, "sul terreno disegnato; la luce in cima al palo, sporgente di 0,7 m");
+		Check(bUnique, "ogni lampione ha il suo numero (le luci vere lo seguono)");
+	}
+
+	// Le forme.
+	bool bShapes = true;
+	for (int32_t Kind = 0; Kind < LampKindCount; ++Kind)
+	{
+		Vegetation::FTreeMesh Near, Far;
+		BuildLampMesh(static_cast<ELampKind>(Kind), false, Near);
+		BuildLampMesh(static_cast<ELampKind>(Kind), true, Far);
+		const FLampShape Shape = LampShape(static_cast<ELampKind>(Kind));
+		bool bIndices = !Near.Indices.empty() && Near.Indices.size() % 3 == 0;
+		for (const uint32_t Index : Near.Indices) { bIndices = bIndices && Index < Near.VertexCount(); }
+		// Il vetro: vertici con A = 255, attorno al punto della luce.
+		double GlassBelow = 1e9, Top = -1e9;
+		bool bGlassNearLight = false;
+		for (size_t Vertex = 0; Vertex < Near.VertexCount(); ++Vertex)
+		{
+			Top = std::max(Top, static_cast<double>(Near.Positions[Vertex * 3 + 2]));
+			if (Near.Colours[Vertex * 4 + 3] != 255) { continue; }
+			const double Dx = Near.Positions[Vertex * 3] - Shape.ReachM, Dz = Near.Positions[Vertex * 3 + 2] - Shape.LightHeightM;
+			bGlassNearLight = bGlassNearLight || (std::fabs(Dx) < 0.4 && std::fabs(Dz) < 0.3);
+			GlassBelow = std::min(GlassBelow, static_cast<double>(Near.Positions[Vertex * 3 + 2]));
+		}
+		const bool bShape = bIndices && bGlassNearLight && Far.TriangleCount() < Near.TriangleCount() && Top < Shape.LightHeightM + 0.6
+			&& GlassBelow > Shape.LightHeightM - 0.3;
+		std::printf("  %-9s %4zu triangoli (lontano %zu), luce a %.2f m, sporge %.1f m\n", LampKindName(static_cast<ELampKind>(Kind)),
+			Near.TriangleCount(), Far.TriangleCount(), Shape.LightHeightM, Shape.ReachM);
+		bShapes = bShapes && bShape;
+	}
+	Check(bShapes, "le tre forme: indici validi, il vetro attorno alla luce, il LOD lontano piu' leggero");
+	Vegetation::FTreeMesh Quad;
+	BuildSpriteQuad(Quad);
+	Check(Quad.VertexCount() == 4 && Quad.TriangleCount() == 2 && Quad.Colours[4] == 255 && Quad.Colours[9] == 255 && Quad.Colours[0] == 0,
+		"il quadrato dei punti luce: quattro angoli scritti nel colore");
+
+	// Il materiale: il punto si apre verso la camera.
+	using HlslShim::float3;
+	using HlslShim::float4;
+	const float Uu = 100.0f;
+	const float4 View(0.001, 2.5, 0.8, 2.0);
+	const float3 Lamp(0.0, 0.0, 0.0);
+	auto Corners = [&](const float3& Cam, float3 Out[4])
+	{
+		const float4 C[4] = { float4(0, 0, 0, 0), float4(1, 0, 0, 0), float4(1, 1, 0, 0), float4(0, 1, 0, 0) };
+		for (int Index = 0; Index < 4; ++Index) { Out[Index] = RunLampSprite(Lamp, Cam, C[Index], View, Uu); }
+	};
+	auto Distance = [](const float3& A, const float3& B) { return std::sqrt((A.x - B.x) * (A.x - B.x) + (A.y - B.y) * (A.y - B.y) + (A.z - B.z) * (A.z - B.z)); };
+	{
+		float3 Far[4], Close[4];
+		Corners(float3(0.0, 100000.0, 30000.0), Far);       // a ~1 km
+		Corners(float3(0.0, 2000.0, 0.0), Close);            // a 20 m
+		const double FarM = std::sqrt(1000.0 * 1000.0 + 300.0 * 300.0);
+		const double FarSide = Distance(Far[0], Far[1]) / Uu, CloseSide = Distance(Close[0], Close[1]) / Uu;
+		const double Expected = FarM * 0.001 * 2.5;
+		// Il quadrato e' perpendicolare alla vista (meno l'avvicinamento, che e' lungo la vista).
+		const double Dx = 0.0, Dy = 100000.0 / (FarM * Uu), Dz = 30000.0 / (FarM * Uu);
+		const float3 Mid((Far[0].x + Far[2].x) * 0.5, (Far[0].y + Far[2].y) * 0.5, (Far[0].z + Far[2].z) * 0.5);
+		const float3 Edge(Far[1].x - Far[0].x, Far[1].y - Far[0].y, Far[1].z - Far[0].z);
+		const double Facing = (Edge.x * Dx + Edge.y * Dy + Edge.z * Dz) / std::max(1e-6, static_cast<double>(Distance(Far[0], Far[1])));
+		const double Pull = (Mid.x * Dx + Mid.y * Dy + Mid.z * Dz) / Uu;
+		Check(std::fabs(FarSide - Expected) < 0.01 * Expected && std::fabs(CloseSide - 0.8) < 1e-3,
+			"il punto: 2,5 pixel da lontano, 80 cm da vicino", Fmt("%.2f m a 1 km, %.2f m a 20 m", FarSide, CloseSide));
+		Check(std::fabs(Facing) < 1e-4 && std::fabs(Pull - 2.0 * Expected) < 0.01 * Expected, "girato verso la camera, avvicinato di due punti",
+			Fmt("avvicinato %.2f m", Pull));
+		float3 Above[4];
+		Corners(float3(0.0, 0.0, 50000.0), Above);
+		const double AboveSide = Distance(Above[0], Above[1]) / Uu;
+		Check(std::isfinite(AboveSide) && std::fabs(AboveSide - 500.0 * 0.0025) < 0.01, "anche visto da sopra (niente divisioni per zero)",
+			Fmt("%.2f m", AboveSide));
+	}
+
+	// Il bagliore: acceso con la stessa formula di LampOnLevel.
+	{
+		const float3 Tint(1.0, 0.8, 0.5);
+		const float3 Cam(0.0, 30000.0, 0.0);                  // a 300 m
+		const float4 Centre(0.5, 0.5, 0, 0), Edge(0.9, 0.5, 0, 0);
+		auto Glow = [&](const float4& Corner, double Ambient, double Factor, const float3& Camera)
+		{
+			return RunLampGlow(Corner, Lamp, Camera, Tint, 30.0f, float4(Ambient, Factor, 0.2, 1.0), View, Uu).x;
+		};
+		const double Night = Glow(Centre, 0.0, 1.0, Cam);
+		Check(Night > 0.0 && Glow(Edge, 0.0, 1.0, Cam) < Night && Glow(Edge, 0.0, 1.0, Cam) > 0.0, "di notte: nucleo e alone");
+		Check(Glow(Centre, 100000.0, 1.0, Cam) == 0.0, "di giorno: niente");
+		bool bSameRamp = true;
+		for (const double Ambient : { 20.0, 31.0, 33.0, 34.0, 36.0 })
+		{
+			bSameRamp = bSameRamp && std::fabs(Glow(Centre, Ambient, 1.0, Cam) / Night - LampOnLevel(Ambient, 30.0, false)) < 1e-4;
+			bSameRamp = bSameRamp && std::fabs(Glow(Centre, Ambient * 1.6, 1.6, Cam) / Night - LampOnLevel(Ambient * 1.6, 30.0, true)) < 1e-4;
+		}
+		Check(bSameRamp, "il materiale si accende con la formula del C++ (sera e mattina)");
+		const double FarGlow = Glow(Centre, 0.0, 1.0, float3(0.0, 500000.0, 0.0));
+		Check(FarGlow > 0.0 && FarGlow < 0.3 * Night, "a 5 km piu' debole per pixel, ma c'e'", Fmt("%.3f del vicino", FarGlow / Night));
+		Check(Glow(Centre, 0.0, 1.0, float3(0.0, 300.0, 0.0)) == 0.0, "a 3 m sparisce: c'e' il vetro del palo");
+
+		const float4 Glass(0.9, 0.9, 0.9, 1.0), Metal(0.4, 0.4, 0.4, 0.0);
+		const double Lit = RunLampGlass(Glass, Tint, 30.0f, float4(0.0, 1.0, 0.2, 0.7)).x;
+		Check(std::fabs(Lit - 1.0 * 0.2 * 30.0 * 0.7) < 1e-4 && RunLampGlass(Metal, Tint, 30.0f, float4(0.0, 1.0, 0.2, 0.7)).x == 0.0
+			&& RunLampGlass(Glass, Tint, 30.0f, float4(100000.0, 1.0, 0.2, 0.7)).x == 0.0, "il vetro del palo: acceso di notte, il metallo mai");
+	}
+
+	// Il costo: una tile di citta' fitta.
+	{
+		std::vector<FTestLine> Grid;
+		for (int Index = 0; Index < 40; ++Index)
+		{
+			Grid.push_back(Line(ERoadClass::Residential, 5.5, 0.0, 30.0 + Index * 60.0, 1730.0, 30.0 + Index * 60.0, 0, 0, 20));
+		}
+		for (int Index = 0; Index < 28; ++Index)
+		{
+			Grid.push_back(Line(ERoadClass::Residential, 5.5, 30.0 + Index * 60.0, 0.0, 30.0 + Index * 60.0, 2440.0, 0, 0, 20));
+		}
+		const FVectorTile Dense = MakeTile(TorinoKey, Grid);
+		std::vector<FStreetLamp> Lamps;
+		const auto Started = std::chrono::steady_clock::now();
+		PlaceTileLamps(Dense, FStreetLightSettings{}, Lamps);
+		const double Ms = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - Started).count();
+		std::printf("  citta' fitta: %zu lampioni in %.1f ms\n", Lamps.size(), Ms);
+		Check(Lamps.size() > 4000 && Ms < 400.0, "una tile di citta' (68 vie, 1360 pezzi): migliaia di lampioni in meno di 0,4 s",
+			Fmt("%.0f in %.1f ms", static_cast<double>(Lamps.size()), Ms));
+	}
+}
+
+// ===========================================================================
 int main(int ArgCount, char** Arguments)
 {
 	std::printf("=====================================================\n");
@@ -1009,6 +1589,8 @@ int main(int ArgCount, char** Arguments)
 	TestBridge();
 	TestSidewalksAndJunctions();
 	TestAtlasAndCost();
+	TestStreetLightPlacement();
+	TestStreetLightTimesAndShapes();
 
 	std::printf("\n=====================================================\n");
 	std::printf(" RISULTATO: %d passati, %d falliti, %d saltati\n", GPassed, GFailed, GSkipped);

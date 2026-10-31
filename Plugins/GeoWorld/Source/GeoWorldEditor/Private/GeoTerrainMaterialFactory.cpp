@@ -73,6 +73,7 @@
 #include "Materials/Material.h"
 #include "Materials/MaterialExpressionAdd.h"
 #include "Materials/MaterialExpressionAppendVector.h"
+#include "Materials/MaterialExpressionCameraPositionWS.h"
 #include "Materials/MaterialExpressionCameraVectorWS.h"
 #include "Materials/MaterialExpressionCollectionParameter.h"
 #include "Materials/MaterialExpressionComponentMask.h"
@@ -561,6 +562,13 @@ namespace
 		Wanted.Emplace(FName(TEXT("SkyEquatorY")), FLinearColor(0.0f, 1.0f, 0.0f, 0.0f));
 		Wanted.Emplace(FName(TEXT("SkyEquatorZ")), FLinearColor(0.0f, 0.0f, 1.0f, 0.0f));
 		Wanted.Emplace(FName(TEXT("SkyNight")), FLinearColor(0.0f, 10.0f, 0.0f, 1.0f));
+		// I lampioni (Roads/StreetLightShader.inl). StreetLights: la luce che
+		// c'e' (lux), il fattore della mattina, la luce al piede di un palo, la
+		// riduzione del flusso (0 = spenti: il default). StreetLightView: un
+		// pixel in radianti, i pixel minimi, il lato da vicino (m), di quanti
+		// punti avvicinarli alla camera.
+		Wanted.Emplace(FName(TEXT("StreetLights")), FLinearColor(100000.0f, 1.0f, 0.0f, 0.0f));
+		Wanted.Emplace(FName(TEXT("StreetLightView")), FLinearColor(0.001f, 2.5f, 0.8f, 2.0f));
 		return CreateOrUpdateCollection(WeatherCollectionPackagePath, WeatherCollectionAssetName, Wanted);
 	}
 
@@ -2066,9 +2074,230 @@ namespace
 	}
 }
 
+// ============================================================================
+//  I LAMPIONI: M_GeoStreetLight (i punti luce) e M_GeoStreetLamp (i pali)
+// ============================================================================
+
+namespace
+{
+	const TCHAR* StreetLightMaterialPackagePath = TEXT("/GeoWorld/Materials/M_GeoStreetLight");
+	const TCHAR* StreetLightMaterialAssetName = TEXT("M_GeoStreetLight");
+	const TCHAR* StreetLampMaterialPackagePath = TEXT("/GeoWorld/Materials/M_GeoStreetLamp");
+	const TCHAR* StreetLampMaterialAssetName = TEXT("M_GeoStreetLamp");
+
+	/** I nodi Custom: il testo di Roads/StreetLightShader.inl (i test lo compilano come C++). */
+#define GEO_STREETLIGHT_SPRITE(...) #__VA_ARGS__
+#define GEO_STREETLIGHT_GLOW(...)
+#define GEO_STREETLIGHT_LAMP(...)
+	const char* StreetLightSpriteCode =
+#include "Roads/StreetLightShader.inl"
+		;
+#undef GEO_STREETLIGHT_SPRITE
+#undef GEO_STREETLIGHT_GLOW
+#undef GEO_STREETLIGHT_LAMP
+#define GEO_STREETLIGHT_SPRITE(...)
+#define GEO_STREETLIGHT_GLOW(...) #__VA_ARGS__
+#define GEO_STREETLIGHT_LAMP(...)
+	const char* StreetLightGlowCode =
+#include "Roads/StreetLightShader.inl"
+		;
+#undef GEO_STREETLIGHT_SPRITE
+#undef GEO_STREETLIGHT_GLOW
+#undef GEO_STREETLIGHT_LAMP
+#define GEO_STREETLIGHT_SPRITE(...)
+#define GEO_STREETLIGHT_GLOW(...)
+#define GEO_STREETLIGHT_LAMP(...) #__VA_ARGS__
+	const char* StreetLampGlassCode =
+#include "Roads/StreetLightShader.inl"
+		;
+#undef GEO_STREETLIGHT_SPRITE
+#undef GEO_STREETLIGHT_GLOW
+#undef GEO_STREETLIGHT_LAMP
+
+	/** La posizione della camera come float3 normale (cm), come TruncatedWorldPosition. */
+	FPin TruncatedCameraPosition(FGraph& G, int32 X, int32 Y)
+	{
+		UMaterialExpressionCameraPositionWS* Camera = G.Make<UMaterialExpressionCameraPositionWS>(X - 250, Y);
+		if (!Camera) { return FPin{}; }
+		if (UClass* TruncateClass = FindObject<UClass>(nullptr, TEXT("/Script/Engine.MaterialExpressionTruncateLWC")))
+		{
+			UMaterialExpression* Truncate = UMaterialEditingLibrary::CreateMaterialExpression(G.Material, TruncateClass, X, Y);
+			if (Truncate && UMaterialEditingLibrary::ConnectMaterialExpressions(Camera, TEXT(""), Truncate, TEXT("")))
+			{
+				return FPin{ Truncate, 0 };
+			}
+		}
+		return FPin{ Camera, 0 };
+	}
+
+	/** Il colore del vertice come float4 (RGB + A, per maschera: vedi FindOutputByChannels). */
+	FPin VertexPaint4(FGraph& G, int32 X, int32 Y)
+	{
+		UMaterialExpressionVertexColor* Paint = G.Make<UMaterialExpressionVertexColor>(X - 250, Y);
+		UMaterialExpressionAppendVector* Append = G.Make<UMaterialExpressionAppendVector>(X, Y);
+		if (!Paint || !Append) { return FPin{}; }
+		const int32 Rgb = FindOutputByChannels(Paint, true, true, true, false);
+		const int32 Alpha = FindOutputByChannels(Paint, false, false, false, true);
+		if (Rgb == INDEX_NONE || Alpha == INDEX_NONE)
+		{
+			Report(FString::Printf(TEXT("%s: il nodo VertexColor non ha le uscite RGB e A."), *MaterialName(G)), FColor::Red);
+			G.bOk = false;
+			return FPin{};
+		}
+		Append->A.Connect(Rgb, Paint);
+		Append->B.Connect(Alpha, Paint);
+		return FPin{ Append, 0 };
+	}
+
+	/** Il colore del lampione (dati per istanza 0, 1, 2) come float3. */
+	FPin LampTint(FGraph& G, int32 X, int32 Y)
+	{
+		const FPin Red = InstanceFloat(G, 0, X - 450, Y - 50);
+		const FPin Green = InstanceFloat(G, 1, X - 450, Y + 50);
+		const FPin Blue = InstanceFloat(G, 2, X - 450, Y + 150);
+		UMaterialExpressionAppendVector* RedGreen = G.Make<UMaterialExpressionAppendVector>(X - 200, Y);
+		UMaterialExpressionAppendVector* Tint = G.Make<UMaterialExpressionAppendVector>(X, Y + 50);
+		if (!Red.Node || !Green.Node || !Blue.Node || !RedGreen || !Tint) { G.bOk = false; return FPin{}; }
+		G.Connect(Red.Node, TEXT(""), RedGreen, TEXT("A"));
+		G.Connect(Green.Node, TEXT(""), RedGreen, TEXT("B"));
+		G.Connect(RedGreen, TEXT(""), Tint, TEXT("A"));
+		G.Connect(Blue.Node, TEXT(""), Tint, TEXT("B"));
+		return FPin{ Tint, 0 };
+	}
+
+	UMaterialParameterCollection* LoadWeatherCollectionFor(const TCHAR* MaterialLabel)
+	{
+		UMaterialParameterCollection* Collection = LoadObject<UMaterialParameterCollection>(nullptr,
+			*FString::Printf(TEXT("%s.%s"), WeatherCollectionPackagePath, WeatherCollectionAssetName), nullptr,
+			LOAD_NoWarn | LOAD_Quiet);
+		if (!Collection) { Report(FString::Printf(TEXT("%s: manca MPC_GeoWeather."), MaterialLabel), FColor::Red); }
+		return Collection;
+	}
+
+	/**
+	 * M_GeoStreetLight: i punti luce dei lampioni (UGeoStreetLightsSubsystem),
+	 * un quadratino di 5 cm per lampione che il materiale apre verso la camera.
+	 * Unlit, ADDITIVO (aggiunge luce, non copre), due facce, per componenti di
+	 * istanze.
+	 *
+	 *   WorldPosition (senza offset), CameraPositionWS, VertexColor (l'angolo),
+	 *   MPC StreetLightView --> Custom "Lampioni (punto)" --> World Position Offset
+	 *   VertexColor, WorldPosition, CameraPositionWS, PerInstanceCustomData
+	 *   0..2 (il colore) e 3 (la soglia), MPC StreetLights e StreetLightView
+	 *       --> Custom "Lampioni (bagliore)" --> Emissive
+	 *
+	 * NOTA UE: la nebbia resta accesa (i lampioni lontani si perdono nella
+	 * foschia, come quelli veri); "Responsive AA" tiene i puntini, piccoli come
+	 * un paio di pixel, al riparo dalla sfocatura dell'antialiasing temporale.
+	 */
+	bool BuildStreetLightGraph(UMaterial* Material)
+	{
+		UMaterialParameterCollection* Collection = LoadWeatherCollectionFor(TEXT("M_GeoStreetLight"));
+		if (!Collection) { return false; }
+
+		Material->MaterialDomain = MD_Surface;
+		Material->SetShadingModel(MSM_Unlit);
+		Material->BlendMode = BLEND_Additive;
+		Material->TwoSided = true;
+		Material->bUsedWithInstancedStaticMeshes = true;
+		SetMaterialFlag(Material, TEXT("bEnableResponsiveAA"), true);
+
+		FGraph G{ Material };
+		const FPin Corner = VertexPaint4(G, -1350, -500);
+		const FPin Rest = TruncatedWorldPosition(G, true, -1350, -400);
+		const FPin Pos = TruncatedWorldPosition(G, false, -1350, 100);
+		const FPin Cam = TruncatedCameraPosition(G, -1350, -300);
+		const FPin View = CollectionParameter(G, Collection, TEXT("StreetLightView"), -1350, -200);
+		const FPin Lights = CollectionParameter(G, Collection, TEXT("StreetLights"), -1350, 400);
+		const FPin Tint = LampTint(G, -1350, 200);
+		const FPin Switch = InstanceFloat(G, 3, -1350, 350);
+		UMaterialExpressionConstant* UuPerMetre = G.Make<UMaterialExpressionConstant>(-1350, 0);
+		if (!G.bOk || !Corner.Node || !Rest.Node || !Pos.Node || !Cam.Node || !Tint.Node || !Switch.Node) { return false; }
+		UuPerMetre->R = static_cast<float>(GeoWorld::Units::MetersToUu);
+
+		TArray<FNamedPin> VertexInputs;
+		VertexInputs.Add(FNamedPin{ TEXT("Pos"), Rest });
+		VertexInputs.Add(FNamedPin{ TEXT("Cam"), Cam });
+		VertexInputs.Add(FNamedPin{ TEXT("Corner"), Corner });
+		VertexInputs.Add(FNamedPin{ TEXT("View"), View });
+		VertexInputs.Add(FNamedPin{ TEXT("UuPerMetre"), FPin{ UuPerMetre, 0 } });
+		const FString VertexCode(ANSI_TO_TCHAR(StreetLightSpriteCode));
+		UMaterialExpressionCustom* Sprite = MakeCustom(G, TEXT("Lampioni (punto)"), *VertexCode, CMOT_Float3, VertexInputs, -700, -400);
+
+		TArray<FNamedPin> PixelInputs;
+		PixelInputs.Add(FNamedPin{ TEXT("Corner"), Corner });
+		PixelInputs.Add(FNamedPin{ TEXT("Pos"), Pos });
+		PixelInputs.Add(FNamedPin{ TEXT("Cam"), Cam });
+		PixelInputs.Add(FNamedPin{ TEXT("Tint"), Tint });
+		PixelInputs.Add(FNamedPin{ TEXT("Switch"), Switch });
+		PixelInputs.Add(FNamedPin{ TEXT("Lights"), Lights });
+		PixelInputs.Add(FNamedPin{ TEXT("View"), View });
+		PixelInputs.Add(FNamedPin{ TEXT("UuPerMetre"), FPin{ UuPerMetre, 0 } });
+		const FString PixelCode(ANSI_TO_TCHAR(StreetLightGlowCode));
+		UMaterialExpressionCustom* Glow = MakeCustom(G, TEXT("Lampioni (bagliore)"), *PixelCode, CMOT_Float3, PixelInputs, -700, 200);
+
+		G.Connect(Sprite, TEXT(""), MP_WorldPositionOffset);
+		G.Connect(Glow, TEXT(""), MP_EmissiveColor);
+		if (!G.bOk) { return false; }
+		UMaterialEditingLibrary::RecompileMaterial(Material);
+		return true;
+	}
+
+	/**
+	 * M_GeoStreetLamp: i pali (StreetLights.h BuildLampMesh). Default Lit,
+	 * opaco, due facce, per componenti di istanze.
+	 *
+	 *   VertexColor RGB (il metallo, sRGB) --al quadrato--> Base Color
+	 *   VertexColor (A: il vetro), PerInstanceCustomData 0..3, MPC StreetLights
+	 *       --> Custom "Lampioni (vetro)" --> Emissive
+	 */
+	bool BuildStreetLampGraph(UMaterial* Material)
+	{
+		UMaterialParameterCollection* Collection = LoadWeatherCollectionFor(TEXT("M_GeoStreetLamp"));
+		if (!Collection) { return false; }
+
+		Material->MaterialDomain = MD_Surface;
+		Material->SetShadingModel(MSM_DefaultLit);
+		Material->TwoSided = true;
+		Material->bUsedWithInstancedStaticMeshes = true;
+		Material->DitheredLODTransition = true;
+
+		FGraph G{ Material };
+		UMaterialExpressionVertexColor* Metal = G.Make<UMaterialExpressionVertexColor>(-1100, -300);
+		UMaterialExpressionMultiply* Linear = G.Make<UMaterialExpressionMultiply>(-800, -300);
+		UMaterialExpressionConstant* Metallic = G.Make<UMaterialExpressionConstant>(-800, -150);
+		UMaterialExpressionConstant* Roughness = G.Make<UMaterialExpressionConstant>(-800, -50);
+		const FPin Paint = VertexPaint4(G, -1350, 100);
+		const FPin Tint = LampTint(G, -1350, 250);
+		const FPin Switch = InstanceFloat(G, 3, -1350, 400);
+		const FPin Lights = CollectionParameter(G, Collection, TEXT("StreetLights"), -1350, 500);
+		if (!G.bOk || !Paint.Node || !Tint.Node || !Switch.Node) { return false; }
+		Metallic->R = 0.6f;
+		Roughness->R = 0.45f;
+		const int32 MetalRgb = FindOutputByChannels(Metal, true, true, true, false);
+		Linear->A.Connect(MetalRgb == INDEX_NONE ? 0 : MetalRgb, Metal);
+		Linear->B.Connect(MetalRgb == INDEX_NONE ? 0 : MetalRgb, Metal);
+		G.Connect(Linear, TEXT(""), MP_BaseColor);
+		G.Connect(Metallic, TEXT(""), MP_Metallic);
+		G.Connect(Roughness, TEXT(""), MP_Roughness);
+
+		TArray<FNamedPin> Inputs;
+		Inputs.Add(FNamedPin{ TEXT("Paint"), Paint });
+		Inputs.Add(FNamedPin{ TEXT("Tint"), Tint });
+		Inputs.Add(FNamedPin{ TEXT("Switch"), Switch });
+		Inputs.Add(FNamedPin{ TEXT("Lights"), Lights });
+		const FString Code(ANSI_TO_TCHAR(StreetLampGlassCode));
+		UMaterialExpressionCustom* Glass = MakeCustom(G, TEXT("Lampioni (vetro)"), *Code, CMOT_Float3, Inputs, -700, 200);
+		G.Connect(Glass, TEXT(""), MP_EmissiveColor);
+		if (!G.bOk) { return false; }
+		UMaterialEditingLibrary::RecompileMaterial(Material);
+		return true;
+	}
+}
+
 static FAutoConsoleCommand GeoImageryCreateMaterialCommand(
 	TEXT("geo.Imagery.CreateMaterial"),
-	TEXT("Costruisce (o RIFA') in /GeoWorld/Materials: M_GeoTerrain (foto e strade dipinte), M_GeoRoad (strade 3D), M_GeoWater e MPC_GeoWater (acqua), MPC_GeoWeather, M_GeoPrecipitation, M_GeoLightning e M_GeoClouds (meteo), M_GeoVegetation (alberi), M_GeoBuilding (edifici), M_GeoNightSky (stelle e luna)."),
+	TEXT("Costruisce (o RIFA') in /GeoWorld/Materials: M_GeoTerrain (foto e strade dipinte), M_GeoRoad (strade 3D), M_GeoWater e MPC_GeoWater (acqua), MPC_GeoWeather, M_GeoPrecipitation, M_GeoLightning e M_GeoClouds (meteo), M_GeoVegetation (alberi), M_GeoBuilding (edifici), M_GeoNightSky (stelle e luna), M_GeoStreetLight e M_GeoStreetLamp (lampioni)."),
 	FConsoleCommandDelegate::CreateStatic([]()
 	{
 		// Il meteo per primo: terreno e strade leggono MPC_GeoWeather (suolo
@@ -2096,8 +2325,13 @@ static FAutoConsoleCommand GeoImageryCreateMaterialCommand(
 			&& CreateOrRebuildMaterial(BuildingMaterialPackagePath, BuildingMaterialAssetName, &BuildBuildingGraph);
 		const bool bNightSky = bWeatherCollection
 			&& CreateOrRebuildMaterial(NightSkyMaterialPackagePath, NightSkyMaterialAssetName, &BuildNightSkyGraph);
+		const bool bStreetLight = bWeatherCollection
+			&& CreateOrRebuildMaterial(StreetLightMaterialPackagePath, StreetLightMaterialAssetName, &BuildStreetLightGraph);
+		const bool bStreetLamp = bWeatherCollection
+			&& CreateOrRebuildMaterial(StreetLampMaterialPackagePath, StreetLampMaterialAssetName, &BuildStreetLampGraph);
 
-		if (bTerrain && bRoad && bWater && bPrecipitation && bLightning && bClouds && bVegetation && bBuildings && bNightSky)
+		if (bTerrain && bRoad && bWater && bPrecipitation && bLightning && bClouds && bVegetation && bBuildings && bNightSky
+			&& bStreetLight && bStreetLamp)
 		{
 			Report(TEXT("Materiali pronti. Riavvia il Play (o rilancia geo.Roads.Demo / geo.Water.Demo)."));
 		}
@@ -2123,6 +2357,11 @@ static FAutoConsoleCommand GeoImageryCreateMaterialCommand(
 		if (!bNightSky)
 		{
 			Report(TEXT("M_GeoNightSky non fatto: di notte niente stelle ne' luna. Output Log (LogGeoWorld) e docs/cielo-verifica.md"),
+				FColor::Red);
+		}
+		if (!bStreetLight || !bStreetLamp)
+		{
+			Report(TEXT("M_GeoStreetLight o M_GeoStreetLamp non fatti: di notte niente punti luce (o pali grigi). Output Log (LogGeoWorld) e docs/lampioni-verifica.md"),
 				FColor::Red);
 		}
 		if (!bBuildings)

@@ -60,6 +60,13 @@ namespace GeoWorld::Tiles
 	/** Il tag dei marciapiedi c'era (anche "no"): senza, decide il default per classe. */
 	inline constexpr uint8_t RoadFlagSidewalkKnown = 1 << 6;
 
+	// L'illuminazione di una linea (un byte, quello che era riservato nel
+	// record). Stessi valori di roadclasses.py (LIT_*), dal tag `lit` di OSM.
+	// Le tile di prima hanno zero: "non si sa", e decide Roads/StreetLights.h.
+	inline constexpr uint8_t RoadLitUnknown = 0;
+	inline constexpr uint8_t RoadLitYes = 1;
+	inline constexpr uint8_t RoadLitNo = 2;
+
 	/** Il nome della pipeline (roadclasses.py), per i messaggi e i controlli. */
 	inline const char* RoadClassName(ERoadClass Class)
 	{

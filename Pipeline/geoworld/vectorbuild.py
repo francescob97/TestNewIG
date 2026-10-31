@@ -114,8 +114,8 @@ def extract_blocks(inputs: list[str], blocks_dir: str, block_level: int,
             extent[2] = max(extent[2], east)
             extent[3] = max(extent[3], north)
 
-            record = BLOCK_RECORD.pack(classified.class_id, classified.flags, classified.layer, 0,
-                                       classified.width_dm, len(points))
+            record = BLOCK_RECORD.pack(classified.class_id, classified.flags, classified.layer,
+                                       classified.lit, classified.width_dm, len(points))
             coords = np.round(points * COORD_SCALE).astype("<i4").tobytes()
 
             x0 = max(0, int((west - margin + 180.0) / span))
@@ -147,19 +147,19 @@ def extract_blocks(inputs: list[str], blocks_dir: str, block_level: int,
     }
 
 
-def read_block(path: str) -> list[tuple[int, int, int, int, np.ndarray]]:
-    """Le linee di un blocco: (classe, flag, layer, larghezza dm, punti lon/lat)."""
+def read_block(path: str) -> list[tuple[int, int, int, int, np.ndarray, int]]:
+    """Le linee di un blocco: (classe, flag, layer, larghezza dm, punti lon/lat, illuminazione)."""
     with open(path, "rb") as handle:
         blob = handle.read()
     lines = []
     offset = 0
     while offset < len(blob):
-        class_id, flags, layer, _pad, width_dm, count = BLOCK_RECORD.unpack_from(blob, offset)
+        class_id, flags, layer, lit, width_dm, count = BLOCK_RECORD.unpack_from(blob, offset)
         offset += BLOCK_RECORD.size
         coords = np.frombuffer(blob, dtype="<i4", count=count * 2, offset=offset)
         offset += count * 8
         lines.append((class_id, flags, layer, width_dm,
-                      coords.reshape(-1, 2).astype(np.float64) / COORD_SCALE))
+                      coords.reshape(-1, 2).astype(np.float64) / COORD_SCALE, lit))
     return lines
 
 
@@ -278,14 +278,14 @@ def cut_block(task: tuple) -> dict:
                     f"POLYGON(({bw} {bs},{be} {bs},{be} {bn},{bw} {bn},{bw} {bs}))")
                 features = []
                 for index in indices:
-                    class_id, flags, layer, width_dm, points = lines[index]
+                    class_id, flags, layer, width_dm, points, lit = lines[index]
                     inside = (west[index] >= bw and east[index] <= be
                               and south[index] >= bs and north[index] <= bn)
                     for part in _clip_and_simplify(points, rect, inside, tolerance):
                         local = quantize(level, tx, ty, part)
                         if local is not None:
                             features.append(vectorformat.Feature(class_id, flags, layer,
-                                                                 width_dm, local))
+                                                                 width_dm, local, lit))
                 if not features:
                     continue
 

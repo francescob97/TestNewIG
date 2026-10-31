@@ -147,8 +147,12 @@ compaiono: è il LOD del terreno applicato alle linee.
 ### 4.2 Il formato `.gvt`
 
 Header di 32 byte (`"GWVT"`, livello, x, y, extent, buffer, conteggi), un
-record di 12 byte per linea (classe, flag, layer, larghezza in decimetri,
-numero di punti), poi i punti in **int16 locali alla tile**.
+record di 12 byte per linea (classe, flag, layer, illuminazione, larghezza
+in decimetri, numero di punti), poi i punti in **int16 locali alla tile**.
+
+L'**illuminazione** (il tag `lit` di OSM: 0 non si sa, 1 lampioni, 2 buio) è
+arrivata con i lampioni, nel byte che era riservato e sempre zero: le tile di
+prima si leggono uguali, con "non si sa" (`docs/lampioni-design.md`).
 
 - **Extent 16384**: una tile del 13 ha un passo di ~15 cm, sotto la precisione
   di OSM. Potenza di due: il pezzo di tile che serve a una tile di terreno più

@@ -23,8 +23,12 @@ Header di 32 byte, poi un record di 12 byte per linea, poi tutti i punti.
 
     header   "GWVT", versione, flag, livello, x, y, extent, buffer,
              numero di linee, numero di punti
-    linea    classe (u8), flag (u8), layer (i8), riservato (u8),
-             larghezza in decimetri (u16), riservato (u16), numero di punti (u32)
+    linea    classe (u8), flag (u8), layer (i8), illuminazione (u8: 0 non si
+             sa, 1 lampioni, 2 buio; roadclasses.LIT_*), larghezza in
+             decimetri (u16), riservato (u16), numero di punti (u32)
+
+L'illuminazione e' arrivata dopo, nel byte che era riservato e sempre zero:
+le tile vecchie si leggono uguali, con "non si sa".
     punti    (x, y) in int16, per tutte le linee una dopo l'altra
 
 Le coordinate sono LOCALI alla tile: x = 0 sul bordo ovest, x = extent sul
@@ -84,6 +88,8 @@ class Feature:
     width_dm: int
     #: (N, 2) int16, coordinate locali della tile.
     points: np.ndarray
+    #: roadclasses.LIT_*: 0 non si sa, 1 lampioni, 2 buio.
+    lit: int = 0
 
 
 @dataclass
@@ -116,7 +122,7 @@ def encode_tile(level: int, x: int, y: int, features: list[Feature]) -> bytes:
             raise ValueError(f"linea con forma {coords.shape}: servono almeno due punti (N, 2)")
         if coords.min() < INT16_MIN or coords.max() > INT16_MAX:
             raise ValueError("coordinate fuori dall'int16: la linea non e' stata ritagliata")
-        records += FEATURE.pack(feature.class_id, feature.flags, feature.layer, 0,
+        records += FEATURE.pack(feature.class_id, feature.flags, feature.layer, feature.lit,
                                 feature.width_dm, 0, len(coords))
         points.append(coords.astype("<i2", copy=False).tobytes())
         total += len(coords)
@@ -146,12 +152,12 @@ def decode_tile(blob: bytes) -> VectorTile:
                            offset=HEADER.size + feature_count * FEATURE.size).reshape(-1, 2)
     cursor = 0
     for index in range(feature_count):
-        class_id, flags, layer, _r0, width_dm, _r1, count = FEATURE.unpack_from(
+        class_id, flags, layer, lit, width_dm, _reserved, count = FEATURE.unpack_from(
             blob, HEADER.size + index * FEATURE.size)
         if cursor + count > point_count:
             raise ValueError(f"la linea {index} dichiara piu' punti di quelli presenti")
         tile.features.append(Feature(class_id, flags, layer, width_dm,
-                                     coords[cursor:cursor + count]))
+                                     coords[cursor:cursor + count], lit))
         cursor += count
     if cursor != point_count:
         raise ValueError(f"le linee usano {cursor} punti, l'header ne dichiara {point_count}")

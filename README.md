@@ -85,7 +85,15 @@ Il progetto `TestNewIG` e' un guscio vuoto: tutto il codice vive in
       il suo profilo e la corrente di ritorno in quota, spente dal vento forte
       e dalle nuvole *(`docs/vento-design.md` 2.6, prova:
       `docs/vento-verifica.md` 5b, per chi impara: `docs/manuale/14-vento.md` 14.6)*
-- [ ] Fase 12, il resto — le luci delle strade, le stelle vere da un catalogo
+- [x] **Fase 12, terzo pezzo: i lampioni** — lungo le strade che ci sono gia':
+      il tag `lit` di OSM se c'e', se no la classe e quanto e' abitato attorno
+      (la rete di strade di casa); a passo fisso, sul marciapiede, mai su
+      un'altra carreggiata; accesi da una fotocellula per circuito dopo il
+      tramonto (prima con il cielo coperto), il flusso ridotto nel cuore della
+      notte; sodio o LED per comune. A schermo i punti luce fino a 8 km, i pali
+      fino a 700 m, 48 luci vere sui piu' vicini *(`docs/lampioni-design.md`,
+      prova: `docs/lampioni-verifica.md`, per chi impara: `docs/manuale/19-lampioni.md`)*
+- [ ] Fase 12, il resto — le stelle vere da un catalogo
       *(il perché di quest'ordine: `docs/fase8-design.md`, sezione 0)*
 
 ## Formato dei dati
@@ -127,7 +135,7 @@ cmake --build build
 ./build/geoquadtree_tests    # 86 test  -- LOD, culling, orizzonte, residenza
 ./build/geomesh_tests        # 41 test  -- mesh, gonne, giunzioni, passo, geomorphing
 ./build/geoimagery_tests     # 52 test  -- drappeggio, formato immagine, mipmap
-./build/georoads_tests       # 80 test  -- strade: formato .gvt, larghezze misurate, ritagli, strade 3D, marciapiedi e incroci
+./build/georoads_tests       # 135 test -- strade: formato .gvt, larghezze misurate, ritagli, strade 3D, marciapiedi e incroci, lampioni
 ./build/geowater_tests Plugins/GeoWorld/Source/GeoTiles/TestData/water_fixture.gwa
                              # 71 test  -- acqua: formato .gwa, scavo, mesh, onde dal vento, texture, il Po vero, mare aperto
 ./build/geoweather_tests     # 109 test -- vento (strato limite, rugosita', rilievi, raffiche, brezze), precipitazione (quota neve, rovesci, visibilita', suolo, particelle), fulmini e tuono, nuvole e suolo (gli shader compilati come C++), ghiaccio, grandine posata
@@ -149,7 +157,7 @@ le classi di errore di compilazione gia' incontrate su Windows -- shadowing,
 simboli non esportati fra moduli, tipi di comando console inesistenti,
 collisioni da build unity, metodi inesistenti chiamati sulle nostre classi.
 
-605 test C++ in totale, piu' 229 test Python della pipeline.
+660 test C++ in totale, piu' 232 test Python della pipeline.
 
 **Dopo la prima prova su Torino** (materiale, scene Sentinel, prestazioni): `docs/prova-torino.md`.
 **Dopo la seconda** (troppi triangoli, RAM): `docs/prova-torino-2.md`.
@@ -193,7 +201,7 @@ costruisci-edifici                             :: chiede terreno ed estratto OSM
 geoworld build-buildings --osm dati/osm/nord-ovest-latest.osm.pbf --terrain dataset/terreno -o dataset/edifici
 geoworld verify-buildings -o dataset/edifici
 
-geoworld test                                      :: 229 test, sorgente sintetico
+geoworld test                                      :: 232 test, sorgente sintetico
 ```
 
 Installazione, opzioni e conda a mano (se lo preferisci): `Pipeline/README.md`.

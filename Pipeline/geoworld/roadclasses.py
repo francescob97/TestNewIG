@@ -39,7 +39,7 @@ from dataclasses import dataclass
 
 #: Versione della classificazione. Entra nell'impronta della pipeline: se
 #: cambia, le tile si rifanno invece di mescolare classificazioni diverse.
-CLASSIFICATION_VERSION = 2   # 2: i marciapiedi (FLAG_SIDEWALK_*)
+CLASSIFICATION_VERSION = 3   # 2: i marciapiedi (FLAG_SIDEWALK_*); 3: l'illuminazione (LIT_*)
 
 
 @dataclass(frozen=True)
@@ -95,6 +95,27 @@ FLAG_SIDEWALK_LEFT = 1 << 4
 FLAG_SIDEWALK_RIGHT = 1 << 5
 FLAG_SIDEWALK_KNOWN = 1 << 6
 
+# --- Illuminazione (un byte per linea; stessi valori in VectorClasses.h) ---
+# Dal tag `lit` di OSM. Il runtime mette i lampioni dove dice "si'", mai dove
+# dice "no", e dove il tag manca (quasi sempre) decide lui: dalla classe e da
+# quanto e' fitta la rete di strade attorno (C++: Roads/StreetLights.h).
+LIT_UNKNOWN = 0
+LIT_YES = 1
+LIT_NO = 2
+
+#: "lit" che vogliono dire buio. Tutto il resto e' luce: oltre a "yes" OSM
+#: usa orari ("sunset-sunrise", "24/7", "18:00-01:00"), "automatic" (con il
+#: sensore), "limited", "interval": i lampioni ci sono.
+_LIT_DARK = {"no", "disused", "none", "0", "false"}
+
+
+def lit_state(tags: dict[str, str]) -> int:
+    """LIT_YES, LIT_NO o LIT_UNKNOWN dal tag `lit` di OSM."""
+    value = (tags.get("lit") or "").strip().lower()
+    if not value:
+        return LIT_UNKNOWN
+    return LIT_NO if value in _LIT_DARK else LIT_YES
+
 # --- Da tag OSM a classe --------------------------------------------------
 
 _HIGHWAY = {
@@ -147,6 +168,8 @@ class Classified:
     flags: int
     layer: int
     width_m: float
+    #: LIT_UNKNOWN, LIT_YES o LIT_NO: i lampioni (sta nel byte riservato del record).
+    lit: int = LIT_UNKNOWN
 
     @property
     def width_dm(self) -> int:
@@ -310,7 +333,8 @@ def classify(tags: dict[str, str]) -> Classified | None:
         width = default_width if default_width is not None else road_class.default_width_m
     width = max(MIN_WIDTH_M, min(MAX_WIDTH_M, width))
 
-    return Classified(road_class.id, flags, parse_layer(tags.get("layer")), width)
+    return Classified(road_class.id, flags, parse_layer(tags.get("layer")), width,
+                      lit_state(tags) if road_class.kind == "strada" else LIT_UNKNOWN)
 
 
 def draw_order_key(class_id: int, flags: int, layer: int) -> tuple[int, int, int]:

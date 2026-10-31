@@ -91,7 +91,10 @@ usa la tile vettoriale **più profonda che non superi il suo livello**.
 
 ### Il formato
 
-Un header di 32 byte, un record di 12 byte per linea, i punti in `int16`.
+Un header di 32 byte, un record di 12 byte per linea (classe, flag, layer,
+illuminazione, larghezza), i punti in `int16`. L'illuminazione è il tag `lit`
+di OSM, per i lampioni (capitolo 19): sta in un byte che prima era riservato,
+e le tile vecchie la leggono come "non si sa".
 Coordinate **locali alla tile**, da 0 a 16384, con il nord in alto; le linee
 possono uscire dalla tile di un ottavo del lato (il **buffer**), perché una
 strada larga che corre lungo il bordo deve comparire anche nella tile accanto.

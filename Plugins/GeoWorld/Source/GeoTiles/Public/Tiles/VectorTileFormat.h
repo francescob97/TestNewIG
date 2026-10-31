@@ -6,8 +6,9 @@
 //
 //      header   32 byte: "GWVT", versione, flag, livello, x, y, extent, buffer,
 //               numero di linee, numero di punti
-//      linee    12 byte ciascuna: classe, flag, layer, riservato, larghezza in
-//               decimetri, riservato, numero di punti
+//      linee    12 byte ciascuna: classe, flag, layer, illuminazione (il tag
+//               `lit`: RoadLit*), larghezza in decimetri, riservato, numero di
+//               punti
 //      punti    (x, y) int16, di tutte le linee una dopo l'altra
 //
 //  Coordinate LOCALI: x = 0 sul bordo ovest e x = Extent sul bordo est; y = 0
@@ -51,6 +52,8 @@ namespace GeoWorld::Tiles
 		ERoadClass Class = ERoadClass::Unknown;
 		uint8_t Flags = 0;
 		int8_t Layer = 0;
+		/** RoadLitUnknown, RoadLitYes, RoadLitNo (VectorClasses.h): i lampioni secondo OSM. */
+		uint8_t Lit = RoadLitUnknown;
 		uint16_t WidthDecimetres = 0;
 
 		/** Indice del primo punto in FVectorTile::Points. */
@@ -199,7 +202,8 @@ namespace GeoWorld::Tiles
 			Feature.Class = static_cast<ERoadClass>(Record[0]);
 			Feature.Flags = Record[1];
 			Feature.Layer = static_cast<int8_t>(Record[2]);
-			// Record[3]: riservato.
+			// Record[3]: l'illuminazione (era riservato: le tile vecchie hanno 0, "non si sa").
+			Feature.Lit = Record[3] <= RoadLitNo ? Record[3] : RoadLitUnknown;
 			Feature.WidthDecimetres = Detail::ReadVectorU16(Record + 4);
 			// Record + 6: due byte riservati.
 			Feature.PointCount = Detail::ReadVectorU32(Record + 8);

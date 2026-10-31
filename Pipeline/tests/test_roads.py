@@ -111,6 +111,17 @@ class Classification(unittest.TestCase):
         # Binari e piste non hanno marciapiedi, qualunque cosa dicano i tag.
         self.assertEqual(self.classify(railway="rail", sidewalk="both").flags & mask, 0)
 
+    def test_lit(self):
+        self.assertEqual(self.classify(highway="residential").lit, roadclasses.LIT_UNKNOWN)
+        self.assertEqual(self.classify(highway="residential", lit="yes").lit, roadclasses.LIT_YES)
+        self.assertEqual(self.classify(highway="primary", lit="no").lit, roadclasses.LIT_NO)
+        self.assertEqual(self.classify(highway="footway", lit="disused").lit, roadclasses.LIT_NO)
+        # Gli orari e il sensore vogliono dire che i lampioni ci sono.
+        for value in ("sunset-sunrise", "24/7", "automatic", "18:00-01:00", "limited"):
+            self.assertEqual(self.classify(highway="tertiary", lit=value).lit, roadclasses.LIT_YES, value)
+        # Ferrovie e piste: niente lampioni stradali, qualunque cosa dica il tag.
+        self.assertEqual(self.classify(railway="rail", lit="yes").lit, roadclasses.LIT_UNKNOWN)
+
     def test_railways(self):
         self.assertEqual(self.classify(railway="rail").class_id, roadclasses.BY_NAME["rail"].id)
         self.assertEqual(self.classify(railway="rail", service="yard").class_id,
@@ -172,6 +183,13 @@ class ContractWithCpp(unittest.TestCase):
             self.assertIsNotNone(match, name)
             self.assertEqual(1 << int(match.group(1)), value, name)
 
+    def test_lit_values_match(self):
+        for name, value in (("Unknown", roadclasses.LIT_UNKNOWN), ("Yes", roadclasses.LIT_YES),
+                            ("No", roadclasses.LIT_NO)):
+            match = re.search(rf"RoadLit{name}\s*=\s*(\d+);", self.header)
+            self.assertIsNotNone(match, name)
+            self.assertEqual(int(match.group(1)), value, name)
+
     def test_fixture_is_up_to_date(self):
         # Il test C++ (georoads_tests) legge questo file. Se il formato cambia
         # qui, il file va rigenerato, altrimenti il C++ proverebbe il vecchio.
@@ -192,6 +210,17 @@ class Format(unittest.TestCase):
             self.assertEqual((original.class_id, original.flags, original.layer, original.width_dm),
                              (decoded.class_id, decoded.flags, decoded.layer, decoded.width_dm))
             np.testing.assert_array_equal(original.points, decoded.points)
+
+    def test_lit_round_trip(self):
+        features = vectorformat.fixture_features()
+        features[0].lit = roadclasses.LIT_YES
+        features[1].lit = roadclasses.LIT_NO
+        tile = vectorformat.decode_tile(vectorformat.encode_tile(13, 8538, 2044, features))
+        self.assertEqual([f.lit for f in tile.features],
+                         [roadclasses.LIT_YES, roadclasses.LIT_NO, roadclasses.LIT_UNKNOWN])
+        # Nel byte che era riservato: la tile di prima (tutti zero) si legge uguale.
+        self.assertEqual(vectorformat.decode_tile(vectorformat.fixture_bytes()).features[0].lit,
+                         roadclasses.LIT_UNKNOWN)
 
     def test_header_sizes(self):
         self.assertEqual(vectorformat.HEADER.size, 32)
@@ -258,7 +287,7 @@ def write_synthetic_osm(path: str) -> None:
 
     way(100, [(7.50 + 0.01 * i, 45.0700 + 0.0005 * (i % 2)) for i in range(21)],
         highway="motorway", lanes="2", ref="A55")
-    way(101, [(7.6810, 45.0710), (7.6830, 45.0712), (7.6850, 45.0720)], highway="residential")
+    way(101, [(7.6810, 45.0710), (7.6830, 45.0712), (7.6850, 45.0720)], highway="residential", lit="yes")
     way(102, [(7.60, 45.05), (7.70, 45.09)], railway="rail", bridge="yes", layer="1")
     way(103, [(7.65, 45.06), (7.66, 45.06)], highway="primary", tunnel="yes")
     way(104, [(7.55, 45.10), (7.75, 45.10)], power="line")
@@ -337,6 +366,8 @@ class BuildOnSyntheticOsm(unittest.TestCase):
         tile = vectorformat.read_tile(os.path.join(self.output, vectorformat.tile_relative_path(level, x, y)))
         residential = [f for f in tile.features if f.class_id == roadclasses.BY_NAME["residential"].id]
         self.assertEqual(len(residential), 1)
+        # Il tag lit arriva fino alla tile (dalla colonna other_tags di GDAL).
+        self.assertEqual(residential[0].lit, roadclasses.LIT_YES)
         lon, lat = vectorformat.local_to_lonlat(level, x, y, residential[0].points[0, 0],
                                                 residential[0].points[0, 1])
         # Un passo di quantizzazione al livello 13 e' ~15 cm: 1e-5 gradi sono ~1 m.
