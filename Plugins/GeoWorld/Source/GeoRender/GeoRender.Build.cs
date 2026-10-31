@@ -17,6 +17,10 @@ public class GeoRender : ModuleRules
 			// Terrain/GeoTerrainMeshProvider.h esiste per poterlo sostituire
 			// con un FPrimitiveSceneProxy custom senza toccare il resto.
 			"GeometryFramework", "GeometryCore",
+
+			// La libreria dei modelli degli alberi sta in Project Settings:
+			// UDeveloperSettings vive in questo modulo.
+			"DeveloperSettings",
 		});
 
 		// La grandine al suolo aggiorna una texture sul posto

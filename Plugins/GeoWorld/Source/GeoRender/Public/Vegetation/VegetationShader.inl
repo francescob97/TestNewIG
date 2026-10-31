@@ -22,7 +22,11 @@
 //    UuPerMetre. Uscita: lo spostamento in cm, negli assi del mondo.
 //    L'albero si piega sottovento tanto piu' quanto piu' e' in alto (la
 //    base non si muove mai) e quanto piu' forte e' il vento (col quadrato),
-//    e oscilla con un suo periodo di 2-4 secondi.
+//    e oscilla con un suo periodo di 2-4 secondi. La cima non va mai piu' in
+//    la' del 15% dell'altezza (una burrasca piega, non sdraia): cosi'
+//    lo spostamento ha un massimo, 4,5 m per un albero di 30 m, che il
+//    materiale dichiara a Nanite (MaxWorldPositionOffsetDisplacement) per
+//    non tagliare via gli alberi piegati fuori dai loro bounds.
 // =============================================================================
 GEO_VEGETATION_COLOUR(
 float Foliage = Paint.x;
@@ -51,6 +55,7 @@ if (Speed > 0.01)
 float Bend = 0.00025 * Size * Speed * Speed * (1.0 + 0.6 * Wind.z);
 float Period = 2.0 + 2.0 * Phase;
 float Sway = sin(6.2831853 * (Wind.w / Period + Phase));
-float Reach = Bend * (1.0 + 0.35 * Sway) * Height * Height;
+float Top = min(Bend * (1.0 + 0.35 * Sway), 0.15 * Size);
+float Reach = Top * Height * Height;
 return float3(DownNorth * Reach * UuPerMetre, DownEast * Reach * UuPerMetre, 0.0);
 )

@@ -19,6 +19,10 @@ public class GeoWorldEditor : ModuleRules
 			// MaterialEditor porta UMaterialEditingLibrary, AssetTools la
 			// creazione dell'asset, UnrealEd il salvataggio su disco.
 			"MaterialEditor", "AssetTools", "AssetRegistry",
+
+			// geo.Vegetation.CreateModels: le forme degli alberi come static
+			// mesh Nanite (FMeshDescription, attributi delle static mesh).
+			"MeshDescription", "StaticMeshDescription",
 		});
 	}
 }

@@ -4,7 +4,7 @@
 > Non modificarlo a mano: i controlli statici (`CheckSourceDiscipline.sh`, regola 7)
 > dicono quando e' indietro. In Unreal lo stesso elenco lo da' `geo.Help`.
 
-**114 comandi** in 10 gruppi.
+**116 comandi** in 10 gruppi.
 
 ## Come si usano
 
@@ -49,7 +49,7 @@
 - [L'acqua](#lacqua) — `geo.Water.*`, 5 comandi
 - [Il meteo](#il-meteo) — `geo.Weather.*`, 24 comandi
 - [La camera di volo](#la-camera-di-volo) — `geo.Fly.*`, 2 comandi
-- [Vegetation](#vegetation) — `geo.Vegetation.*`, 10 comandi
+- [Vegetation](#vegetation) — `geo.Vegetation.*`, 12 comandi
 
 ## Generale
 
@@ -227,11 +227,13 @@ Solo in Play: velocita' proporzionale alla quota.
 | `geo.Vegetation.Enable <0\|1>` | accende e spegne gli alberi (il dataset resta aperto). |
 | `geo.Vegetation.Density <0..4>` | quanti alberi rispetto alla natura (1 = come la copertura del suolo; 0,5 = la meta'). Default 1. |
 | `geo.Vegetation.Radius <m>` | fin dove ci sono alberi (default 2500). Le bande vicina e media si allargano insieme. |
-| `geo.Vegetation.Shadows <0\|1>` | gli alberi vicini fanno ombra (default 1; quelli lontani mai). |
+| `geo.Vegetation.Shadows <0\|1\|2>` | chi fa ombra: 0 nessuno, 1 gli alberi vicini (default), 2 tutti (con i modelli Nanite e le Virtual Shadow Maps). |
+| `geo.Vegetation.ReloadModels` | rilegge la libreria dei modelli (Project Settings &gt; Plugins &gt; GeoWorld - Vegetazione) e rifa' gli alberi: dopo geo.Vegetation.CreateModels o dopo aver cambiato un modello. |
 | `geo.Vegetation.FlipWinding <0\|1>` | inverte le facce degli alberi: se li vedi "dal di dentro" (la chioma sparisce dal lato verso di te). |
 | `geo.Vegetation.Debug <0\|1>` | overlay della vegetazione: celle per banda (contorni colorati), alberi per specie, attese. |
 | `geo.Vegetation.Stats` | Statistiche della vegetazione. |
 | `geo.Vegetation.Demo <terreno> <ortofoto\|-> <vegetazione> [acqua\|-]` | apre tutto, accende e si mette 250 m sopra il centro della vegetazione. |
+| `geo.Vegetation.CreateModels [1]` | salva in /GeoWorld/Vegetation le otto forme degli alberi come static mesh Nanite, la libreria di default. Con 1: facce invertite (se servi geo.Vegetation.FlipWinding 1). Prima: geo.Imagery.CreateMaterial. *(solo nell'editor)* |
 
 ## Comandi del motore utili
 
@@ -252,6 +254,7 @@ Non sono di GeoWorld, ma la documentazione li usa spesso.
 | File | Comandi |
 |---|---|
 | `Plugins/GeoWorld/Source/GeoCore/Private/GeoCoreModule.cpp` | 10 |
-| `Plugins/GeoWorld/Source/GeoRender/Private/GeoRenderModule.cpp` | 93 |
+| `Plugins/GeoWorld/Source/GeoRender/Private/GeoRenderModule.cpp` | 94 |
 | `Plugins/GeoWorld/Source/GeoTiles/Private/GeoTilesModule.cpp` | 10 |
 | `Plugins/GeoWorld/Source/GeoWorldEditor/Private/GeoTerrainMaterialFactory.cpp` | 1 |
+| `Plugins/GeoWorld/Source/GeoWorldEditor/Private/GeoVegetationModelFactory.cpp` | 1 |

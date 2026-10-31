@@ -163,6 +163,8 @@ quota minima e massima (quote) o copertura (immagini). (3)
 
 **Latitudine parametrica** — tan β = (b/a)·tan φ. È la latitudine di un punto dell'ellissoide nello spazio scalato, dove l'ellissoide diventa una sfera. (11)
 
+**Libreria dei modelli** — le otto caselle di Project Settings → Plugins → GeoWorld - Vegetazione (`UGeoVegetationSettings`): quale static mesh usare per ogni specie e variante. Di default i modelli Nanite di `geo.Vegetation.CreateModels`. (16)
+
 **Limite del bosco** — la quota oltre la quale non crescono alberi (2.100 m s.l.m.): sopra solo arbusti, sopra i 2.700 m niente. Vicino al limite tutto si fa più piccolo. (16)
 
 **LOD** (*Level Of Detail*) — usare versioni più semplici di ciò che è lontano. (5)
@@ -197,6 +199,8 @@ modificabili a runtime. (1, 7)
 
 **MPSC** (*multiple producers, single consumer*) — una coda in cui molti thread
 aggiungono e uno solo toglie. (4)
+
+**Nanite** — il sistema di Unreal 5 per la geometria densa: la mesh è divisa in gruppi di ~128 triangoli in una gerarchia, e la GPU sceglie a ogni frame il dettaglio di ogni gruppo. Niente LOD a mano; i dati si costruiscono solo nell'editor. I modelli degli alberi sono Nanite, il terreno no (nasce a runtime). (16)
 
 **NEU** (*North-East-Up*) — l'ordine degli assi scelto per il progetto: Nord → X,
 Est → Y, Alto → Z. (2)
@@ -326,6 +330,8 @@ pixel. Il runtime le disegna alla risoluzione che serve. Livelli 10..13. (12)
 
 **UBT / UHT** — Unreal Build Tool e Unreal Header Tool: compilano e generano codice. (1)
 
+**UDeveloperSettings** — la classe delle impostazioni che compaiono da sole in Project Settings, salvate in un file `.ini` del progetto. (16)
+
 **ULP** (*unit in the last place*) — il passo fra due numeri `float` consecutivi.
 A 6.371 km è 64 cm, a 10 km è 0,6 mm. (2)
 
@@ -451,6 +457,7 @@ il primo comando da provare quando non si vede niente. (6)
 | `Public/Weather/GroundHail.h`, `GroundShader.inl`, `GeoHailMap.h` | la grandine posata (puro), il meteo sul suolo nel materiale (HLSL e C++ insieme), la griglia in Unreal |
 | `Public/Vegetation/TreePlacement.h`, `TreeMesh.h`, `VegetationCells.h` | la vegetazione (puro): chi cresce dove, le forme, celle e bande |
 | `Public/Vegetation/VegetationShader.inl`, `GeoVegetationSubsystem.h` | il materiale degli alberi (HLSL e C++), il subsystem in Unreal |
+| `Public/Vegetation/GeoVegetationSettings.h`, `GeoTreeModels.h` | la libreria dei modelli (Project Settings), le forme come mesh di Unreal |
 | `Public/GeoPositionHudSubsystem.h` | le stampe della posizione |
 | `Private/GeoRenderModule.cpp` | comandi `geo.Lod.*`, `geo.Terrain.*`, `geo.Imagery.*`, `geo.Roads.*`, `geo.Water.*`, `geo.Weather.*`, `geo.Hud`, `geo.Fly*` |
 | `Private/**/*.cpp` | le implementazioni |
@@ -461,6 +468,7 @@ il primo comando da provare quando non si vede niente. (6)
 |---|---|
 | `GeoWorldEditor.Build.cs` | `MaterialEditor`, `AssetTools` |
 | `Private/GeoWorldEditorModule.cpp` | il modulo |
+| `Private/GeoVegetationModelFactory.cpp` | `geo.Vegetation.CreateModels`: i modelli Nanite degli alberi |
 | `Private/GeoTerrainMaterialFactory.cpp` | `geo.Imagery.CreateMaterial`: `M_GeoTerrain`, `M_GeoRoad`, `M_GeoWater`, `MPC_GeoWater`, `MPC_GeoWeather`, `M_GeoPrecipitation`, `M_GeoLightning`, `M_GeoClouds`, `M_GeoVegetation` |
 
 ### Strumenti

@@ -108,9 +108,21 @@ public:
 	void SetRadiusM(double InRadiusM);
 	const GeoWorld::Vegetation::FBandSettings& GetBands() const { return Bands; }
 
-	/** Gli alberi della banda vicina fanno ombra (gli altri mai: costerebbe troppo). */
-	void SetShadows(bool bInShadows);
-	bool AreShadowsEnabled() const { return bShadows; }
+	/**
+	 * Chi fa ombra: 0 nessuno, 1 gli alberi della banda vicina (default), 2
+	 * tutti. Il 2 ha senso con i modelli Nanite e le Virtual Shadow Maps, che
+	 * reggono tante ombre; con le forme fatte dal codice costa molto.
+	 */
+	void SetShadowMode(int32 InMode);
+	int32 GetShadowMode() const { return ShadowMode; }
+
+	/**
+	 * Rilegge la libreria dei modelli (Project Settings) e rifa' i componenti:
+	 * dopo geo.Vegetation.CreateModels, o dopo aver cambiato un modello.
+	 */
+	void ReloadModels();
+	/** "8 modelli dalla libreria (8 Nanite), 0 forme fatte dal codice". */
+	FString GetModelsDescription() const;
 
 	/**
 	 * Inverte l'ordine dei vertici delle forme. Come geo.Terrain.FlipWinding:
@@ -184,6 +196,9 @@ private:
 	void DestroyComponents(FCell& Cell);
 	void RemoveAllCells();
 	bool EnsureShapes();
+	/** La mesh e' una delle forme che usano M_GeoVegetation (non un modello con il suo materiale)? */
+	bool UsesVegetationMaterial(const UStaticMesh* Mesh) const;
+	bool CastsShadow(int32 Band) const;
 	void EnsureContainer();
 	void UpdateShadows();
 	/** Rilegge M_GeoVegetation se mancava (dopo geo.Imagery.CreateMaterial). */
@@ -201,6 +216,21 @@ private:
 	TWeakObjectPtr<AActor> Container;
 	/** Le otto forme: [specie * VariantCount + variante]. */
 	TStrongObjectPtr<UStaticMesh> Shapes[GeoWorld::Vegetation::ShapeCount];
+
+	/** Come adattare una forma alla larghezza e all'altezza di un albero. */
+	struct FShapeFit
+	{
+		/** 1 / larghezza, 1 / larghezza, 1 / altezza del modello (1 per le forme del codice). */
+		FVector InverseSize = FVector::OneVector;
+		/** Porta la base del modello, al centro, nell'origine. */
+		FVector Offset = FVector::ZeroVector;
+		/** Viene dalla libreria (Project Settings), non dal codice. */
+		bool bAsset = false;
+		bool bNanite = false;
+		/** Tiene il suo materiale (un modello proprio). */
+		bool bOwnMaterial = false;
+	};
+	FShapeFit Fits[GeoWorld::Vegetation::ShapeCount];
 	TStrongObjectPtr<UMaterialInterface> Material;
 	TStrongObjectPtr<UMaterialParameterCollection> WeatherCollection;
 	bool bMaterialIsFallback = false;
@@ -219,7 +249,7 @@ private:
 	GeoWorld::Vegetation::FPlacementSettings Placement;
 	GeoWorld::Vegetation::FBandSettings Bands;
 	bool bEnabled = true;
-	bool bShadows = true;
+	int32 ShadowMode = 1;
 	bool bFlipWinding = false;
 	bool bShowDebugOverlay = false;
 

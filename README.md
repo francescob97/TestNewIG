@@ -53,16 +53,19 @@ Il progetto `TestNewIG` e' un guscio vuoto: tutto il codice vive in
       strisce sotto i temporali
       *(`docs/meteo-design.md`, prova:
       `docs/meteo-verifica.md`, per chi impara: `docs/manuale/15-meteo.md`)*
-- [ ] Fase 10 — edifici e monumenti
+- [ ] Fase 10 — edifici e monumenti **(il prossimo: case dalle sagome, modelli
+      Nanite piazzati dai tile come gli alberi)**
 - [x] **Fase 11, primo pezzo: le piante** — alberi e arbusti dove dice ESA
       WorldCover (10 m, letto dalla rete solo per la tua area), latifoglie,
       conifere, pini domestici e arbusti scelti dalla quota, fino al limite del
-      bosco; forme fatte da codice, istanziate in celle attorno alla camera,
+      bosco; modelli **Nanite** da una libreria in Project Settings (di default
+      cotti da `geo.Vegetation.CreateModels`, o modelli tuoi), istanziati in celle attorno alla camera,
       appoggiate sul terreno disegnato; piu' rade da lontano, mosse dal vento,
       imbiancate dalla neve *(`docs/vegetazione-design.md`, prova:
       `docs/vegetazione-verifica.md`, per chi impara:
       `docs/manuale/16-vegetazione.md`)*. Gli animali verranno dopo.
-- [ ] Fase 12 — atmosfera, cielo, nuvole e luce
+- [ ] Fase 12 — atmosfera, cielo, nuvole e luce **(dopo gli edifici: il ciclo
+      del giorno e della notte, per vedere le ombre)**
       *(il perché di quest'ordine: `docs/fase8-design.md`, sezione 0)*
 
 ## Formato dei dati
@@ -108,7 +111,7 @@ cmake --build build
                              # 71 test  -- acqua: formato .gwa, scavo, mesh, onde dal vento, texture, il Po vero, mare aperto
 ./build/geoweather_tests     # 97 test  -- vento (strato limite, rugosita', rilievi, raffiche), precipitazione (quota neve, rovesci, visibilita', suolo, particelle), fulmini e tuono, nuvole e suolo (gli shader compilati come C++), ghiaccio, grandine posata
 ./build/geovegetation_tests Plugins/GeoWorld/Source/GeoTiles/TestData/vegetation_fixture.gvg
-                             # 33 test  -- vegetazione: formato .gvg, griglia, chi cresce dove, forme, materiale (colore, neve, vento), celle e bande
+                             # 34 test  -- vegetazione: formato .gvg, griglia, chi cresce dove, forme (anche Nanite), materiale (colore, neve, vento), celle e bande
 
 ./Plugins/GeoWorld/Tools/CheckSourceDiscipline.sh
 python3 Plugins/GeoWorld/Tools/CheckShadowedParameters.py
@@ -122,7 +125,7 @@ le classi di errore di compilazione gia' incontrate su Windows -- shadowing,
 simboli non esportati fra moduli, tipi di comando console inesistenti,
 collisioni da build unity, metodi inesistenti chiamati sulle nostre classi.
 
-533 test C++ in totale, piu' 212 test Python della pipeline.
+534 test C++ in totale, piu' 212 test Python della pipeline.
 
 **Dopo la prima prova su Torino** (materiale, scene Sentinel, prestazioni): `docs/prova-torino.md`.
 **Dopo la seconda** (troppi triangoli, RAM): `docs/prova-torino-2.md`.

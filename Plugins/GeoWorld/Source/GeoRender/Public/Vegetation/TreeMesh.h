@@ -11,6 +11,8 @@
 //
 //  Ogni forma ha due DETTAGLI: "vicino" (100-350 triangoli) e "lontano"
 //  (20-30: un cono, una bolla), e due VARIANTI (bitorzoli e coni diversi).
+//  Un terzo dettaglio, "pieno" (Full, 500-3.500 triangoli), e' per i modelli
+//  Nanite che geo.Vegetation.CreateModels salva nell'editor.
 //  Sono tutte alte 1 e larghe 1 (x e y fra -0,5 e 0,5, z fra 0 e 1): ogni
 //  istanza le scala alla sua altezza e larghezza (TreePlacement.h).
 //
@@ -36,7 +38,8 @@
 
 namespace GeoWorld::Vegetation
 {
-	enum class ETreeDetail : uint8_t { Near = 0, Far = 1 };
+	/** Vicino e Lontano: i due LOD delle forme fatte a runtime. Full: i modelli Nanite. */
+	enum class ETreeDetail : uint8_t { Near = 0, Far = 1, Full = 2 };
 
 	struct FTreeMesh
 	{
@@ -240,17 +243,29 @@ namespace GeoWorld::Vegetation
 		}
 	}
 
-	/** La forma di una specie, a un dettaglio, in una variante (0..VariantCount-1). */
+	/**
+	 * La forma di una specie, a un dettaglio, in una variante (0..VariantCount-1).
+	 *
+	 * Full e' per i modelli NANITE (geo.Vegetation.CreateModels): Nanite
+	 * sceglie da solo quanti triangoli disegnare, quindi la forma puo' essere
+	 * fitta (1.000-3.500 triangoli) senza costare da lontano. La chioma e'
+	 * fatta di piu' ciuffi, piu' lisci; le conifere di piu' palchi.
+	 */
 	inline void BuildTreeMesh(ESpecies Species, ETreeDetail Detail, uint32_t Variant, FTreeMesh& Out)
 	{
 		using namespace TreeMeshDetail;
 		Out = FTreeMesh();
 		FBuilder Mesh(Out);
-		const bool bNear = Detail == ETreeDetail::Near;
+		const bool bFull = Detail == ETreeDetail::Full;
+		const bool bNear = Detail != ETreeDetail::Far;
 		const uint32_t Seed = 7919u * (static_cast<uint32_t>(Species) + 1u) + 104729u * Variant + (bNear ? 0u : 15485863u);
-		const int32_t Levels = bNear ? 1 : 0;
-		const double Bumps = bNear ? 0.12 : 0.06;
+		const int32_t Levels = bFull ? 2 : (bNear ? 1 : 0);
+		// Piu' la sfera e' suddivisa, piu' i bitorzoli a caso per vertice
+		// sembrano spine: con Full si abbassano.
+		const double Bumps = bFull ? 0.07 : (bNear ? 0.12 : 0.06);
+		const int32_t TrunkSides = bFull ? 10 : 6;
 		const double Turn = Random(Seed, 500) * 2.0 * 3.14159265358979323846;
+		const double Pi = 3.14159265358979323846;
 
 		switch (Species)
 		{
@@ -258,13 +273,16 @@ namespace GeoWorld::Vegetation
 		{
 			if (bNear)
 			{
-				Trunk(Mesh, 6, 0.022, 0.3);
-				for (int32_t Tier = 0; Tier < 6; ++Tier)
+				const int32_t Tiers = bFull ? 12 : 6;
+				const double Step = 0.81 / Tiers;
+				Trunk(Mesh, TrunkSides, 0.022, 0.3);
+				for (int32_t Tier = 0; Tier < Tiers; ++Tier)
 				{
-					const double Base = 0.15 + Tier * 0.135;
-					const double Apex = std::min(1.0, Base + 0.30);
-					const double Radius = 0.5 * std::pow(1.0 - Tier / 6.5, 1.05);
-					Cone(Mesh, 9, Radius / 1.12, Base, Apex, Seed + static_cast<uint32_t>(Tier) * 31u, 0.5 + 0.08 * Tier);
+					const double Base = 0.15 + Tier * Step;
+					const double Apex = std::min(1.0, Base + (bFull ? 0.22 : 0.30));
+					const double Radius = 0.5 * std::pow(1.0 - Tier / (Tiers + 0.5), 1.05);
+					Cone(Mesh, bFull ? 20 : 9, Radius / 1.12, Base, Apex, Seed + static_cast<uint32_t>(Tier) * 31u,
+						0.5 + 0.48 * Tier / Tiers);
 				}
 			}
 			else
@@ -279,13 +297,15 @@ namespace GeoWorld::Vegetation
 			const FVec Squash{ 0.30, 0.30, 0.11 };
 			if (bNear)
 			{
-				Trunk(Mesh, 6, 0.03, 0.84);
+				Trunk(Mesh, TrunkSides, 0.03, 0.84);
 				Blob(Mesh, Levels, FVec{ 0.0, 0.0, 0.84 }, Squash, Bumps, Seed, 0.72, 0.98);
-				for (int32_t Side = 0; Side < 2; ++Side)
+				const int32_t Around = bFull ? 5 : 2;
+				for (int32_t Side = 0; Side < Around; ++Side)
 				{
-					const double Angle = Turn + Side * 3.14159265358979323846;
-					const FVec Centre{ 0.16 * std::cos(Angle), 0.16 * std::sin(Angle), 0.83 + 0.02 * Side };
-					Blob(Mesh, Levels, Centre, Squash * 0.95, Bumps, Seed + 1u + static_cast<uint32_t>(Side), 0.72, 0.98);
+					const double Angle = Turn + Side * 2.0 * Pi / Around;
+					const double Reach = bFull ? 0.19 : 0.16;
+					const FVec Centre{ Reach * std::cos(Angle), Reach * std::sin(Angle), 0.83 + 0.02 * (Side % 2) };
+					Blob(Mesh, Levels, Centre, Squash * (bFull ? 0.8 : 0.95), Bumps, Seed + 1u + static_cast<uint32_t>(Side), 0.72, 0.98);
 				}
 			}
 			else
@@ -300,11 +320,13 @@ namespace GeoWorld::Vegetation
 			if (bNear)
 			{
 				Blob(Mesh, Levels, FVec{ 0.0, 0.0, 0.42 }, FVec{ 0.32, 0.32, 0.38 }, Bumps, Seed, 0.0, 0.85);
-				for (int32_t Side = 0; Side < 2; ++Side)
+				const int32_t Around = bFull ? 4 : 2;
+				for (int32_t Side = 0; Side < Around; ++Side)
 				{
-					const double Angle = Turn + Side * 2.4;
+					const double Angle = Turn + Side * (bFull ? 2.0 * Pi / Around : 2.4);
 					const FVec Centre{ 0.15 * std::cos(Angle), 0.15 * std::sin(Angle), 0.32 };
-					Blob(Mesh, Levels, Centre, FVec{ 0.26, 0.26, 0.28 }, Bumps, Seed + 1u + static_cast<uint32_t>(Side), 0.0, 0.85);
+					Blob(Mesh, Levels, Centre, FVec{ 0.26, 0.26, 0.28 } * (bFull ? 0.9 : 1.0), Bumps,
+						Seed + 1u + static_cast<uint32_t>(Side), 0.0, 0.85);
 				}
 			}
 			else
@@ -317,13 +339,25 @@ namespace GeoWorld::Vegetation
 		{
 			if (bNear)
 			{
-				Trunk(Mesh, 6, 0.04, 0.5);
+				Trunk(Mesh, TrunkSides, 0.04, 0.5);
 				Blob(Mesh, Levels, FVec{ 0.0, 0.0, 0.62 }, FVec{ 0.30, 0.30, 0.30 }, Bumps, Seed, 0.32, 0.96);
-				for (int32_t Side = 0; Side < 3; ++Side)
+				// Vicino: tre ciuffi attorno. Full: due giri, sei in basso e tre
+				// in alto, piu' piccoli: la chioma a cavolfiore delle querce.
+				const int32_t Lower = bFull ? 6 : 3;
+				const int32_t Upper = bFull ? 3 : 0;
+				for (int32_t Side = 0; Side < Lower + Upper; ++Side)
 				{
-					const double Angle = Turn + Side * 2.0 * 3.14159265358979323846 / 3.0 + 0.5 * Random(Seed, 600u + static_cast<uint32_t>(Side));
-					const FVec Centre{ 0.17 * std::cos(Angle), 0.17 * std::sin(Angle), 0.55 + 0.13 * Random(Seed, 700u + static_cast<uint32_t>(Side)) };
-					Blob(Mesh, Levels, Centre, FVec{ 0.22, 0.22, 0.20 }, Bumps, Seed + 1u + static_cast<uint32_t>(Side), 0.32, 0.96);
+					const bool bUpper = Side >= Lower;
+					const int32_t Count = bUpper ? Upper : Lower;
+					const int32_t Index = bUpper ? Side - Lower : Side;
+					const double Angle = Turn + (bUpper ? Pi / Count : 0.0) + Index * 2.0 * Pi / Count
+						+ 0.5 * Random(Seed, 600u + static_cast<uint32_t>(Side));
+					const double Reach = bUpper ? 0.11 : (bFull ? 0.20 : 0.17);
+					const double Height = bUpper ? 0.78 + 0.06 * Random(Seed, 800u + static_cast<uint32_t>(Side))
+						: 0.55 + 0.13 * Random(Seed, 700u + static_cast<uint32_t>(Side));
+					const FVec Radii = bFull ? (bUpper ? FVec{ 0.16, 0.16, 0.15 } : FVec{ 0.19, 0.19, 0.17 }) : FVec{ 0.22, 0.22, 0.20 };
+					const FVec Centre{ Reach * std::cos(Angle), Reach * std::sin(Angle), Height };
+					Blob(Mesh, Levels, Centre, Radii, Bumps, Seed + 1u + static_cast<uint32_t>(Side), 0.32, 0.96);
 				}
 			}
 			else

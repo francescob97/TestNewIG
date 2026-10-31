@@ -376,11 +376,12 @@ static void TestPlacement()
 static void TestMeshes()
 {
 	Section("5. Le forme degli alberi: dentro il cubo unitario, girate verso fuori, leggere");
-	bool bBox = true, bIndices = true, bNormals = true, bFacing = true, bFoliage = true, bBudget = true;
+	bool bBox = true, bIndices = true, bNormals = true, bFacing = true, bFoliage = true, bBudget = true, bDenser = true;
 	std::string Counts;
+	size_t NearTriangles = 0;
 	for (int32_t Species = 0; Species < SpeciesCount; ++Species)
 	{
-		for (const ETreeDetail Detail : { ETreeDetail::Near, ETreeDetail::Far })
+		for (const ETreeDetail Detail : { ETreeDetail::Near, ETreeDetail::Far, ETreeDetail::Full })
 		{
 			for (uint32_t Variant = 0; Variant < static_cast<uint32_t>(VariantCount); ++Variant)
 			{
@@ -422,8 +423,11 @@ static void TestMeshes()
 					bCrown = bCrown || (Mesh.Colours[Index * 4] == 255 && Mesh.Positions[Index * 3 + 2] > 0.7f);
 				}
 				bFoliage = bFoliage && bCrown;
-				const size_t Budget = Detail == ETreeDetail::Near ? 400 : 40;
+				const size_t Budget = Detail == ETreeDetail::Near ? 400 : (Detail == ETreeDetail::Far ? 40 : 4000);
 				bBudget = bBudget && Mesh.TriangleCount() <= Budget && Mesh.TriangleCount() >= 16;
+				// La forma Nanite e' molto piu' fitta di quella vicina (si confronta la variante 0).
+				if (Detail == ETreeDetail::Near && Variant == 0) { NearTriangles = Mesh.TriangleCount(); }
+				if (Detail == ETreeDetail::Full && Variant == 0) { bDenser = bDenser && Mesh.TriangleCount() >= 2 * NearTriangles; }
 				if (Variant == 0)
 				{
 					Counts += (Detail == ETreeDetail::Near ? std::string(Counts.empty() ? "" : ", ") + SpeciesName(static_cast<ESpecies>(Species)) + " " : std::string("/"))
@@ -434,8 +438,9 @@ static void TestMeshes()
 	}
 	Check(bBox && bIndices && bNormals, "ogni forma sta nel cubo unitario (alta 1, larga 1), indici validi, normali unitarie");
 	Check(bFacing, "i triangoli girano come il terreno: la normale geometrica (B-A)x(C-A) punta fuori, con le normali dei vertici");
-	Check(bFoliage && bBudget, "la chioma e' segnata nel colore dei vertici; vicino fino a 400 triangoli, lontano fino a 40",
-		"triangoli vicino/lontano: " + Counts);
+	Check(bFoliage && bBudget && bDenser,
+		"la chioma e' segnata nel colore dei vertici; vicino fino a 400 triangoli, lontano fino a 40, Nanite almeno il doppio del vicino (fino a 4.000)",
+		"triangoli vicino/lontano/Nanite: " + Counts);
 
 	FTreeMesh A, B, C;
 	BuildTreeMesh(ESpecies::Broadleaf, ETreeDetail::Near, 0, A);
@@ -517,6 +522,21 @@ static void TestShader()
 		&& East.y > 0.0f && std::fabs(East.x) < 1e-4f && Highest > 1.5 * Lowest && Lowest > 0.0 && Highest / 100.0 < 2.0,
 		"il vento: niente con la calma, la base non si muove; il doppio del vento piega quattro volte; sottovento, e oscilla",
 		Fmt("la cima di un albero di 20 m: %.2f m con 5 m/s, fra %.2f e %.2f m con 10 m/s", TipBreeze.x / 100.0, Lowest / 100.0, Highest / 100.0));
+
+	// Una burrasca: 40 m/s con la raffica piena su un abete di 30 m. La cima
+	// arriva al 15% dell'altezza e non oltre: e' il massimo che il materiale
+	// dichiara a Nanite (MaxWorldPositionOffsetDisplacement, 500 cm).
+	double Stormiest = 0.0;
+	float3 StormMiddle(0.0f, 0.0f, 0.0f);
+	for (int Step = 0; Step < 200; ++Step)
+	{
+		const float4 Storm(40.0, 0.0, 1.0, 0.05 * Step);
+		const float3 Now = RunWind(float4(1.0, 1.0, 1.0, 1.0), Storm, 30.0f, 0.7f, 100.0f);
+		if (Now.x > Stormiest) { Stormiest = Now.x; StormMiddle = RunWind(float4(1.0, 1.0, 0.5, 1.0), Storm, 30.0f, 0.7f, 100.0f); }
+	}
+	Check(Stormiest <= 450.0 + 1e-3 && Stormiest > 440.0 && std::fabs(StormMiddle.x - 0.25 * Stormiest) < 1e-2,
+		"in una burrasca la cima si piega al massimo del 15% dell'altezza, e il resto dell'albero in proporzione",
+		Fmt("un abete di 30 m con 40 m/s: la cima %.2f m (limite 4,50), a meta' %.2f m", Stormiest / 100.0, StormMiddle.x / 100.0));
 }
 
 // ===========================================================================

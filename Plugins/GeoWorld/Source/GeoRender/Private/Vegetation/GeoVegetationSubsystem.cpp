@@ -8,6 +8,8 @@
 #include "Streaming/GeoVegetationStreamingSubsystem.h"
 #include "Terrain/GeoTerrainSubsystem.h"
 #include "Tiles/TilingScheme.h"
+#include "Vegetation/GeoTreeModels.h"
+#include "Vegetation/GeoVegetationSettings.h"
 #include "Vegetation/TreeMesh.h"
 #include "Water/GeoWaterSubsystem.h"
 #include "Weather/GeoWeatherSubsystem.h"
@@ -23,8 +25,8 @@
 #include "Materials/MaterialInterface.h"
 #include "Materials/MaterialParameterCollection.h"
 #include "Materials/MaterialParameterCollectionInstance.h"
+#include "Misc/PackageName.h"
 #include "MeshDescription.h"
-#include "StaticMeshAttributes.h"
 #include "StaticMeshResources.h"
 #include "UObject/Package.h"
 
@@ -38,7 +40,6 @@ namespace
 	const TCHAR* VegetationMaterialPath = TEXT("/GeoWorld/Materials/M_GeoVegetation.M_GeoVegetation");
 	const TCHAR* VegetationFallbackMaterialPath = TEXT("/Engine/BasicShapes/BasicShapeMaterial.BasicShapeMaterial");
 	const TCHAR* VegetationWeatherCollectionPath = TEXT("/GeoWorld/Materials/MPC_GeoWeather.MPC_GeoWeather");
-	const FName VegetationSlotName(TEXT("Vegetation"));
 
 	/** Ogni quanto si rifa' il conto delle celle, s. */
 	constexpr double VegetationSynchronisePeriodS = 0.25;
@@ -50,70 +51,6 @@ namespace
 	constexpr float VegetationFarLodScreenSize = 0.02f;
 	/** L'orologio del vento (MPC VegetationWind.w) ricomincia ogni giorno: un float resta preciso al centesimo. */
 	constexpr double VegetationWindClockPeriodS = 86400.0;
-
-	/**
-	 * Una forma di TreeMesh.h in una FMeshDescription, il formato con cui
-	 * Unreal costruisce le static mesh.
-	 *
-	 * NOTA UE sul colore dei vertici: la costruzione lo converte in FColor
-	 * CON la codifica sRGB (ToFColor(true)), e il nodo VertexColor del
-	 * materiale restituisce poi quei byte divisi per 255. Per far arrivare al
-	 * materiale esattamente i byte di TreeMesh.h (R chioma, G luce, B altezza)
-	 * qui si passa il colore lineare che, ricodificato sRGB, torna quei byte:
-	 * FromSRGBColor.
-	 *
-	 * La tangente: il materiale non ha normal map, ma il motore vuole una base
-	 * completa; una qualunque perpendicolare alla normale va bene.
-	 */
-	void FillShapeDescription(const Vegetation::FTreeMesh& TreeShape, bool bFlipWinding, FMeshDescription& Out)
-	{
-		FStaticMeshAttributes Attributes(Out);
-		Attributes.Register();
-		TVertexAttributesRef<FVector3f> Positions = Attributes.GetVertexPositions();
-		TVertexInstanceAttributesRef<FVector3f> Normals = Attributes.GetVertexInstanceNormals();
-		TVertexInstanceAttributesRef<FVector3f> Tangents = Attributes.GetVertexInstanceTangents();
-		TVertexInstanceAttributesRef<float> Signs = Attributes.GetVertexInstanceBinormalSigns();
-		TVertexInstanceAttributesRef<FVector4f> Colours = Attributes.GetVertexInstanceColors();
-		TVertexInstanceAttributesRef<FVector2f> Uvs = Attributes.GetVertexInstanceUVs();
-		Uvs.SetNumChannels(1);
-
-		const FPolygonGroupID Group = Out.CreatePolygonGroup();
-		Attributes.GetPolygonGroupMaterialSlotNames()[Group] = VegetationSlotName;
-
-		const int32 VertexCount = static_cast<int32>(TreeShape.VertexCount());
-		const int32 TriangleCount = static_cast<int32>(TreeShape.TriangleCount());
-		Out.ReserveNewVertices(VertexCount);
-		Out.ReserveNewVertexInstances(VertexCount);
-		Out.ReserveNewTriangles(TriangleCount);
-
-		TArray<FVertexInstanceID> Corners;
-		Corners.Reserve(VertexCount);
-		for (int32 Index = 0; Index < VertexCount; ++Index)
-		{
-			const FVertexID Vertex = Out.CreateVertex();
-			Positions[Vertex] = FVector3f(TreeShape.Positions[3 * Index], TreeShape.Positions[3 * Index + 1], TreeShape.Positions[3 * Index + 2]);
-			const FVertexInstanceID VertexInstance = Out.CreateVertexInstance(Vertex);
-			const FVector3f Normal(TreeShape.Normals[3 * Index], TreeShape.Normals[3 * Index + 1], TreeShape.Normals[3 * Index + 2]);
-			Normals[VertexInstance] = Normal;
-			const FVector3f Helper = FMath::Abs(Normal.Z) < 0.9f ? FVector3f::UpVector : FVector3f::ForwardVector;
-			Tangents[VertexInstance] = FVector3f::CrossProduct(Helper, Normal).GetSafeNormal();
-			Signs[VertexInstance] = 1.0f;
-			const FLinearColor Paint = FLinearColor::FromSRGBColor(FColor(TreeShape.Colours[4 * Index], TreeShape.Colours[4 * Index + 1],
-				TreeShape.Colours[4 * Index + 2], TreeShape.Colours[4 * Index + 3]));
-			Colours[VertexInstance] = FVector4f(Paint.R, Paint.G, Paint.B, Paint.A);
-			Uvs.Set(VertexInstance, 0, FVector2f(0.0f, 0.0f));
-			Corners.Add(VertexInstance);
-		}
-		for (int32 Triangle = 0; Triangle < TriangleCount; ++Triangle)
-		{
-			FVertexInstanceID Corner[3] = {
-				Corners[static_cast<int32>(TreeShape.Indices[3 * Triangle])],
-				Corners[static_cast<int32>(TreeShape.Indices[3 * Triangle + 1])],
-				Corners[static_cast<int32>(TreeShape.Indices[3 * Triangle + 2])] };
-			if (bFlipWinding) { Swap(Corner[1], Corner[2]); }
-			Out.CreateTriangle(Group, MakeArrayView(Corner, 3));
-		}
-	}
 
 	/**
 	 * Una forma (specie, variante) come UStaticMesh con due LOD: il
@@ -130,11 +67,11 @@ namespace
 		Vegetation::BuildTreeMesh(Species, Vegetation::ETreeDetail::Near, Variant, Near);
 		Vegetation::BuildTreeMesh(Species, Vegetation::ETreeDetail::Far, Variant, Far);
 		FMeshDescription NearDescription, FarDescription;
-		FillShapeDescription(Near, bFlipWinding, NearDescription);
-		FillShapeDescription(Far, bFlipWinding, FarDescription);
+		GeoVegetationModels::FillMeshDescription(Near, bFlipWinding, NearDescription);
+		GeoVegetationModels::FillMeshDescription(Far, bFlipWinding, FarDescription);
 
 		UStaticMesh* Mesh = NewObject<UStaticMesh>(GetTransientPackage(), NAME_None, RF_Transient);
-		Mesh->GetStaticMaterials().Add(FStaticMaterial(Material, VegetationSlotName));
+		Mesh->GetStaticMaterials().Add(FStaticMaterial(Material, GeoVegetationModels::SlotName()));
 
 		// NOTA UE: se uno di questi campi non c'e' nella tua versione, togli la
 		// riga: sono tutti "non fare" (niente pacchetto sporco, niente
@@ -255,21 +192,47 @@ void UGeoVegetationSubsystem::SetRadiusM(double InRadiusM)
 	LastSynchronise = -100.0;
 }
 
-void UGeoVegetationSubsystem::SetShadows(bool bInShadows)
+void UGeoVegetationSubsystem::SetShadowMode(int32 InMode)
 {
-	bShadows = bInShadows;
+	ShadowMode = FMath::Clamp(InMode, 0, 2);
 	UpdateShadows();
+}
+
+bool UGeoVegetationSubsystem::CastsShadow(int32 Band) const
+{
+	return ShadowMode == 2 || (ShadowMode == 1 && Band == 0);
 }
 
 void UGeoVegetationSubsystem::SetFlipWinding(bool bInFlip)
 {
 	if (bFlipWinding == bInFlip) { return; }
 	bFlipWinding = bInFlip;
+	ReloadModels();
+}
+
+void UGeoVegetationSubsystem::ReloadModels()
+{
 	for (TStrongObjectPtr<UStaticMesh>& Slot : Shapes) { Slot.Reset(); }
+	for (FShapeFit& Fit : Fits) { Fit = FShapeFit(); }
 	for (TPair<uint64, FCell>& Pair : Cells)
 	{
 		if (Pair.Value.Instances.IsValid()) { ApplyCell(Pair.Value); }
 	}
+}
+
+FString UGeoVegetationSubsystem::GetModelsDescription() const
+{
+	int32 Assets = 0, Nanite = 0, Built = 0;
+	for (int32 Shape = 0; Shape < GeoWorld::Vegetation::ShapeCount; ++Shape)
+	{
+		if (!Shapes[Shape].IsValid()) { continue; }
+		if (Fits[Shape].bAsset) { ++Assets; Nanite += Fits[Shape].bNanite ? 1 : 0; }
+		else { ++Built; }
+	}
+	if (Assets + Built == 0) { return TEXT("non ancora caricati"); }
+	FString Text = FString::Printf(TEXT("%d modelli dalla libreria (%d Nanite), %d forme fatte dal codice"), Assets, Nanite, Built);
+	if (Built > 0) { Text += TEXT(" -- geo.Vegetation.CreateModels salva quelle Nanite"); }
+	return Text;
 }
 
 FString UGeoVegetationSubsystem::GetMaterialProblem() const
@@ -608,7 +571,8 @@ void UGeoVegetationSubsystem::CheckMaterial()
 			{
 				for (const TWeakObjectPtr<UHierarchicalInstancedStaticMeshComponent>& Weak : Pair.Value.Components)
 				{
-					if (UHierarchicalInstancedStaticMeshComponent* Component = Weak.Get()) { Component->SetMaterial(0, Found); }
+					UHierarchicalInstancedStaticMeshComponent* Component = Weak.Get();
+					if (Component && UsesVegetationMaterial(Component->GetStaticMesh())) { Component->SetMaterial(0, Found); }
 				}
 			}
 		}
@@ -622,16 +586,69 @@ void UGeoVegetationSubsystem::CheckMaterial()
 	}
 }
 
+bool UGeoVegetationSubsystem::UsesVegetationMaterial(const UStaticMesh* Mesh) const
+{
+	for (int32 Shape = 0; Shape < GeoWorld::Vegetation::ShapeCount; ++Shape)
+	{
+		if (Mesh && Shapes[Shape].Get() == Mesh) { return !Fits[Shape].bOwnMaterial; }
+	}
+	return false;
+}
+
 bool UGeoVegetationSubsystem::EnsureShapes()
 {
 	if (!Material.IsValid()) { return false; }
+	const UGeoVegetationSettings* Settings = GetDefault<UGeoVegetationSettings>();
 	bool bAll = true;
 	for (int32 Species = 0; Species < Vegetation::SpeciesCount; ++Species)
 	{
 		for (int32 Variant = 0; Variant < Vegetation::VariantCount; ++Variant)
 		{
-			TStrongObjectPtr<UStaticMesh>& Slot = Shapes[Vegetation::ShapeIndex(static_cast<uint8>(Species), static_cast<uint8>(Variant))];
+			const int32 Index = Vegetation::ShapeIndex(static_cast<uint8>(Species), static_cast<uint8>(Variant));
+			TStrongObjectPtr<UStaticMesh>& Slot = Shapes[Index];
 			if (Slot.IsValid()) { continue; }
+			FShapeFit& Fit = Fits[Index];
+			Fit = FShapeFit();
+
+			// 1. Il modello della libreria (Project Settings), se c'e'. Si
+			//    controlla che il package esista prima di caricarlo: un modello
+			//    non ancora creato non deve riempire il log di avvisi.
+			UStaticMesh* Model = nullptr;
+			if (Settings)
+			{
+				const TSoftObjectPtr<UStaticMesh> Soft = Settings->GetModel(Species, Variant);
+				const FSoftObjectPath& Path = Soft.ToSoftObjectPath();
+				if (!Path.IsNull() && FPackageName::DoesPackageExist(Path.GetLongPackageName()))
+				{
+					Model = Soft.LoadSynchronous();
+				}
+			}
+			if (Model)
+			{
+				// Il modello si adatta all'albero dai suoi bounds: larghezza sui
+				// due assi orizzontali, altezza su Z, la base nell'origine.
+				const FBoxSphereBounds Bounds = Model->GetBounds();
+				const double Width = 2.0 * FMath::Max(Bounds.BoxExtent.X, Bounds.BoxExtent.Y);
+				const double Height = 2.0 * Bounds.BoxExtent.Z;
+				if (Width > UE_KINDA_SMALL_NUMBER && Height > UE_KINDA_SMALL_NUMBER)
+				{
+					Fit.InverseSize = FVector(1.0 / Width, 1.0 / Width, 1.0 / Height);
+					Fit.Offset = FVector(-Bounds.Origin.X, -Bounds.Origin.Y, -(Bounds.Origin.Z - Bounds.BoxExtent.Z));
+					Fit.bAsset = true;
+					Fit.bNanite = Model->HasValidNaniteData();
+					// Il materiale: M_GeoVegetation sui modelli di CreateModels
+					// (ce l'hanno gia'), il loro su quelli propri.
+					UMaterialInterface* Own = Model->GetMaterial(0);
+					const bool bOurs = Own && Own->GetPathName() == FString(VegetationMaterialPath);
+					Fit.bOwnMaterial = !bOurs && !(Settings && Settings->bForceVegetationMaterial);
+					Slot.Reset(Model);
+					continue;
+				}
+				UE_LOG(LogGeoWorld, Warning, TEXT("[GeoVegetation] il modello %s ha bounds vuoti: uso la forma fatta dal codice"),
+					*Model->GetPathName());
+			}
+
+			// 2. La forma fatta dal codice: due LOD, non Nanite, gia' nel cubo unitario.
 			Slot.Reset(BuildShapeMesh(static_cast<Vegetation::ESpecies>(Species), static_cast<uint32>(Variant), bFlipWinding, Material.Get()));
 			bAll = bAll && Slot.IsValid();
 		}
@@ -681,10 +698,17 @@ void UGeoVegetationSubsystem::ApplyCell(FCell& Cell)
 		++GroundCount;
 		if (Tree.Thin >= Fraction) { continue; }
 		const int32 Shape = Vegetation::ShapeIndex(Tree.Species, Tree.Variant);
-		// Nel frame della cella, in metri: X nord, Y est, Z alto. La forma e'
-		// nel cubo unitario: larghezza sui due assi orizzontali, altezza su Z.
-		Transforms[Shape].Emplace(FQuat(FVector::UpVector, Tree.YawRad),
-			FVector(Tree.Local[0], Tree.Local[1], Tree.Local[2]), FVector(Tree.WidthM, Tree.WidthM, Tree.HeightM));
+		// Nel frame della cella, in metri: X nord, Y est, Z alto. La forma va
+		// larga WidthM sui due assi orizzontali e alta HeightM su Z: le forme
+		// del codice sono gia' nel cubo unitario (Fit neutro), un modello
+		// della libreria si scala dai suoi bounds e si sposta con la base
+		// nell'origine. Lo spostamento si fa PRIMA di scala e rotazione:
+		// R(S(x + o)) + t = R(S x) + (t + R(S o)).
+		const FShapeFit& Fit = Fits[Shape];
+		const FQuat Rotation(FVector::UpVector, Tree.YawRad);
+		const FVector Scale = FVector(Tree.WidthM, Tree.WidthM, Tree.HeightM) * Fit.InverseSize;
+		const FVector Location = FVector(Tree.Local[0], Tree.Local[1], Tree.Local[2]) + Rotation.RotateVector(Scale * Fit.Offset);
+		Transforms[Shape].Emplace(Rotation, Location, Scale);
 		float Values[Vegetation::InstanceDataFloats];
 		Vegetation::InstanceData(Tree, Values);
 		Data[Shape].Append(Values, Vegetation::InstanceDataFloats);
@@ -694,7 +718,7 @@ void UGeoVegetationSubsystem::ApplyCell(FCell& Cell)
 
 	FTransform Transform = Georeference->GetSnapshot().GetLocalNeuTransform(Cell.Origin);
 	Transform.SetScale3D(FVector(Units::MetersToUu));
-	const bool bShadow = bShadows && Cell.Band == 0;
+	const bool bShadow = CastsShadow(Cell.Band);
 	for (int32 Shape = 0; Shape < Vegetation::ShapeCount; ++Shape)
 	{
 		if (Transforms[Shape].Num() == 0 || !Shapes[Shape].IsValid()) { continue; }
@@ -704,8 +728,13 @@ void UGeoVegetationSubsystem::ApplyCell(FCell& Cell)
 		Component->SetCollisionEnabled(ECollisionEnabled::NoCollision);
 		Component->SetCanEverAffectNavigation(false);
 		Component->SetStaticMesh(Shapes[Shape].Get());
-		Component->SetMaterial(0, Material.Get());
+		if (!Fits[Shape].bOwnMaterial) { Component->SetMaterial(0, Material.Get()); }
 		Component->SetCastShadow(bShadow);
+		// Il vento solo da vicino. Oltre ~700 m la cima di un albero si sposta
+		// meno di un pixel, e un'ombra che si muove costringe le Virtual
+		// Shadow Maps a ridisegnare le loro pagine a ogni frame; con Nanite,
+		// in piu', un materiale che sposta i vertici prende la strada lenta.
+		Component->SetEvaluateWorldPositionOffset(Cell.Band == 0);
 		// I dati per istanza (il verde, l'altezza, il caso) PRIMA delle
 		// istanze: il componente li alloca per ognuna mentre le aggiunge.
 		Component->SetNumCustomDataFloats(Vegetation::InstanceDataFloats);
@@ -726,7 +755,7 @@ void UGeoVegetationSubsystem::UpdateShadows()
 {
 	for (TPair<uint64, FCell>& Pair : Cells)
 	{
-		const bool bShadow = bShadows && Pair.Value.Band == 0;
+		const bool bShadow = CastsShadow(Pair.Value.Band);
 		for (const TWeakObjectPtr<UHierarchicalInstancedStaticMeshComponent>& Weak : Pair.Value.Components)
 		{
 			if (UHierarchicalInstancedStaticMeshComponent* Component = Weak.Get()) { Component->SetCastShadow(bShadow); }
@@ -799,8 +828,10 @@ void UGeoVegetationSubsystem::DrawDebugOverlay() const
 		Line(FColor::Yellow, TEXT("Spenta: geo.Vegetation.Enable 1"));
 		return;
 	}
-	Line(FColor::White, FString::Printf(TEXT("Bande      : vicino %.0f m (ombre %s), medio %.0f m, lontano %.0f m; densita' %.2f"),
-		Bands.NearM, bShadows ? TEXT("si'") : TEXT("no"), Bands.MidM, Bands.FarM, Placement.Density));
+	static const TCHAR* ShadowNames[3] = { TEXT("nessuna"), TEXT("solo i vicini"), TEXT("tutti") };
+	Line(FColor::White, FString::Printf(TEXT("Bande      : vicino %.0f m, medio %.0f m, lontano %.0f m; densita' %.2f; ombre: %s"),
+		Bands.NearM, Bands.MidM, Bands.FarM, Placement.Density, ShadowNames[FMath::Clamp(ShadowMode, 0, 2)]));
+	Line(FColor::White, FString::Printf(TEXT("Modelli    : %s"), *GetModelsDescription()));
 	Line(FColor::White, FString::Printf(TEXT("Celle      : %d vicine, %d medie, %d lontane, %d vuote, %d in attesa, %d in costruzione"),
 		Stats.CelleVicine, Stats.CelleMedie, Stats.CelleLontane, Stats.CelleVuote, Stats.CelleInAttesa, Stats.CostruzioniInCorso));
 	Line(FColor::White, FString::Printf(TEXT("Alberi     : %d (latifoglie %d, conifere %d, pini domestici %d, arbusti %d), %d componenti"),

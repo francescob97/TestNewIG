@@ -1742,6 +1742,13 @@ namespace
 		Material->SetShadingModel(MSM_DefaultLit);
 		Material->bUsedWithInstancedStaticMeshes = true;
 		Material->DitheredLODTransition = true;
+		// I modelli della libreria sono Nanite (geo.Vegetation.CreateModels).
+		// Con il World Position Offset (il vento) Nanite vuole sapere quanto al
+		// massimo si spostano i vertici, per non tagliare via un albero piegato
+		// fuori dai suoi bounds: la cima va al piu' al 15% dell'altezza
+		// (VegetationShader.inl), 4,5 m per l'albero piu' alto, 30 m.
+		Material->bUsedWithNanite = true;
+		Material->MaxWorldPositionOffsetDisplacement = 500.0f;
 
 		FGraph G{ Material };
 		const FPin Red = InstanceFloat(G, 0, -1600, -400);

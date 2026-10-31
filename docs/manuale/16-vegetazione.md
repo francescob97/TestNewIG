@@ -188,7 +188,52 @@ provato come C++ dai test, come le nuvole):
   all'unisono sembrerebbe finto.
 
 > 💡 **Esempio.** Con 10 m/s di vento la cima di un albero di 20 m va
-> avanti e indietro fra 33 e 67 cm sottovento; con 5 m/s, 16 cm.
+> avanti e indietro fra 33 e 67 cm sottovento; con 5 m/s, 16 cm. In una
+> burrasca di 40 m/s un abete di 30 m piega la cima di 4,5 m, e non di più:
+> lo shader la ferma al 15% dell'altezza.
+
+---
+
+## 16.6 La libreria dei modelli, e Nanite
+
+Le forme fatte dal codice vanno bene per cominciare, ma il piano è un altro:
+**una libreria di modelli preparata nell'editor**, istanziata dai dati. È lo
+stesso schema che useranno le case.
+
+**Nanite** è il sistema di Unreal 5 per la geometria densa. Una mesh Nanite è
+divisa in gruppi di ~128 triangoli, organizzati in una gerarchia da fine a
+grossolano; a ogni frame la GPU sceglie, gruppo per gruppo, il dettaglio che
+basta per i pixel che occupa. Niente LOD fatti a mano, e milioni di istanze
+reggono. In cambio, i dati Nanite si costruiscono **nell'editor**: una mesh
+fatta mentre il gioco gira non li ha.
+
+Per questo le forme si "cuociono" una volta, come i materiali:
+
+1. `geo.Vegetation.CreateModels` costruisce le otto forme al dettaglio
+   **pieno** (fino a 3.220 triangoli: troppi per una mesh normale ripetuta
+   centomila volte, niente per Nanite) e le salva come asset Nanite in
+   `/GeoWorld/Vegetation`;
+2. in **Project Settings → Plugins → GeoWorld - Vegetazione** otto caselle
+   puntano a quei modelli. Si possono cambiare con modelli propri: un abete
+   comprato, una quercia scansionata;
+3. a runtime ogni cella crea istanze di quei modelli. Un modello si adatta a
+   ogni albero **dai suoi bounds**: largo quanto la chioma, alto quanto
+   l'albero, con la base sul suolo. Se una casella è vuota, si torna alla
+   forma fatta dal codice.
+
+> ⚠️ **Trappola.** Il vento sposta i vertici; Nanite, che decide in anticipo
+> quali gruppi si vedono, deve sapere **di quanto al massimo**, altrimenti
+> taglia via un albero piegato fuori dai suoi bounds. Lo shader limita la
+> cima al 15% dell'altezza, e il materiale lo dichiara: 500 cm.
+
+> ⚠️ **Trappola.** Un'ombra che si muove costringe le Virtual Shadow Maps a
+> ridisegnarsi a ogni frame. Per questo il vento c'è solo entro ~700 m: oltre,
+> la cima si sposta di meno di un pixel e non lo vede nessuno.
+
+Le posizioni non sono salvate albero per albero: nei tile c'è la copertura
+del suolo, e la posizione di ogni albero se ne ricava al caricamento,
+sempre uguale (16.2). Salvarle tutte vorrebbe dire una ventina di GB per i
+boschi italiani, contro 64 KB per tile.
 
 ---
 
@@ -254,6 +299,26 @@ le istanze serve la casella **Used with Instanced Static Meshes**
 (`bUsedWithInstancedStaticMeshes`). Se manca, il motore disegna il materiale di
 default a scacchi grigi, e lo dice solo nell'Output Log.
 
+### UDeveloperSettings: le impostazioni in Project Settings
+
+Una classe derivata da **`UDeveloperSettings`** compare da sola in Project
+Settings, con un campo per ogni `UPROPERTY(Config, EditAnywhere)`. `Config =
+Game, DefaultConfig` la salva in `Config/DefaultGame.ini`: nel progetto, e
+quindi nel repository, non nelle preferenze di chi lo apre. Dal codice si
+legge con `GetDefault<UGeoVegetationSettings>()`.
+
+Le caselle sono **`TSoftObjectPtr<UStaticMesh>`**: un riferimento "morbido",
+che ricorda il percorso dell'asset senza caricarlo. Si carica quando serve
+(`LoadSynchronous`). Un riferimento normale caricherebbe tutti i modelli
+all'avvio del motore, anche senza vegetazione.
+
+### Una static mesh fatta da codice, nell'editor
+
+Nell'editor la strada è diversa da quella del runtime: la `FMeshDescription`
+si consegna al **source model** del LOD 0 (`CreateMeshDescription`,
+`CommitMeshDescription`), si accende `NaniteSettings.bEnabled`, e `Build()` fa
+tutto, dati Nanite compresi. Poi si salva il package, come per i materiali.
+
 ### Il World Position Offset, ancora
 
 Lo stesso meccanismo delle particelle della pioggia (capitolo 15): il vertex
@@ -275,6 +340,8 @@ centomila alberi.
 | `GeoRender/Public/Vegetation/VegetationCells.h` | celle, bande, isteresi, firma, terreno disegnato |
 | `GeoRender/Public/Vegetation/VegetationShader.inl` | il materiale, HLSL e C++ |
 | `GeoRender/Public/Vegetation/GeoVegetationSubsystem.h` | Unreal: mesh a runtime, HISM, giro, vento, overlay |
+| `GeoRender/Public/Vegetation/GeoVegetationSettings.h` | la libreria dei modelli, in Project Settings |
+| `GeoWorldEditor/Private/GeoVegetationModelFactory.cpp` | `geo.Vegetation.CreateModels`: i modelli Nanite |
 | `GeoWorldEditor/Private/GeoTerrainMaterialFactory.cpp` | `M_GeoVegetation` |
 
 ---
@@ -292,5 +359,9 @@ centomila alberi.
 - Le **celle** (livello 15) attorno alla camera hanno tre **bande** con
   l'**isteresi**; stanno sul **terreno disegnato** e si rifanno quando la
   sua **firma** cambia.
-- In Unreal: `UStaticMesh` da `FMeshDescription`, **HISM** con i **Per
-  Instance Custom Data**, un materiale con il vento e la neve.
+- In Unreal: **HISM** con i **Per Instance Custom Data**, un materiale con il
+  vento e la neve.
+- I modelli vengono da una **libreria** in Project Settings: di default otto
+  modelli **Nanite** cotti nell'editor (`geo.Vegetation.CreateModels`), o
+  modelli propri adattati dai bounds; senza, forme fatte dal codice a
+  runtime.

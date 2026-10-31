@@ -46,12 +46,24 @@ Quello che **non** è provato: tutto quello che passa per Unreal (la mesh a
 runtime, gli HISM, il materiale vero, il vento letto dalla collezione). È il
 lavoro di questa pagina.
 
-## 1. Compilare e rifare i materiali
+## 1. Compilare, rifare i materiali, cuocere i modelli
 
 1. Compila il progetto. I punti più a rischio sono in fondo (sezione 6).
 2. Apri l'editor e lancia **`geo.Imagery.CreateMaterial`**. Crea
    `M_GeoVegetation` e aggiunge `VegetationWind` a `MPC_GeoWeather`. Atteso,
    fra i messaggi: "MPC_GeoWeather: aggiunti 1 parametri" e "Materiali pronti".
+3. Lancia **`geo.Vegetation.CreateModels`**. Salva in `/GeoWorld/Vegetation`
+   gli otto modelli Nanite (`SM_GeoTree_Broadleaf_0` ...). Atteso: "Modelli
+   Nanite: 8 su 8 in /GeoWorld/Vegetation (triangoli: latifoglie 3220,
+   conifere 500, pini domestici 1940, arbusti 1600)". Ci mette qualche
+   secondo: costruisce i dati Nanite.
+4. Apri **Project Settings → Plugins → GeoWorld - Vegetazione**: le otto
+   caselle puntano a quei modelli. Aprine uno nel Content Browser: nello
+   Static Mesh Editor, "Nanite Settings → Enable Nanite Support" acceso, e i
+   triangoli come sopra.
+
+Il passo 3 si può saltare: senza modelli il runtime costruisce le forme da
+codice (non Nanite), e gli alberi ci sono lo stesso.
 
 ## 2. Il dataset
 
@@ -121,6 +133,10 @@ centro, con l'overlay acceso. Atteso:
 | j | Vola dritto per 30 km (rebase) | nessun salto degli alberi | se saltano al rebase: segnalalo |
 | k | In montagna, verso i 2.000 m | conifere, poi solo arbusti, poi niente sopra i 2.700 m | se ci sono latifoglie in alto: manca il geoide (apri anche l'acqua) o la quota è sbagliata |
 | l | `geo.Vegetation.Density 0.3`, poi `1` | le celle si rifanno (le vecchie restano finché le nuove sono pronte) | |
+| m | `geo.Vegetation.Stats` | "Modelli: 8 modelli dalla libreria (8 Nanite), 0 forme fatte dal codice" | "forme fatte dal codice": i modelli non ci sono (passo 1.3) o il percorso nelle caselle è sbagliato; "(0 Nanite)": il modello non ha i dati Nanite (Enable Nanite Support) |
+| n | Nel viewport: View Mode → Nanite Visualization → Triangles | gli alberi vicini colorati a triangoli fitti, quelli lontani a pochi grandi triangoli | se gli alberi non si colorano, non sono Nanite (vedi m) |
+| o | `geo.Vegetation.Shadows 2`, con le Virtual Shadow Maps accese (`r.Shadow.Virtual.Enable 1`) | tutti gli alberi fanno ombra; `stat unit` non deve crescere molto | se la GPU sale tanto: `geo.Vegetation.Shadows 1` |
+| p | Un modello tuo: mettilo in una casella della libreria, poi `geo.Vegetation.ReloadModels` | gli alberi di quella forma diventano il tuo modello, alti e larghi come prima, con la base sul suolo | se galleggiano o affondano: il modello non ha la base in basso (il pivot non conta, contano i bounds); se sono sdraiati, il modello non ha Z in alto |
 
 ## 5. Se qualcosa non va
 
@@ -165,6 +181,11 @@ Le API di Unreal usate qui per la prima volta, con il ripiego:
 | `ApplyCell` | `AddInstances(Transforms, false, false)` | idem con due argomenti |
 | `GeoTerrainMaterialFactory.cpp` | `UMaterialExpressionPerInstanceCustomData::DataIndex` | il nodo è "PerInstanceCustomData" nell'editor: si può rifare a mano |
 | idem | `Material->DitheredLODTransition` | togli la riga (niente sfumatura fra i LOD) |
+| idem | `Material->bUsedWithNanite`, `Material->MaxWorldPositionOffsetDisplacement` | nell'editor sono "Used with Nanite" (Usage) e "Max World Position Offset Displacement" (Nanite): accendili a mano su `M_GeoVegetation`, 500 |
+| `GeoVegetationModelFactory.cpp` | `SetNumSourceModels`, `GetSourceModel(0).BuildSettings`, `CreateMeshDescription`, `CommitMeshDescription`, `Build(true)`, `NaniteSettings.bEnabled` | la strada dell'editor per una static mesh da codice: se una manca, dimmi quale; intanto gli alberi usano le forme del codice |
+| `GeoVegetationSubsystem.cpp`, `EnsureShapes` | `HasValidNaniteData()` | metti `false`: serve solo alla statistica |
+| `ApplyCell` | `SetEvaluateWorldPositionOffset` | togli la riga: il vento resterà anche lontano (costa un po' di più) |
+| `GeoVegetationSettings.h` | `UDeveloperSettings` (modulo `DeveloperSettings`, nel Build.cs) | se il modulo non si trova, è in "Engine" nelle versioni vecchie: togli la riga dal Build.cs |
 
 Se il materiale non si costruisce, si può fare a mano: due nodi Custom con il
 testo di `VegetationShader.inl` (un blocco ciascuno), gli ingressi elencati in

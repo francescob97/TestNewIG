@@ -32,7 +32,7 @@ l'ortofoto, che il bosco lo mostra già. Le forme degli alberi sono fatte
 | Tile | `.gvg`, livello 13 (2,4 km), 256x256 classi, zlib; solo dove cresce qualcosa |
 | Griglia | un albero possibile ogni 8 x 8 m, fissa nel mondo |
 | Specie | latifoglie, conifere, pini domestici, arbusti; 2 forme ciascuna |
-| Forme | 2 LOD: vicino fino a 332 triangoli, lontano 20–28 |
+| Modelli | una **libreria** in Project Settings: di default otto modelli **Nanite** (`geo.Vegetation.CreateModels`), oppure modelli tuoi; senza, forme fatte dal codice a 2 LOD |
 | Celle | livello 15 (~610 x 430 m a 45°), entro 2,5 km dalla camera |
 | Bande | vicino 700 m (tutti, con l'ombra), medio 1.500 m (metà), lontano 2.500 m (un quarto) |
 | Bosco | ~14.500 alberi per km², ~3.800 per cella |
@@ -214,14 +214,19 @@ scala alla larghezza e all'altezza dell'albero. Pochi solidi:
 | pino domestico | un tronco alto e nudo, una chioma piatta a ombrello | una bolla piatta |
 | arbusto | tre bolle schiacciate a terra | una bolla |
 
-Le due varianti hanno bitorzoli e coni diversi.
+Le due varianti hanno bitorzoli e coni diversi. Ci sono tre dettagli:
 
-| Specie | Vicino | Lontano |
-|---|---:|---:|
-| latifoglie | 332 triangoli | 20 |
-| conifere | 120 | 24 |
-| pini domestici | 252 | 28 |
-| arbusti | 240 | 20 |
+| Specie | Vicino | Lontano | Pieno (Nanite) |
+|---|---:|---:|---:|
+| latifoglie | 332 triangoli | 20 | 3.220 (dieci ciuffi in due giri) |
+| conifere | 120 | 24 | 500 (dodici palchi) |
+| pini domestici | 252 | 28 | 1.940 (sei ombrelli) |
+| arbusti | 240 | 20 | 1.600 |
+
+Vicino e lontano sono i due LOD delle forme fatte a runtime. Il dettaglio
+pieno è per i modelli Nanite (sezione 6.5): Nanite disegna di ogni albero solo
+i triangoli che servono, quindi la forma può essere fitta senza costare da
+lontano.
 
 **Il colore dei vertici porta i dati del materiale**, non un colore:
 
@@ -377,7 +382,61 @@ Lo scrive `UGeoVegetationSubsystem` a ogni frame, leggendo il vento del meteo.
 istanze il motore usa il materiale di default e lo dice solo nell'Output Log.
 `DitheredLODTransition` fa sfumare il passaggio fra le due forme.
 
-### 6.5 I comandi
+### 6.5 La libreria dei modelli, e Nanite
+
+Il piano di partenza era: **una libreria di modelli preparata nell'editor
+(specie di alberi, tipi di case), posizioni dai dati nei tile, a runtime
+istanze di quei modelli; Nanite regge milioni di istanze senza LOD fatti a
+mano.** Così è fatto ora.
+
+**La libreria** sta in Project Settings → Plugins → *GeoWorld - Vegetazione*
+(`UGeoVegetationSettings`, salvata in `Config/DefaultGame.ini`): otto caselle,
+una per forma. Di default puntano a `/GeoWorld/Vegetation/SM_GeoTree_<specie>_<variante>`,
+i modelli che **`geo.Vegetation.CreateModels`** costruisce nell'editor dal
+dettaglio pieno, **con Nanite acceso** e il materiale `M_GeoVegetation`. Il
+runtime per ogni casella:
+
+1. se il modello c'è, usa quello. Lo adatta albero per albero **dai suoi
+   bounds**: larghezza sui due assi orizzontali, altezza su Z, la base
+   nell'origine. Così un modello tuo (un abete di Quixel, una quercia
+   comprata), in centimetri e alto quanto vuole, va bene così com'è;
+2. se manca (o la casella è vuota), costruisce la forma dal codice, a due LOD,
+   non Nanite. Gli alberi ci sono sempre, anche prima di aver lanciato
+   `CreateModels`.
+
+**Il materiale.** I modelli di `CreateModels` hanno `M_GeoVegetation`: il verde
+di ogni albero, la neve, il vento. Un modello tuo tiene **il suo** materiale
+(con i suoi colori, ma senza il nostro vento e la nostra neve), a meno di
+accendere *M_GeoVegetation anche sui modelli propri*. Questo serve solo se il
+modello ha il colore dei vertici come `TreeMesh.h`.
+
+**Perché le posizioni non sono "nei tile".** Nei tile c'è la copertura del
+suolo (10 m), e la posizione di ogni albero se ne ricava al caricamento,
+sempre uguale (la griglia fissa, sezione 3.1). Salvare gli alberi uno per uno
+vorrebbe dire ~14.500 per km²: per i boschi italiani un miliardo e mezzo di
+alberi, una ventina di GB, contro 64 KB per tile di copertura. Il risultato è
+lo stesso: posizioni decise dai dati, uguali a ogni visita.
+
+**Nanite e il vento.** Nanite accetta il World Position Offset, ma con due
+condizioni:
+
+- deve sapere **quanto al massimo** si spostano i vertici, per non tagliare
+  via un albero piegato fuori dai suoi bounds. Lo shader limita la cima al 15%
+  dell'altezza (una burrasca piega, non sdraia: 4,5 m per un abete di 30 m),
+  e il materiale lo dichiara (`MaxWorldPositionOffsetDisplacement`, 500 cm);
+- un materiale che sposta i vertici prende la strada più lenta di Nanite, e
+  un'ombra che si muove costringe le Virtual Shadow Maps a ridisegnare le loro
+  pagine a ogni frame. Perciò **il vento c'è solo nella banda vicina**
+  (`SetEvaluateWorldPositionOffset`): oltre ~700 m la cima di un albero si
+  sposta di meno di un pixel.
+
+**Le ombre** hanno tre modi (`geo.Vegetation.Shadows`): 0 nessuna, 1 solo gli
+alberi vicini (default), 2 tutti. Il 2 è pensato per i modelli Nanite con le
+Virtual Shadow Maps, che reggono molte ombre di geometria Nanite. Servirà con
+il ciclo del giorno e della notte, quando il sole basso allunga le ombre dei
+boschi.
+
+### 6.6 I comandi
 
 | Comando | |
 |---|---|
@@ -386,7 +445,9 @@ istanze il motore usa il materiale di default e lo dice solo nell'Output Log.
 | `geo.Vegetation.Enable <0\|1>` | accende e spegne |
 | `geo.Vegetation.Density <0..4>` | quanti alberi |
 | `geo.Vegetation.Radius <m>` | fin dove |
-| `geo.Vegetation.Shadows <0\|1>` | le ombre dei vicini |
+| `geo.Vegetation.Shadows <0\|1\|2>` | chi fa ombra: nessuno, i vicini, tutti |
+| `geo.Vegetation.CreateModels [1]` | (editor) salva gli otto modelli Nanite in `/GeoWorld/Vegetation`; con 1 le facce invertite |
+| `geo.Vegetation.ReloadModels` | rilegge la libreria e rifà gli alberi |
 | `geo.Vegetation.FlipWinding <0\|1>` | se si vedono dal di dentro |
 | `geo.Vegetation.Debug <0\|1>` / `Stats` | overlay (celle colorate per banda) e numeri |
 
@@ -398,10 +459,10 @@ schermo, celle, celle in attesa.
 - **Le specie sono dedotte**, non lette: un castagneto e una faggeta alla
   stessa quota sono lo stesso bosco. Corine (100 m) distingue conifere e
   latifoglie; si potrebbe usarlo per correggere la quota.
-- **Le forme sono semplici** (low poly, tinta unita per specie). Il punto dove
-  sostituirle con modelli tuoi è uno solo, `BuildShapeMesh` in
-  `GeoVegetationSubsystem.cpp`. Un modello va bene se sta nel cubo unitario
-  e ha il colore dei vertici come sopra.
+- **Le nostre forme sono semplici** (solidi bitorzoluti, tinta unita per
+  specie, niente foglie). Per alberi veri si mettono modelli propri nella
+  libreria (sezione 6.5). Otto caselle sono poche per la varietà di un bosco
+  vero: se servirà, la libreria potrà avere più modelli per specie.
 - **Niente erba né sottobosco**, niente fiori, niente colori d'autunno.
 - **Gli alberi non seguono il geomorphing**: quando il terreno si affina, la
   cella si rifà sul terreno nuovo con un salto (di solito di qualche
@@ -411,7 +472,12 @@ schermo, celle, celle in attesa.
 - **WorldCover è del 2021**: i tagli e gli incendi dopo non ci sono.
 - **Niente collisione**: si vola attraverso le chiome.
 - **La scala non uniforme** (larghezza diversa dall'altezza) storce un po' le
-  normali delle istanze. Sulle chiome tonde non si vede.
+  normali delle istanze. Sulle chiome tonde non si vede; su un modello proprio
+  molto dettagliato un po' sì.
+- **I modelli vanno cotti nel progetto.** `/GeoWorld/Vegetation` è caricato per
+  percorso: per un gioco impacchettato la cartella va aggiunta a quelle da
+  "cuocere" (Project Settings → Packaging → Additional Asset Directories to
+  Cook), come `/GeoWorld/Materials`.
 - **Oltre 2,5 km niente alberi**: un impostor (un'immagine dell'albero) per
   le distanze grandi è il passo successivo, se servirà.
 
@@ -424,9 +490,16 @@ schermo, celle, celle in attesa.
   questo, con un grafo nell'editor. Ma è un plugin che cambia spesso fra le
   versioni e non si prova senza il motore. Qui le regole sono C++ puro,
   provato dai test, e il pezzo Unreal è sottile.
-- **Nanite foliage.** È il futuro per le chiome dettagliate. Le nostre forme
-  sono di poche centinaia di triangoli, e Nanite non accetta il World Position
-  Offset senza costi (il vento).
+- **Solo forme a runtime, senza Nanite** (la prima versione). Niente da
+  preparare nell'editor, ma i LOD fatti a mano e le ombre care con le
+  Virtual Shadow Maps. Restano come riserva quando un modello manca.
+- **Nanite anche per il terreno.** No. Il terreno nasce a runtime dalle tile,
+  e i dati Nanite si costruiscono solo nell'editor: andrebbe "cotto" in
+  anticipo, ~4.500 asset e una decina di GB per l'Italia a 30 m, rifatti a
+  ogni cambio di dati. Si perderebbero i dataset aperti a runtime, lo scavo
+  dei fiumi, il mare aperto virtuale. E il guadagno sarebbe piccolo: 1,5–2,5
+  milioni di triangoli a schermo il rendering classico li regge bene. Nanite
+  rende con modelli densi preparati nell'editor: alberi, edifici, rocce.
 - **ISM invece di HISM.** Più semplice; ma il LOD lo sceglierebbe per tutto il
   componente insieme, non per gruppi di alberi.
 - **Un componente per cella invece che per forma.** Un HISM ha una sola mesh:
@@ -451,5 +524,8 @@ schermo, celle, celle in attesa.
 | `GeoRender/Public/Vegetation/VegetationCells.h` | celle, bande, firma, terreno disegnato (C++ puro) |
 | `GeoRender/Public/Vegetation/VegetationShader.inl` | il materiale (HLSL e C++) |
 | `GeoRender/Public/Vegetation/GeoVegetationSubsystem.h` | tutto il resto, in Unreal |
+| `GeoRender/Public/Vegetation/GeoVegetationSettings.h` | la libreria dei modelli (Project Settings) |
+| `GeoRender/Public/Vegetation/GeoTreeModels.h` | forma → `FMeshDescription`, i percorsi dei modelli di default |
+| `GeoWorldEditor/Private/GeoVegetationModelFactory.cpp` | `geo.Vegetation.CreateModels`: i modelli Nanite |
 | `GeoWorldEditor/Private/GeoTerrainMaterialFactory.cpp` | `M_GeoVegetation`, `VegetationWind` |
-| `Tools/StandaloneTests/geovegetation_main.cpp` | 33 test C++ |
+| `Tools/StandaloneTests/geovegetation_main.cpp` | 34 test C++ |

@@ -2504,15 +2504,26 @@ static FAutoConsoleCommandWithWorldAndArgs GeoVegetationRadiusCommand(
 
 static FAutoConsoleCommandWithWorldAndArgs GeoVegetationShadowsCommand(
 	TEXT("geo.Vegetation.Shadows"),
-	TEXT("geo.Vegetation.Shadows <0|1> - gli alberi vicini fanno ombra (default 1; quelli lontani mai)."),
+	TEXT("geo.Vegetation.Shadows <0|1|2> - chi fa ombra: 0 nessuno, 1 gli alberi vicini (default), 2 tutti (con i modelli Nanite e le Virtual Shadow Maps)."),
 	FConsoleCommandWithWorldAndArgsDelegate::CreateStatic(
 		[](const TArray<FString>& Args, UWorld* World)
 	{
 		UGeoVegetationSubsystem* Vegetation = GeoVegetationConsole::Get(World);
 		if (!Vegetation) { return; }
-		const bool bValue = GeoVegetationConsole::Flag(Args, Vegetation->AreShadowsEnabled());
-		Vegetation->SetShadows(bValue);
-		GeoTerrainConsole::Report(bValue ? TEXT("Ombre degli alberi vicini: ON") : TEXT("Ombre degli alberi: OFF"));
+		if (Args.Num() >= 1) { Vegetation->SetShadowMode(FCString::Atoi(*Args[0])); }
+		static const TCHAR* Names[3] = { TEXT("nessun albero"), TEXT("gli alberi vicini"), TEXT("tutti gli alberi") };
+		GeoTerrainConsole::Report(FString::Printf(TEXT("Ombre della vegetazione: %s"), Names[FMath::Clamp(Vegetation->GetShadowMode(), 0, 2)]));
+	}));
+
+static FAutoConsoleCommandWithWorld GeoVegetationReloadModelsCommand(
+	TEXT("geo.Vegetation.ReloadModels"),
+	TEXT("geo.Vegetation.ReloadModels - rilegge la libreria dei modelli (Project Settings > Plugins > GeoWorld - Vegetazione) e rifa' gli alberi: dopo geo.Vegetation.CreateModels o dopo aver cambiato un modello."),
+	FConsoleCommandWithWorldDelegate::CreateStatic([](UWorld* World)
+	{
+		UGeoVegetationSubsystem* Vegetation = GeoVegetationConsole::Get(World);
+		if (!Vegetation) { return; }
+		Vegetation->ReloadModels();
+		GeoTerrainConsole::Report(FString::Printf(TEXT("Modelli degli alberi: %s"), *Vegetation->GetModelsDescription()));
 	}));
 
 static FAutoConsoleCommandWithWorldAndArgs GeoVegetationFlipCommand(
@@ -2566,6 +2577,7 @@ static FAutoConsoleCommandWithWorld GeoVegetationStatsCommand(
 			Stats.GetTreeCount(), Stats.Latifoglie, Stats.Conifere, Stats.PiniDomestici, Stats.Arbusti, Stats.Componenti));
 		GeoTerrainConsole::Report(FString::Printf(TEXT("Celle: %d vicine, %d medie, %d lontane, %d vuote, %d in attesa; %.1f ms per cella"),
 			Stats.CelleVicine, Stats.CelleMedie, Stats.CelleLontane, Stats.CelleVuote, Stats.CelleInAttesa, Stats.MillisecondiPerCella));
+		GeoTerrainConsole::Report(FString::Printf(TEXT("Modelli: %s"), *Vegetation->GetModelsDescription()));
 		const FGeoVegetationStreamingStats Loads = Streaming->GetStats();
 		GeoTerrainConsole::Report(FString::Printf(TEXT("Copertura del suolo: %d tile in memoria (%.1f MB), %d caricate, %d errori"),
 			Loads.TileResidenti, Loads.MemoriaMB, Loads.CaricamentiTotali, Loads.ErroriDiCaricamento));
