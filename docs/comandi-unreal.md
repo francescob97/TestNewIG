@@ -4,7 +4,7 @@
 > Non modificarlo a mano: i controlli statici (`CheckSourceDiscipline.sh`, regola 7)
 > dicono quando e' indietro. In Unreal lo stesso elenco lo da' `geo.Help`.
 
-**125 comandi** in 11 gruppi.
+**139 comandi** in 12 gruppi.
 
 ## Come si usano
 
@@ -37,6 +37,7 @@
 | pioggia, neve, sereno | `geo.Weather.Rain 4   geo.Weather.Snow 1   geo.Weather.Clear` |
 | un temporale, o un fulmine subito | `geo.Weather.Storm   oppure   geo.Weather.Strike 1500` |
 | vento | `geo.Weather.Wind 10 270` |
+| il giorno e la notte | `geo.Sky.Demo   oppure   geo.Sky.Time 18:30` |
 | capire perche' non vedo niente | `geo.Terrain.Diag   (poi viewmode wireframe, r.Fog 0)` |
 | i comandi di un gruppo, dentro Unreal | `geo.Help Weather` |
 
@@ -52,6 +53,7 @@
 - [Il meteo](#il-meteo) — `geo.Weather.*`, 24 comandi
 - [La vegetazione](#la-vegetazione) — `geo.Vegetation.*`, 12 comandi
 - [Gli edifici](#gli-edifici) — `geo.Buildings.*`, 9 comandi
+- [Il cielo](#il-cielo) — `geo.Sky.*`, 14 comandi
 - [La camera di volo](#la-camera-di-volo) — `geo.Fly.*`, 2 comandi
 
 ## Generale
@@ -149,7 +151,7 @@ Le foto sul terreno, e i materiali di tutto il progetto (Fase 6).
 | `geo.Imagery.Budget <N>` | texture create per frame (default 4). |
 | `geo.Imagery.Stats` | Statistiche del drappeggio e dello streaming delle ortofoto. |
 | `geo.Imagery.Demo <cartella_terreno> <cartella_ortofoto>` | apre tutto e accende. |
-| `geo.Imagery.CreateMaterial` | Costruisce (o RIFA') in /GeoWorld/Materials: M_GeoTerrain (foto e strade dipinte), M_GeoRoad (strade 3D), M_GeoWater e MPC_GeoWater (acqua), MPC_GeoWeather, M_GeoPrecipitation, M_GeoLightning e M_GeoClouds (meteo), M_GeoVegetation (alberi), M_GeoBuilding (edifici). *(solo nell'editor)* |
+| `geo.Imagery.CreateMaterial` | Costruisce (o RIFA') in /GeoWorld/Materials: M_GeoTerrain (foto e strade dipinte), M_GeoRoad (strade 3D), M_GeoWater e MPC_GeoWater (acqua), MPC_GeoWeather, M_GeoPrecipitation, M_GeoLightning e M_GeoClouds (meteo), M_GeoVegetation (alberi), M_GeoBuilding (edifici), M_GeoNightSky (stelle e luna). *(solo nell'editor)* |
 
 ## Strade, ferrovie, piste
 
@@ -247,6 +249,27 @@ Le sagome di OpenStreetMap estruse, i monumenti dalla libreria (Fase 10).
 | `geo.Buildings.Stats` | Statistiche degli edifici. |
 | `geo.Buildings.Demo <terreno> <ortofoto\|-> <edifici> [vegetazione\|-]` | apre tutto, accende e si mette 300 m sopra la zona con piu' edifici. |
 
+## Il cielo
+
+Il giorno e la notte: il sole all'ora giusta, la luna con le fasi, le stelle (Fase 12).
+
+| Comando | Cosa fa |
+|---|---|
+| `geo.Sky.Time <HH:MM> [AAAA-MM-GG]` | l'ora locale (e la data): geo.Sky.Time 18:30, geo.Sky.Time 21:00 2026-06-21. Senza argomenti dice dove sono sole e luna. |
+| `geo.Sky.Date <AAAA-MM-GG>` | il giorno, alla stessa ora locale: geo.Sky.Date 2026-12-21 (il solstizio d'inverno). |
+| `geo.Sky.Speed <x>` | quanto corre il tempo: 0 fermo, 1 come l'orologio, 60 un minuto al secondo, 600 un giorno in 2,4 minuti; negativo all'indietro. |
+| `geo.Sky.Now` | l'ora vera, adesso, e il tempo che corre come l'orologio. |
+| `geo.Sky.Enable <0\|1>` | il cielo muove il sole del livello (0: il sole, la nebbia e l'esposizione tornano come erano). |
+| `geo.Sky.Zone <cet\|ore>` | il fuso: cet l'ora italiana (con l'ora legale d'estate), oppure lo scostamento fisso da UT (geo.Sky.Zone 0 = UT, 5.5 = India). |
+| `geo.Sky.MoonLight <rapporto>` | la luce della luna piena rispetto al sole (default 0.001; dal vero 0.0000025, troppo buio per un gioco). |
+| `geo.Sky.NightExposure <stop>` | di notte l'esposizione scende di tanto (default -2; 0 = lascia fare all'esposizione automatica). |
+| `geo.Sky.SunLux <lux>` | la luce del sole (0 = quella che aveva la luce del livello). Tutto il resto, luna compresa, si misura su questa. |
+| `geo.Sky.Stars <0\|1>` | stelle, Via Lattea e luna con le fasi (M_GeoNightSky). |
+| `geo.Sky.CityLights <0\|1>` | le finestre degli edifici accese di notte. |
+| `geo.Sky.Debug <0\|1>` | overlay del cielo: ora, sole e luna (altezza, levate, tramonti, fase), luce, la scena. |
+| `geo.Sky.Stats` | Dove sono il sole e la luna, e che ora e'. |
+| `geo.Sky.Demo [velocita']` | un giorno intero di corsa: da prima dell'alba, 300 volte piu' veloce (un giorno in poco meno di 5 minuti), con l'overlay. |
+
 ## La camera di volo
 
 Solo in Play: velocita' proporzionale alla quota.
@@ -275,7 +298,7 @@ Non sono di GeoWorld, ma la documentazione li usa spesso.
 | File | Comandi |
 |---|---|
 | `Plugins/GeoWorld/Source/GeoCore/Private/GeoCoreModule.cpp` | 10 |
-| `Plugins/GeoWorld/Source/GeoRender/Private/GeoRenderModule.cpp` | 103 |
+| `Plugins/GeoWorld/Source/GeoRender/Private/GeoRenderModule.cpp` | 117 |
 | `Plugins/GeoWorld/Source/GeoTiles/Private/GeoTilesModule.cpp` | 10 |
 | `Plugins/GeoWorld/Source/GeoWorldEditor/Private/GeoTerrainMaterialFactory.cpp` | 1 |
 | `Plugins/GeoWorld/Source/GeoWorldEditor/Private/GeoVegetationModelFactory.cpp` | 1 |

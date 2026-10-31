@@ -1,10 +1,11 @@
 // =============================================================================
 //  HlslShim.h -- Quel tanto di HLSL che serve a compilare uno shader come C++.
 //
-//  Per i test di Weather/CloudShader.inl e Weather/GroundShader.inl: lo stesso
+//  Per i test degli shader a doppia sintassi (nuvole, suolo, alberi, edifici, cielo): lo stesso
 //  testo che la factory mette nel materiale, qui compilato come corpo di una
 //  funzione C++. Tipi (float2/3/4, uint), le funzioni intrinseche usate
-//  (floor, lerp, saturate, min, max, length, sqrt, sin, abs) e la lettura di una texture
+//  (floor, lerp, saturate, min, max, length, sqrt, sin, cos, exp, log, abs,
+//  dot, normalize) e la lettura di una texture
 //  (bilineare, bordi bloccati, come il campionatore della mappa meteo).
 // =============================================================================
 #pragma once
@@ -57,6 +58,11 @@ namespace HlslShim
 	inline float sqrt(float A) { return std::sqrt(A); }
 	inline float sin(float A) { return std::sin(A); }
 	inline float abs(float A) { return std::fabs(A); }
+	inline float cos(float A) { return std::cos(A); }
+	inline float exp(float A) { return std::exp(A); }
+	inline float log(float A) { return std::log(A); }
+	inline float dot(const float3& A, const float3& B) { return A.x * B.x + A.y * B.y + A.z * B.z; }
+	inline float3 normalize(const float3& A) { const float L = length(A); return L > 0.0f ? A * (1.0f / L) : A; }
 
 	/** Una texture BGRA8 quadrata, come la mappa meteo. */
 	struct FTexture

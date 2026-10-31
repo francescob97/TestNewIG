@@ -45,6 +45,7 @@ GROUPS = [
     ("Weather", "Il meteo", "Vento, pioggia, neve, grandine, fulmini e tuono."),
     ("Vegetation", "La vegetazione", "Alberi e arbusti dalla copertura del suolo, la libreria dei modelli (Fase 11)."),
     ("Buildings", "Gli edifici", "Le sagome di OpenStreetMap estruse, i monumenti dalla libreria (Fase 10)."),
+    ("Sky", "Il cielo", "Il giorno e la notte: il sole all'ora giusta, la luna con le fasi, le stelle (Fase 12)."),
     ("Fly", "La camera di volo", "Solo in Play: velocita' proporzionale alla quota."),
 ]
 
@@ -66,6 +67,7 @@ START_HERE = [
     ("pioggia, neve, sereno", "geo.Weather.Rain 4   geo.Weather.Snow 1   geo.Weather.Clear"),
     ("un temporale, o un fulmine subito", "geo.Weather.Storm   oppure   geo.Weather.Strike 1500"),
     ("vento", "geo.Weather.Wind 10 270"),
+    ("il giorno e la notte", "geo.Sky.Demo   oppure   geo.Sky.Time 18:30"),
     ("capire perche' non vedo niente", "geo.Terrain.Diag   (poi viewmode wireframe, r.Fog 0)"),
     ("i comandi di un gruppo, dentro Unreal", "geo.Help Weather"),
 ]

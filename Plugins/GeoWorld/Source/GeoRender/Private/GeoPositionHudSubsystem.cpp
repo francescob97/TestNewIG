@@ -1,6 +1,7 @@
 #include "GeoPositionHudSubsystem.h"
 
 #include "Buildings/GeoBuildingsSubsystem.h"
+#include "Sky/GeoSkySubsystem.h"
 #include "Geo/GeoFormat.h"
 #include "Georeference/GeoreferenceSubsystem.h"
 #include "Mesh/TileMesh.h"
@@ -227,6 +228,31 @@ void UGeoPositionHudSubsystem::Draw(UCanvas* Canvas, APlayerController* /*Contro
 			if (Built.CelleInAttesa > 0) { Text += ", " + Format::Number(Built.CelleInAttesa, 0) + " in attesa"; }
 			if (!Buildings->GetMaterialProblem().IsEmpty()) { Text += " (manca il materiale)"; }
 			Add(TEXT("Edifici"), Text);
+		}
+	}
+
+	// Il cielo: l'ora (locale) e dove sta il sole.
+	if (const UGeoSkySubsystem* SkySubsystem = GetWorld()->GetSubsystem<UGeoSkySubsystem>())
+	{
+		const FGeoSkyState& Sky = SkySubsystem->GetState();
+		if (SkySubsystem->IsEnabled() && Sky.bValid)
+		{
+			std::string Clock = std::string(TCHAR_TO_UTF8(*Sky.LocalDate)) + " " + TCHAR_TO_UTF8(*Sky.LocalClock) + " " + TCHAR_TO_UTF8(*Sky.ZoneName);
+			if (SkySubsystem->GetSpeed() != 1.0)
+			{
+				Clock += SkySubsystem->GetSpeed() == 0.0 ? ", fermo" : ", x" + Format::Number(SkySubsystem->GetSpeed(), 0);
+			}
+			Add(TEXT("Ora"), Clock);
+			const double Altitude = Sky.Bodies.Sun.AltitudeDeg;
+			std::string Sun = Altitude > -0.8 ? "alto " + Format::Number(Altitude, 0) + Format::Degree + ", " + Format::Heading(Sky.Bodies.Sun.AzimuthDeg)
+			                                  : "sotto l'orizzonte (" + Format::Number(Altitude, 0) + Format::Degree + ")";
+			Sun += std::string(", alba ") + TCHAR_TO_UTF8(*Sky.Sunrise) + ", tramonto " + TCHAR_TO_UTF8(*Sky.Sunset);
+			Add(TEXT("Sole"), Sun);
+			if (Altitude < 0.0 && Sky.Bodies.Moon.AltitudeDeg > 0.0)
+			{
+				Add(TEXT("Luna"), std::string(Sky.Bodies.bMoonWaxing ? "crescente " : "calante ")
+					+ Format::Number(100.0 * Sky.Bodies.MoonIllumination, 0) + "%, alta " + Format::Number(Sky.Bodies.Moon.AltitudeDeg, 0) + Format::Degree);   /* percentuale, non-unita */
+			}
 		}
 	}
 

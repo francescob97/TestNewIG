@@ -70,8 +70,16 @@ Il progetto `TestNewIG` e' un guscio vuoto: tutto il codice vive in
       imbiancate dalla neve *(`docs/vegetazione-design.md`, prova:
       `docs/vegetazione-verifica.md`, per chi impara:
       `docs/manuale/16-vegetazione.md`)*. Gli animali verranno dopo.
-- [ ] Fase 12 — atmosfera, cielo, nuvole e luce **(il prossimo: il ciclo
-      del giorno e della notte, per vedere le ombre)**
+- [x] **Fase 12, primo pezzo: il giorno e la notte** — il sole e la luna
+      all'ora giusta per il luogo e la data (gli algoritmi di Meeus, provati
+      sugli esempi del libro e sull'eclisse del 2024), l'ora legale, il tempo
+      che corre alla velocità scelta; il sole del livello che gira (le ombre
+      con lui), la luna con la luce della sua fase, la notte scura ma
+      leggibile, stelle e Via Lattea che girano col cielo, la luna con le
+      fasi, le finestre degli edifici accese la sera *(`docs/cielo-design.md`,
+      prova: `docs/cielo-verifica.md`, per chi impara: `docs/manuale/18-cielo.md`)*
+- [ ] Fase 12, il resto — le brezze (di mare, di valle) dal sole, le luci
+      delle strade, le stelle vere da un catalogo
       *(il perché di quest'ordine: `docs/fase8-design.md`, sezione 0)*
 
 ## Formato dei dati
@@ -120,7 +128,8 @@ cmake --build build
 ./build/geovegetation_tests Plugins/GeoWorld/Source/GeoTiles/TestData/vegetation_fixture.gvg
                              # 34 test  -- vegetazione: formato .gvg, griglia, chi cresce dove, forme (anche Nanite), materiale (colore, neve, vento), celle e bande
 ./build/geobuildings_tests Plugins/GeoWorld/Source/GeoTiles/TestData/buildings_fixture.gbd
-                             # 24 test  -- edifici: formato .gbd, triangolazione con i cortili, muri e tetti, una tile intera, monumenti (anche a parti), materiale (finestre, neve, bagnato)
+                             # 26 test  -- edifici: formato .gbd, triangolazione con i cortili, muri e tetti, una tile intera, monumenti (anche a parti), materiale (finestre, neve, bagnato, finestre accese di notte)
+./build/geosky_tests         # 33 test  -- cielo: giorni giuliani, tempo siderale, ora legale, sole e luna (gli esempi di Meeus, l'eclisse del 2024), levate e tramonti, luce del giorno e della notte, stelle e luna (lo shader compilato come C++)
 
 ./Plugins/GeoWorld/Tools/CheckSourceDiscipline.sh
 python3 Plugins/GeoWorld/Tools/CheckShadowedParameters.py
@@ -134,7 +143,7 @@ le classi di errore di compilazione gia' incontrate su Windows -- shadowing,
 simboli non esportati fra moduli, tipi di comando console inesistenti,
 collisioni da build unity, metodi inesistenti chiamati sulle nostre classi.
 
-558 test C++ in totale, piu' 229 test Python della pipeline.
+593 test C++ in totale, piu' 229 test Python della pipeline.
 
 **Dopo la prima prova su Torino** (materiale, scene Sentinel, prestazioni): `docs/prova-torino.md`.
 **Dopo la seconda** (troppi triangoli, RAM): `docs/prova-torino-2.md`.
@@ -198,4 +207,5 @@ Scorciatoie: `geo.Terrain.Demo <quote>` per il terreno,
 `geo.Imagery.Demo <quote> <ortofoto>` per il terreno vestito,
 `geo.Water.Demo <quote> <ortofoto> <acqua>` per l'acqua,
 `geo.Vegetation.Demo <quote> <ortofoto> <vegetazione>` per gli alberi,
-`geo.Buildings.Demo <quote> <ortofoto> <edifici>` per gli edifici.
+`geo.Buildings.Demo <quote> <ortofoto> <edifici>` per gli edifici,
+`geo.Sky.Demo` per un giorno intero di corsa (`geo.Sky.Time 18:30` per un'ora precisa).

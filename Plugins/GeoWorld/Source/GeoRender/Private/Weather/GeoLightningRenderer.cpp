@@ -2,6 +2,7 @@
 
 #include "GeoCoreModule.h"
 #include "Geo/GeoUnits.h"
+#include "Sky/GeoSkySubsystem.h"
 
 #include "Components/DynamicMeshComponent.h"
 #include "Components/LightComponent.h"
@@ -77,6 +78,14 @@ bool FGeoLightningRenderer::EnsureMaterial()
 
 double FGeoLightningRenderer::ReferenceLux(UWorld* World)
 {
+	// Con il cielo acceso: la luce che c'e' davvero adesso (di notte quella
+	// della luna), ma mai meno di un cinquantesimo del giorno: di notte il
+	// fulmine acceca.
+	if (const UGeoSkySubsystem* SkySubsystem = World ? World->GetSubsystem<UGeoSkySubsystem>() : nullptr)
+	{
+		const double SceneLux = SkySubsystem->GetSceneLux();
+		if (SceneLux > 0.0) { return FMath::Max(SceneLux, 0.02 * SkySubsystem->GetSunLux()); }
+	}
 	// Il primo sole del livello; senza (o di notte), qualche lux: il fulmine
 	// si vede comunque.
 	double Lux = 0.0;

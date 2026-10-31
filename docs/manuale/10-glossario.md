@@ -24,6 +24,8 @@ L'antenato di livello `La` di `(L, X, Y)` è `(La, X >> d, Y >> d)` con `d = L �
 **Attore** (`AActor`) — un oggetto che esiste nella scena di Unreal, con una
 posizione. È fatto di componenti. (1)
 
+**Atmosphere Sun Light** — la casella di una luce direzionale che la fa usare dalla SkyAtmosphere: il cielo si colora con lei, e la sua luce si attenua attraversando l'aria e si spegne quando va sotto la Terra. Fino a due: indice 0 il sole, 1 la luna. (18)
+
 **Ballpark** — la "trasformazione approssimata" di PROJ, che in mancanza della
 griglia geoidica non applica lo scostamento verticale, in silenzio. (3)
 
@@ -90,15 +92,21 @@ oggi ne costa una. (6)
 
 **Ear clipping** — un modo di triangolare un poligono: si taglia via un'"orecchia" (tre vertici consecutivi che fanno un triangolo tutto dentro) e si ricomincia. Con i buchi (i cortili) si collega prima ogni buco al contorno con un ponte. (17)
 
+**Eclittica** — il cerchio che il sole sembra percorrere nel cielo in un anno, inclinato di 23,44° sull'equatore celeste. La luna ci sta vicina (5°). (18)
+
 **ECEF** (*Earth-Centered, Earth-Fixed*) — coordinate cartesiane con l'origine nel
 centro della Terra. **L'unica autorità** del progetto. (2)
 
 **Editor / PIE / Game** — i tre contesti in cui gira il codice. Nell'editor la
 camera non è un attore. (1)
 
+**Elongazione** — l'angolo fra il sole e la luna (o un pianeta) visti dalla Terra. Dice la fase: 0° luna nuova, 180° piena. (18)
+
 **Ellissoide** — la forma matematica della Terra: un'ellisse fatta ruotare. (2)
 
 **Estrusione** — alzare una sagoma piana fino a un'altezza: i lati diventano muri verticali, la sagoma in alto il tetto. (17)
+
+**Equazione del tempo** — di quanto il sole vero anticipa (o ritarda) il sole "medio" degli orologi: fino a 16 minuti a novembre e −14 a febbraio. Per questo il mezzogiorno vero non è alle 12. (18)
 
 **Errore geometrico** — di quanti metri, al massimo, un livello si discosta dal
 terreno vero. Qui approssimato con il passo fra i post. (5)
@@ -112,9 +120,13 @@ del LOD. Soglia di default: 8 pixel (era 4: vedi `docs/prova-torino-2.md`). (5)
 
 **ExponentialHeightFog** — l'attore della nebbia di Unreal: una densità che cala con la quota. La precipitazione ne alza la densità (`56,4 / visibilità in m`) e la rimette com'era; nell'editor quella del livello non si tocca, perché si salverebbe. (15)
 
+**Fase (della luna)** — quanta parte del disco è illuminata. La luce che arriva cala molto più della parte illuminata: al primo quarto un decimo della piena (legge di Allen). (18)
+
 **Fascia** (del piano di residenza) — un gruppo di tile del piano con la stessa urgenza: 0 = adesso, 1..3 = posizioni previste, l'ultima = anello di sicurezza. (11)
 
 **FDynamicMesh3** — la mesh "da lavoro" di Unreal (modulo GeometryCore): vertici e triangoli più gli overlay degli attributi (normali, UV, colori). Si prepara su un worker e si consegna a un `UDynamicMeshComponent` con uno spostamento. (6, 17)
+
+**Giorno giuliano** — il tempo degli astronomi: i giorni (con la frazione) da un mezzogiorno del 4713 a.C. Il 1 gennaio 2000 alle 12 è 2.451.545,0. (18)
 
 **Firma del terreno** — un hash delle tile di terreno visibili sotto una cella (e del passo della mesh). Quando cambia, il terreno sotto si è affinato e la cella si rifà sopra il terreno nuovo. (16)
 
@@ -234,10 +246,14 @@ edifici, boschi, acqua. Licenza ODbL, da citare. Fonte della Fase 8 e delle succ
 
 **Nube-suolo** — il fulmine che arriva a terra, circa uno su tre; gli altri restano dentro la nube e si vedono solo come il cielo che si illumina. (15)
 
+**Ora legale** — in Europa, dall'ultima domenica di marzo all'ultima di ottobre (alle 01:00 UT) gli orologi vanno un'ora avanti: in Italia UT+2 (CEST) invece di UT+1 (CET). (18)
+
 **Ortofoto** — immagine aerea o satellitare raddrizzata, in cui ogni pixel sta alla
 sua coordinata. (7)
 
 **Parte (di un edificio)** (`building:part`) — nello schema Simple 3D Buildings di OSM, un pezzo di un edificio con la sua altezza e il suo tetto (la navata, il campanile). Si disegnano le parti e non il contorno, che resta "solo contorno" per i monumenti. (17)
+
+**Parallasse (della luna)** — la luna vista dalla superficie della Terra sta più in basso che vista dal centro: fino a un grado all'orizzonte. (18)
 
 **Per Instance Custom Data** — qualche numero per ogni istanza di un componente di istanze, letto dal materiale con il nodo PerInstanceCustomData. Per gli alberi: il verde, l'altezza, la fase del vento. (16)
 
@@ -298,6 +314,8 @@ quote) o un'area (i pixel). Decide se il bordo è condiviso. (3, 7)
 
 **Sagoma** (*footprint*) — il contorno di un edificio visto dall'alto, con i cortili come buchi. È quello che OSM disegna. (17)
 
+**Rifrazione** — l'aria piega la luce: un astro all'orizzonte sembra mezzo grado più alto di dove è. Al tramonto il sole è già sotto quando lo vediamo toccare l'orizzonte. (18)
+
 **Scavo** — abbassare le quote del terreno sotto l'acqua fino al fondale prima di costruirne la mesh, così l'acqua ha una profondità vera. Lo fa il terreno, con la funzione che gli consegna l'acqua (`SetHeightEditor`). (13)
 
 **SCL** (*Scene Classification Layer*) — il file di Sentinel-2 L2A che classifica ogni pixel da 20 m: nuvole, ombre di nuvole, cirri, neve, acqua... Serve a togliere le nuvole dalle ortofoto. (7)
@@ -312,6 +330,8 @@ quote) o un'area (i pixel). Decide se il bordo è condiviso. (3, 7)
 
 **Single Layer Water** — il modello d'ombreggiatura di Unreal per l'acqua: il colore viene da assorbimento e diffusione nello spessore d'acqua letto dal depth buffer, non da un BaseColor. (13)
 
+**SkyAtmosphere** — il componente di Unreal che simula l'aria: il blu del cielo, il rosso al tramonto, il crepuscolo, la luce del sole attenuata. (18)
+
 **Spazio scalato** — le coordinate ECEF divise per i semiassi (x/a, y/a, z/b): l'ellissoide diventa la sfera unitaria e il test d'orizzonte diventa esatto. (5, 11)
 
 **Sponda a V** — la forma dello scavo attorno alla riva: la stessa funzione della distanza fa la profondità dentro l'acqua e il tetto del terreno fuori, zero sulla riva. Così i triangoli della mesh incrociano l'acqua proprio sulla riva. (13)
@@ -324,12 +344,18 @@ toccare il subsystem. (2)
 
 **Stampe della posizione** — il riquadro a destra con latitudine, longitudine, quota (ellissoide, livello del mare, dal suolo) e rotta. Disegnato con `UDebugDrawService`, anche nell'editor. (13)
 
+**Stop** — un raddoppio (o un dimezzamento) di luce. Fra il sole e la luna piena ci sono 18 stop; l'esposizione automatica ne recupera una decina. (18)
+
 **Strato limite** — i primi ~600 m d'aria, dove il vento sente l'attrito del suolo: cresce con il logaritmo della quota e gira con lei. Sopra c'è il vento di gradiente. (14)
 
 **Strato puro / ponte Unreal** — la divisione di ogni modulo in C++ standard
 testabile e codice che usa il motore. (0)
 
 **Subsystem** — un "gestore" che Unreal crea e distrugge da solo. (1)
+
+**Tempo siderale** — quanto è girata la Terra rispetto alle stelle (un giro in 23 h 56 min). Con la longitudine dice quali stelle sono sul meridiano. (18)
+
+**TT e UT** — il Tempo Terrestre, uniforme (quello dei calcoli dei pianeti), e il Tempo Universale, che segue la rotazione della Terra (quello degli orologi). Differiscono di ΔT, ~69 s nel 2024. (18)
 
 **Teletrasporto** — uno spostamento, in un aggiornamento solo, oltre metà della quota. Svuota le code, azzera la velocità, fa partire il riscaldamento. (11)
 
@@ -485,6 +511,8 @@ il primo comando da provare quando non si vede niente. (6)
 | `Public/Mesh/GroundCells.h` | celle, bande, isteresi, firma e terreno disegnato: condivisi da alberi ed edifici |
 | `Public/Buildings/BuildingMesh.h`, `BuildingShader.inl` | gli edifici (puro): pulizia, triangolazione, muri, tetti; il materiale (HLSL e C++) |
 | `Public/Buildings/GeoBuildingsSubsystem.h`, `GeoBuildingSettings.h` | il subsystem degli edifici in Unreal, la libreria dei monumenti (Project Settings) |
+| `Public/Sky/Astronomy.h`, `DayLight.h`, `NightSkyShader.inl` | il cielo (puro): sole, luna, ora locale, luce del giorno e della notte; stelle e luna (HLSL e C++) |
+| `Public/Sky/GeoSkySubsystem.h`, `GeoSkySettings.h` | il giorno e la notte in Unreal: il sole del livello, la luna, l'esposizione, la nebbia, le stelle; le impostazioni |
 | `Public/GeoPositionHudSubsystem.h` | le stampe della posizione |
 | `Private/GeoRenderModule.cpp` | comandi `geo.Lod.*`, `geo.Terrain.*`, `geo.Imagery.*`, `geo.Roads.*`, `geo.Water.*`, `geo.Weather.*`, `geo.Hud`, `geo.Fly*` |
 | `Private/**/*.cpp` | le implementazioni |
@@ -496,14 +524,14 @@ il primo comando da provare quando non si vede niente. (6)
 | `GeoWorldEditor.Build.cs` | `MaterialEditor`, `AssetTools` |
 | `Private/GeoWorldEditorModule.cpp` | il modulo |
 | `Private/GeoVegetationModelFactory.cpp` | `geo.Vegetation.CreateModels`: i modelli Nanite degli alberi |
-| `Private/GeoTerrainMaterialFactory.cpp` | `geo.Imagery.CreateMaterial`: `M_GeoTerrain`, `M_GeoRoad`, `M_GeoWater`, `MPC_GeoWater`, `MPC_GeoWeather`, `M_GeoPrecipitation`, `M_GeoLightning`, `M_GeoClouds`, `M_GeoVegetation`, `M_GeoBuilding` |
+| `Private/GeoTerrainMaterialFactory.cpp` | `geo.Imagery.CreateMaterial`: `M_GeoTerrain`, `M_GeoRoad`, `M_GeoWater`, `MPC_GeoWater`, `MPC_GeoWeather`, `M_GeoPrecipitation`, `M_GeoLightning`, `M_GeoClouds`, `M_GeoVegetation`, `M_GeoBuilding`, `M_GeoNightSky` |
 
 ### Strumenti
 
 | File | Contenuto |
 |---|---|
-| `Tools/StandaloneTests/*` | i dieci eseguibili di test senza Unreal |
-| `Tools/StandaloneTests/HlslShim.h` | quel tanto di HLSL che serve a compilare come C++ gli shader di nuvole, suolo, alberi ed edifici |
+| `Tools/StandaloneTests/*` | gli undici eseguibili di test senza Unreal |
+| `Tools/StandaloneTests/HlslShim.h` | quel tanto di HLSL che serve a compilare come C++ gli shader di nuvole, suolo, alberi, edifici e cielo |
 | `Tools/CheckSourceDiscipline.sh` | sette regole di disciplina |
 | `Tools/CheckShadowedParameters.py` | parametri che nascondono campi |
 | `Tools/CheckModuleExports.py` | simboli invisibili fra moduli |
@@ -559,6 +587,8 @@ il primo comando da provare quando non si vede niente. (6)
 | `docs/vegetazione-verifica.md` | come provare la vegetazione |
 | `docs/edifici-design.md` | gli edifici: dati, formato, muri e tetti, materiale, celle, monumenti |
 | `docs/edifici-verifica.md` | come provare gli edifici |
+| `docs/cielo-design.md` | il cielo: l'astronomia, la luce, la notte, cosa tocca del livello |
+| `docs/cielo-verifica.md` | come provare il giorno e la notte |
 | `docs/residenza-design.md` | cosa tenere pronto: posizione, velocità, mesh nascoste |
 | `docs/residenza-verifica.md` | come verificare la residenza |
 | `docs/prova-torino.md` | la prima prova vera: cause del mosaico, prestazioni, tutta Italia |

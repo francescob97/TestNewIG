@@ -153,6 +153,16 @@ else()
 	target_compile_options(geobuildings_tests PRIVATE -Wall -Wextra -Werror=shadow -O2)
 endif()
 
+# --- Cielo: sole, luna, ora locale, luce, shader della notte -------------------
+add_executable(geosky_tests geosky_main.cpp)
+target_include_directories(geosky_tests PRIVATE ${GEORENDER_DIR}/Public ${GEOCORE_DIR}/Public)
+
+if (MSVC)
+	target_compile_options(geosky_tests PRIVATE /W4)
+else()
+	target_compile_options(geosky_tests PRIVATE -Wall -Wextra -Werror=shadow -O2)
+endif()
+
 enable_testing()
 add_test(NAME geocore COMMAND geocore_tests)
 add_test(NAME geotiles COMMAND geotiles_tests)
@@ -168,3 +178,4 @@ add_test(NAME geovegetation COMMAND geovegetation_tests
 	${CMAKE_CURRENT_SOURCE_DIR}/../../Source/GeoTiles/TestData/vegetation_fixture.gvg)
 add_test(NAME geobuildings COMMAND geobuildings_tests
 	${CMAKE_CURRENT_SOURCE_DIR}/../../Source/GeoTiles/TestData/buildings_fixture.gbd)
+add_test(NAME geosky COMMAND geosky_tests)

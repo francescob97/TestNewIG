@@ -54,6 +54,7 @@ Due convenzioni tipografiche:
 | 15 | `15-meteo.md` | Il meteo: pioggia, neve, grandine (quota neve, visibilità, suolo, particelle), fulmini e tuono, nuvole, ghiaccio e grandine sul terreno |
 | 16 | `16-vegetazione.md` | Fase 11 — La vegetazione: alberi e arbusti dalla copertura del suolo, una griglia fissa nel mondo, forme fatte da codice, celle e bande attorno alla camera |
 | 17 | `17-edifici.md` | Fase 10 — Gli edifici: sagome e altezze da OpenStreetMap, dalla sagoma al solido (cortili, tetti), finestre disegnate dal materiale, i monumenti da una libreria |
+| 18 | `18-cielo.md` | Fase 12, primo pezzo — Il cielo: il sole e la luna all'ora giusta (l'astronomia di Meeus), le levate e i tramonti, la notte (luna, esposizione, stelle, finestre accese) |
 
 Tutti i comandi della console di Unreal, con la spiegazione di ognuno, sono in
 `docs/comandi-unreal.md` (generato dal codice; in Unreal: `geo.Help`).

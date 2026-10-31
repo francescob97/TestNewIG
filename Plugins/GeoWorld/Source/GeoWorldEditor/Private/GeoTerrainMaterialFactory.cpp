@@ -522,6 +522,11 @@ namespace
 	 *                   le nuvole: Weather/Clouds.h, FCloudShaderParameters
 	 *   VegetationWind = (vento a 10 m verso nord, verso est in m/s, raffica 0..1,
 	 *                   orologio in s): lo scrive UGeoVegetationSubsystem
+	 *   SkySun        = (direzione del sole nel mondo, luce 0..1)
+	 *   SkyMoon       = (direzione della luna nel mondo, raggio in radianti)
+	 *   SkyEquatorX/Y/Z = le righe della rotazione mondo -> cielo equatoriale (le stelle)
+	 *   SkyNight      = (stelle 0..1, sole del livello in lux, finestre accese 0..1, cielo sereno 0..1)
+	 *                   tutti scritti da UGeoSkySubsystem
 	 *
 	 * I valori di riposo non fanno niente: suolo asciutto, neve a 100 km,
 	 * nessuna particella, nessuna nuvola (la soglia dei cumuli a 2: mai).
@@ -549,6 +554,13 @@ namespace
 		Wanted.Emplace(FName(TEXT("CloudFlash")), FLinearColor(0.0f, 0.0f, 0.0f, 0.0f));
 		Wanted.Emplace(FName(TEXT("CloudFair")), FLinearColor(0.0f, 0.0f, 0.0f, 0.0f));
 		Wanted.Emplace(FName(TEXT("VegetationWind")), FLinearColor(0.0f, 0.0f, 0.0f, 0.0f));
+		// Il cielo di riposo: sole allo zenit, luna sotto la Terra, niente stelle ne' finestre.
+		Wanted.Emplace(FName(TEXT("SkySun")), FLinearColor(0.0f, 0.0f, 1.0f, 1.0f));
+		Wanted.Emplace(FName(TEXT("SkyMoon")), FLinearColor(0.0f, 0.0f, -1.0f, 0.0045f));
+		Wanted.Emplace(FName(TEXT("SkyEquatorX")), FLinearColor(1.0f, 0.0f, 0.0f, 0.0f));
+		Wanted.Emplace(FName(TEXT("SkyEquatorY")), FLinearColor(0.0f, 1.0f, 0.0f, 0.0f));
+		Wanted.Emplace(FName(TEXT("SkyEquatorZ")), FLinearColor(0.0f, 0.0f, 1.0f, 0.0f));
+		Wanted.Emplace(FName(TEXT("SkyNight")), FLinearColor(0.0f, 10.0f, 0.0f, 1.0f));
 		return CreateOrUpdateCollection(WeatherCollectionPackagePath, WeatherCollectionAssetName, Wanted);
 	}
 
@@ -1855,10 +1867,19 @@ namespace
 
 	/** Il nodo Custom: il testo di Buildings/BuildingShader.inl (i test lo compilano come C++). */
 #define GEO_BUILDING_COLOUR(...) #__VA_ARGS__
+#define GEO_BUILDING_LIGHTS(...)
 	const char* BuildingColourCode =
 #include "Buildings/BuildingShader.inl"
 		;
 #undef GEO_BUILDING_COLOUR
+#undef GEO_BUILDING_LIGHTS
+#define GEO_BUILDING_COLOUR(...)
+#define GEO_BUILDING_LIGHTS(...) #__VA_ARGS__
+	const char* BuildingLightsCode =
+#include "Buildings/BuildingShader.inl"
+		;
+#undef GEO_BUILDING_COLOUR
+#undef GEO_BUILDING_LIGHTS
 
 	/**
 	 * M_GeoBuilding: il materiale degli edifici estrusi (UGeoBuildingsSubsystem).
@@ -1869,6 +1890,8 @@ namespace
 	 *   TexCoord 1 (Style: altezza di un piano, caso dell'edificio)
 	 *   VertexNormalWS, WorldPosition, MPC_GeoWeather GroundWeather e GroundFrame
 	 *       --> Custom "Edifici (colore)" = float4(colore, ruvidita')
+	 *   Paint, Facade, Style, VertexNormalWS, MPC_GeoWeather SkyNight
+	 *       --> Custom "Edifici (luci)" = le finestre accese di notte --> Emissive
 	 *       --> Base Color (RGB), Roughness (A)
 	 *
 	 * NOTA UE: le finestre sono DISEGNATE dal materiale (BuildingShader.inl),
@@ -1942,6 +1965,101 @@ namespace
 		G.Connect(ColourMask, TEXT(""), MP_BaseColor);
 		G.Connect(RoughMask, TEXT(""), MP_Roughness);
 
+		// Le finestre accese: lo stesso disegno delle finestre, acceso dal cielo.
+		TArray<FNamedPin> LightInputs;
+		LightInputs.Add(FNamedPin{ TEXT("Paint"), FPin{ PaintColour, 0 } });
+		LightInputs.Add(FNamedPin{ TEXT("Facade"), FPin{ Facade, 0 } });
+		LightInputs.Add(FNamedPin{ TEXT("Style"), FPin{ Style, 0 } });
+		LightInputs.Add(FNamedPin{ TEXT("Normal"), FPin{ Normal, 0 } });
+		LightInputs.Add(FNamedPin{ TEXT("Night"), CollectionParameter(G, Collection, TEXT("SkyNight"), -1350, 550) });
+		const FString LightsCode(ANSI_TO_TCHAR(BuildingLightsCode));
+		UMaterialExpressionCustom* Lights = MakeCustom(G, TEXT("Edifici (luci)"), *LightsCode, CMOT_Float3, LightInputs, -700, 300);
+		G.Connect(Lights, TEXT(""), MP_EmissiveColor);
+
+		if (!G.bOk) { return false; }
+		UMaterialEditingLibrary::RecompileMaterial(Material);
+		return true;
+	}
+}
+
+// ============================================================================
+//  IL CIELO DI NOTTE: M_GeoNightSky
+// ============================================================================
+
+namespace
+{
+	const TCHAR* NightSkyMaterialPackagePath = TEXT("/GeoWorld/Materials/M_GeoNightSky");
+	const TCHAR* NightSkyMaterialAssetName = TEXT("M_GeoNightSky");
+
+	/** Il nodo Custom: il testo di Sky/NightSkyShader.inl (i test lo compilano come C++). */
+#define GEO_NIGHT_SKY(...) #__VA_ARGS__
+	const char* NightSkyCode =
+#include "Sky/NightSkyShader.inl"
+		;
+#undef GEO_NIGHT_SKY
+
+	/** Un flag booleano del materiale PER NOME (vedi SetUsageFlag), acceso o spento. */
+	bool SetMaterialFlag(UMaterial* Material, const TCHAR* PropertyName, bool bValue)
+	{
+		FBoolProperty* Flag = Material ? FindFProperty<FBoolProperty>(UMaterial::StaticClass(), FName(PropertyName)) : nullptr;
+		if (!Flag)
+		{
+			Report(FString::Printf(TEXT("%s: questa versione del motore non ha %s (controllalo a mano in Details)."),
+				Material ? *Material->GetName() : TEXT("?"), PropertyName), FColor::Yellow);
+			return false;
+		}
+		Flag->SetPropertyValue_InContainer(Material, bValue);
+		return true;
+	}
+
+	/**
+	 * M_GeoNightSky: stelle, Via Lattea e luna, sulla sfera enorme che
+	 * UGeoSkySubsystem tiene attorno alla camera. Unlit, ADDITIVO (aggiunge
+	 * luce al cielo dietro, non lo copre), due facce (la camera sta dentro).
+	 *
+	 *   CameraVectorWS, MPC_GeoWeather SkyEquatorX/Y/Z, SkyMoon, SkySun, SkyNight
+	 *       --> Custom "Cielo di notte" (float3) --> Emissive
+	 *
+	 * NOTA UE: un oggetto trasparente a 100 km riceverebbe tutta la nebbia e la
+	 * prospettiva aerea: le stelle sparirebbero nel bianco. "Apply Fogging" e
+	 * "Apply Cloud Fogging" si spengono (per nome: i campi cambiano fra le
+	 * versioni). "Responsive AA" tiene le stelle, piccole come un pixel, al
+	 * riparo dalla sfocatura dell'antialiasing temporale.
+	 */
+	bool BuildNightSkyGraph(UMaterial* Material)
+	{
+		UMaterialParameterCollection* Collection = LoadObject<UMaterialParameterCollection>(nullptr,
+			*FString::Printf(TEXT("%s.%s"), WeatherCollectionPackagePath, WeatherCollectionAssetName), nullptr,
+			LOAD_NoWarn | LOAD_Quiet);
+		if (!Collection)
+		{
+			Report(TEXT("M_GeoNightSky: manca MPC_GeoWeather."), FColor::Red);
+			return false;
+		}
+
+		Material->MaterialDomain = MD_Surface;
+		Material->SetShadingModel(MSM_Unlit);
+		Material->BlendMode = BLEND_Additive;
+		Material->TwoSided = true;
+		SetMaterialFlag(Material, TEXT("bUseTranslucencyVertexFog"), false);
+		SetMaterialFlag(Material, TEXT("bApplyCloudFogging"), false);
+		SetMaterialFlag(Material, TEXT("bEnableResponsiveAA"), true);
+
+		FGraph G{ Material };
+		UMaterialExpressionCameraVectorWS* View = G.Make<UMaterialExpressionCameraVectorWS>(-1350, -300);
+		if (!G.bOk) { return false; }
+		TArray<FNamedPin> Inputs;
+		Inputs.Add(FNamedPin{ TEXT("View"), FPin{ View, 0 } });
+		Inputs.Add(FNamedPin{ TEXT("EqX"), CollectionParameter(G, Collection, TEXT("SkyEquatorX"), -1350, -200) });
+		Inputs.Add(FNamedPin{ TEXT("EqY"), CollectionParameter(G, Collection, TEXT("SkyEquatorY"), -1350, -100) });
+		Inputs.Add(FNamedPin{ TEXT("EqZ"), CollectionParameter(G, Collection, TEXT("SkyEquatorZ"), -1350, 0) });
+		Inputs.Add(FNamedPin{ TEXT("Moon"), CollectionParameter(G, Collection, TEXT("SkyMoon"), -1350, 100) });
+		Inputs.Add(FNamedPin{ TEXT("Sun"), CollectionParameter(G, Collection, TEXT("SkySun"), -1350, 200) });
+		Inputs.Add(FNamedPin{ TEXT("Night"), CollectionParameter(G, Collection, TEXT("SkyNight"), -1350, 300) });
+		const FString Code(ANSI_TO_TCHAR(NightSkyCode));
+		UMaterialExpressionCustom* Sky = MakeCustom(G, TEXT("Cielo di notte"), *Code, CMOT_Float3, Inputs, -700, 0);
+		G.Connect(Sky, TEXT(""), MP_EmissiveColor);
+
 		if (!G.bOk) { return false; }
 		UMaterialEditingLibrary::RecompileMaterial(Material);
 		return true;
@@ -1950,7 +2068,7 @@ namespace
 
 static FAutoConsoleCommand GeoImageryCreateMaterialCommand(
 	TEXT("geo.Imagery.CreateMaterial"),
-	TEXT("Costruisce (o RIFA') in /GeoWorld/Materials: M_GeoTerrain (foto e strade dipinte), M_GeoRoad (strade 3D), M_GeoWater e MPC_GeoWater (acqua), MPC_GeoWeather, M_GeoPrecipitation, M_GeoLightning e M_GeoClouds (meteo), M_GeoVegetation (alberi), M_GeoBuilding (edifici)."),
+	TEXT("Costruisce (o RIFA') in /GeoWorld/Materials: M_GeoTerrain (foto e strade dipinte), M_GeoRoad (strade 3D), M_GeoWater e MPC_GeoWater (acqua), MPC_GeoWeather, M_GeoPrecipitation, M_GeoLightning e M_GeoClouds (meteo), M_GeoVegetation (alberi), M_GeoBuilding (edifici), M_GeoNightSky (stelle e luna)."),
 	FConsoleCommandDelegate::CreateStatic([]()
 	{
 		// Il meteo per primo: terreno e strade leggono MPC_GeoWeather (suolo
@@ -1976,8 +2094,10 @@ static FAutoConsoleCommand GeoImageryCreateMaterialCommand(
 			&& CreateOrRebuildMaterial(VegetationMaterialPackagePath, VegetationMaterialAssetName, &BuildVegetationGraph);
 		const bool bBuildings = bWeatherCollection
 			&& CreateOrRebuildMaterial(BuildingMaterialPackagePath, BuildingMaterialAssetName, &BuildBuildingGraph);
+		const bool bNightSky = bWeatherCollection
+			&& CreateOrRebuildMaterial(NightSkyMaterialPackagePath, NightSkyMaterialAssetName, &BuildNightSkyGraph);
 
-		if (bTerrain && bRoad && bWater && bPrecipitation && bLightning && bClouds && bVegetation && bBuildings)
+		if (bTerrain && bRoad && bWater && bPrecipitation && bLightning && bClouds && bVegetation && bBuildings && bNightSky)
 		{
 			Report(TEXT("Materiali pronti. Riavvia il Play (o rilancia geo.Roads.Demo / geo.Water.Demo)."));
 		}
@@ -1998,6 +2118,11 @@ static FAutoConsoleCommand GeoImageryCreateMaterialCommand(
 		if (!bVegetation)
 		{
 			Report(TEXT("M_GeoVegetation non fatto: gli alberi restano grigi e fermi. Output Log (LogGeoWorld) e docs/vegetazione-verifica.md"),
+				FColor::Red);
+		}
+		if (!bNightSky)
+		{
+			Report(TEXT("M_GeoNightSky non fatto: di notte niente stelle ne' luna. Output Log (LogGeoWorld) e docs/cielo-verifica.md"),
 				FColor::Red);
 		}
 		if (!bBuildings)

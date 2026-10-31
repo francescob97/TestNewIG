@@ -12,6 +12,7 @@
 #include "Imagery/GeoImagerySubsystem.h"
 #include "Lod/GeoQuadtreeSubsystem.h"
 #include "Roads/GeoRoadsSubsystem.h"
+#include "Sky/GeoSkySubsystem.h"
 #include "Terrain/GeoTerrainSubsystem.h"
 #include "Streaming/GeoBuildingStreamingSubsystem.h"
 #include "Streaming/GeoImageryStreamingSubsystem.h"
@@ -2928,4 +2929,272 @@ static FAutoConsoleCommandWithWorldAndArgs GeoBuildingsDemoCommand(
 		GeoTerrainConsole::Report(TEXT("Edifici accesi, 300 m sopra la zona con piu' edifici. Scendi: le celle vicine hanno tutto, con le finestre."));
 		GeoTerrainConsole::Report(TEXT("La neve sui tetti: geo.Weather.SnowCover 0. I monumenti: Project Settings > Plugins > GeoWorld - Edifici"));
 		GeoTerrainConsole::Report(TEXT("Se gli edifici sono grigi e senza finestre: geo.Imagery.CreateMaterial (crea M_GeoBuilding)"));
+	}));
+
+// ============================================================================
+//  geo.Sky.* -- il giorno e la notte
+// ============================================================================
+
+namespace GeoSkyConsole
+{
+	static UGeoSkySubsystem* Get(UWorld* World)
+	{
+		return World ? World->GetSubsystem<UGeoSkySubsystem>() : nullptr;
+	}
+
+	/** Dove sono sole e luna adesso, in tre righe. */
+	static void ReportState(const UGeoSkySubsystem* Sky)
+	{
+		const FGeoSkyState& State = Sky->GetState();
+		if (!State.bValid)
+		{
+			GeoTerrainConsole::Report(TEXT("Cielo: in attesa della camera (apri un dataset o muovi la vista)"), FColor::Yellow);
+			return;
+		}
+		const GeoWorld::Sky::FSkyBodies& Bodies = State.Bodies;
+		GeoTerrainConsole::Report(FString::Printf(TEXT("Cielo: %s %s %s, velocita' x%g"),
+			*State.LocalDate, *State.LocalClock, *State.ZoneName, Sky->GetSpeed()));
+		GeoTerrainConsole::Report(FString::Printf(TEXT("Sole: azimut %.0f, altezza %.1f gradi; sorge %s, tramonta %s"),
+			Bodies.Sun.AzimuthDeg, Bodies.Sun.AltitudeDeg, *State.Sunrise, *State.Sunset));
+		GeoTerrainConsole::Report(FString::Printf(TEXT("Luna: %s %.0f%%, altezza %.1f gradi; sorge %s, tramonta %s"),
+			Bodies.bMoonWaxing ? TEXT("crescente") : TEXT("calante"), 100.0 * Bodies.MoonIllumination,   /* percentuale, non-unita */
+			Bodies.Moon.AltitudeDeg, *State.Moonrise, *State.Moonset));
+		if (!Sky->GetProblem().IsEmpty()) { GeoTerrainConsole::Report(Sky->GetProblem(), FColor::Red); }
+		if (!Sky->GetAdvice().IsEmpty()) { GeoTerrainConsole::Report(Sky->GetAdvice(), FColor::Yellow); }
+	}
+
+	/** "1" / "0", o niente per invertire. */
+	static bool Flag(const TArray<FString>& Args, bool bCurrent)
+	{
+		return (Args.Num() >= 1) ? (FCString::Atoi(*Args[0]) != 0) : !bCurrent;
+	}
+}
+
+static FAutoConsoleCommandWithWorldAndArgs GeoSkyTimeCommand(
+	TEXT("geo.Sky.Time"),
+	TEXT("geo.Sky.Time <HH:MM> [AAAA-MM-GG] - l'ora locale (e la data): geo.Sky.Time 18:30, geo.Sky.Time 21:00 2026-06-21. Senza argomenti dice dove sono sole e luna."),
+	FConsoleCommandWithWorldAndArgsDelegate::CreateStatic(
+		[](const TArray<FString>& Args, UWorld* World)
+	{
+		UGeoSkySubsystem* Sky = GeoSkyConsole::Get(World);
+		if (!Sky) { return; }
+		if (Args.Num() >= 2)
+		{
+			int32 Year = 0, Month = 0, Day = 0;
+			if (!GeoWorld::Sky::ParseDate(TCHAR_TO_UTF8(*Args[1]), Year, Month, Day))
+			{
+				GeoTerrainConsole::Report(TEXT("Data non valida: AAAA-MM-GG, per esempio 2026-06-21"), FColor::Red);
+				return;
+			}
+			Sky->SetLocalDate(Year, Month, Day);
+		}
+		if (Args.Num() >= 1)
+		{
+			double Hours = 0.0;
+			if (!GeoWorld::Sky::ParseClock(TCHAR_TO_UTF8(*Args[0]), Hours))
+			{
+				GeoTerrainConsole::Report(TEXT("Ora non valida: HH:MM, per esempio 18:30"), FColor::Red);
+				return;
+			}
+			Sky->SetLocalHour(Hours);
+			Sky->Tick(0.0f);
+		}
+		GeoSkyConsole::ReportState(Sky);
+	}));
+
+static FAutoConsoleCommandWithWorldAndArgs GeoSkyDateCommand(
+	TEXT("geo.Sky.Date"),
+	TEXT("geo.Sky.Date <AAAA-MM-GG> - il giorno, alla stessa ora locale: geo.Sky.Date 2026-12-21 (il solstizio d'inverno)."),
+	FConsoleCommandWithWorldAndArgsDelegate::CreateStatic(
+		[](const TArray<FString>& Args, UWorld* World)
+	{
+		UGeoSkySubsystem* Sky = GeoSkyConsole::Get(World);
+		if (!Sky) { return; }
+		int32 Year = 0, Month = 0, Day = 0;
+		if (Args.Num() < 1 || !GeoWorld::Sky::ParseDate(TCHAR_TO_UTF8(*Args[0]), Year, Month, Day))
+		{
+			GeoTerrainConsole::Report(TEXT("Uso: geo.Sky.Date AAAA-MM-GG, per esempio 2026-06-21"), FColor::Red);
+			return;
+		}
+		Sky->SetLocalDate(Year, Month, Day);
+		Sky->Tick(0.0f);
+		GeoSkyConsole::ReportState(Sky);
+	}));
+
+static FAutoConsoleCommandWithWorldAndArgs GeoSkySpeedCommand(
+	TEXT("geo.Sky.Speed"),
+	TEXT("geo.Sky.Speed <x> - quanto corre il tempo: 0 fermo, 1 come l'orologio, 60 un minuto al secondo, 600 un giorno in 2,4 minuti; negativo all'indietro."),
+	FConsoleCommandWithWorldAndArgsDelegate::CreateStatic(
+		[](const TArray<FString>& Args, UWorld* World)
+	{
+		UGeoSkySubsystem* Sky = GeoSkyConsole::Get(World);
+		if (!Sky) { return; }
+		if (Args.Num() >= 1) { Sky->SetSpeed(FMath::Clamp(FCString::Atod(*Args[0]), -100000.0, 100000.0)); }
+		if (Sky->GetSpeed() == 0.0)
+		{
+			GeoTerrainConsole::Report(TEXT("Il tempo e' fermo (geo.Sky.Speed 60: un minuto al secondo)"));
+			return;
+		}
+		const double DaySeconds = 86400.0 / FMath::Abs(Sky->GetSpeed());
+		const FString Day = DaySeconds >= 7200.0 ? FString::Printf(TEXT("%.1f ore"), DaySeconds / 3600.0)
+			: (DaySeconds >= 120.0 ? FString::Printf(TEXT("%.1f minuti"), DaySeconds / 60.0) : FString::Printf(TEXT("%.0f secondi"), DaySeconds));
+		GeoTerrainConsole::Report(FString::Printf(TEXT("Il tempo corre x%g: un giorno in %s%s"), Sky->GetSpeed(), *Day,
+			Sky->GetSpeed() < 0.0 ? TEXT(", all'indietro") : TEXT("")));
+	}));
+
+static FAutoConsoleCommandWithWorld GeoSkyNowCommand(
+	TEXT("geo.Sky.Now"),
+	TEXT("geo.Sky.Now - l'ora vera, adesso, e il tempo che corre come l'orologio."),
+	FConsoleCommandWithWorldDelegate::CreateStatic([](UWorld* World)
+	{
+		UGeoSkySubsystem* Sky = GeoSkyConsole::Get(World);
+		if (!Sky) { return; }
+		Sky->SetToNow();
+		Sky->Tick(0.0f);
+		GeoSkyConsole::ReportState(Sky);
+	}));
+
+static FAutoConsoleCommandWithWorldAndArgs GeoSkyEnableCommand(
+	TEXT("geo.Sky.Enable"),
+	TEXT("geo.Sky.Enable <0|1> - il cielo muove il sole del livello (0: il sole, la nebbia e l'esposizione tornano come erano)."),
+	FConsoleCommandWithWorldAndArgsDelegate::CreateStatic(
+		[](const TArray<FString>& Args, UWorld* World)
+	{
+		UGeoSkySubsystem* Sky = GeoSkyConsole::Get(World);
+		if (!Sky) { return; }
+		const bool bValue = GeoSkyConsole::Flag(Args, Sky->IsEnabled());
+		Sky->SetEnabled(bValue);
+		GeoTerrainConsole::Report(bValue ? TEXT("Cielo: ON (il sole segue l'ora)") : TEXT("Cielo: OFF (il livello e' tornato com'era)"));
+	}));
+
+static FAutoConsoleCommandWithWorldAndArgs GeoSkyZoneCommand(
+	TEXT("geo.Sky.Zone"),
+	TEXT("geo.Sky.Zone <cet|ore> - il fuso: cet l'ora italiana (con l'ora legale d'estate), oppure lo scostamento fisso da UT (geo.Sky.Zone 0 = UT, 5.5 = India)."),
+	FConsoleCommandWithWorldAndArgsDelegate::CreateStatic(
+		[](const TArray<FString>& Args, UWorld* World)
+	{
+		UGeoSkySubsystem* Sky = GeoSkyConsole::Get(World);
+		if (!Sky) { return; }
+		if (Args.Num() >= 1)
+		{
+			GeoWorld::Sky::FTimeZone Zone;
+			if (Args[0].Equals(TEXT("cet"), ESearchCase::IgnoreCase) || Args[0].Equals(TEXT("italia"), ESearchCase::IgnoreCase))
+			{
+				Zone.Kind = GeoWorld::Sky::ETimeZoneKind::CentralEurope;
+			}
+			else
+			{
+				Zone.Kind = GeoWorld::Sky::ETimeZoneKind::Fixed;
+				Zone.FixedOffsetHours = FMath::Clamp(FCString::Atod(*Args[0]), -12.0, 14.0);
+			}
+			Sky->SetTimeZone(Zone);
+			Sky->Tick(0.0f);
+		}
+		GeoSkyConsole::ReportState(Sky);
+	}));
+
+static FAutoConsoleCommandWithWorldAndArgs GeoSkyMoonCommand(
+	TEXT("geo.Sky.MoonLight"),
+	TEXT("geo.Sky.MoonLight <rapporto> - la luce della luna piena rispetto al sole (default 0.001; dal vero 0.0000025, troppo buio per un gioco)."),
+	FConsoleCommandWithWorldAndArgsDelegate::CreateStatic(
+		[](const TArray<FString>& Args, UWorld* World)
+	{
+		UGeoSkySubsystem* Sky = GeoSkyConsole::Get(World);
+		if (!Sky) { return; }
+		if (Args.Num() >= 1) { Sky->SetMoonRatio(FCString::Atod(*Args[0])); }
+		GeoTerrainConsole::Report(FString::Printf(TEXT("Luna piena: %g del sole"), Sky->GetMoonRatio()));
+	}));
+
+static FAutoConsoleCommandWithWorldAndArgs GeoSkyNightExposureCommand(
+	TEXT("geo.Sky.NightExposure"),
+	TEXT("geo.Sky.NightExposure <stop> - di notte l'esposizione scende di tanto (default -2; 0 = lascia fare all'esposizione automatica)."),
+	FConsoleCommandWithWorldAndArgsDelegate::CreateStatic(
+		[](const TArray<FString>& Args, UWorld* World)
+	{
+		UGeoSkySubsystem* Sky = GeoSkyConsole::Get(World);
+		if (!Sky) { return; }
+		if (Args.Num() >= 1) { Sky->SetNightExposureBias(FCString::Atod(*Args[0])); }
+		GeoTerrainConsole::Report(FString::Printf(TEXT("Esposizione di notte: %+.1f stop"), Sky->GetNightExposureBias()));
+	}));
+
+static FAutoConsoleCommandWithWorldAndArgs GeoSkySunLuxCommand(
+	TEXT("geo.Sky.SunLux"),
+	TEXT("geo.Sky.SunLux <lux> - la luce del sole (0 = quella che aveva la luce del livello). Tutto il resto, luna compresa, si misura su questa."),
+	FConsoleCommandWithWorldAndArgsDelegate::CreateStatic(
+		[](const TArray<FString>& Args, UWorld* World)
+	{
+		UGeoSkySubsystem* Sky = GeoSkyConsole::Get(World);
+		if (!Sky) { return; }
+		if (Args.Num() >= 1) { Sky->SetSunLux(FCString::Atod(*Args[0])); }
+		GeoTerrainConsole::Report(FString::Printf(TEXT("Sole: %.3g lux"), Sky->GetSunLux()));
+	}));
+
+static FAutoConsoleCommandWithWorldAndArgs GeoSkyStarsCommand(
+	TEXT("geo.Sky.Stars"),
+	TEXT("geo.Sky.Stars <0|1> - stelle, Via Lattea e luna con le fasi (M_GeoNightSky)."),
+	FConsoleCommandWithWorldAndArgsDelegate::CreateStatic(
+		[](const TArray<FString>& Args, UWorld* World)
+	{
+		UGeoSkySubsystem* Sky = GeoSkyConsole::Get(World);
+		if (!Sky) { return; }
+		const bool bValue = GeoSkyConsole::Flag(Args, Sky->IsNightSkyEnabled());
+		Sky->SetNightSkyEnabled(bValue);
+		GeoTerrainConsole::Report(bValue ? TEXT("Stelle e luna: ON") : TEXT("Stelle e luna: OFF"));
+	}));
+
+static FAutoConsoleCommandWithWorldAndArgs GeoSkyCityLightsCommand(
+	TEXT("geo.Sky.CityLights"),
+	TEXT("geo.Sky.CityLights <0|1> - le finestre degli edifici accese di notte."),
+	FConsoleCommandWithWorldAndArgsDelegate::CreateStatic(
+		[](const TArray<FString>& Args, UWorld* World)
+	{
+		UGeoSkySubsystem* Sky = GeoSkyConsole::Get(World);
+		if (!Sky) { return; }
+		const bool bValue = GeoSkyConsole::Flag(Args, Sky->AreCityLightsEnabled());
+		Sky->SetCityLightsEnabled(bValue);
+		GeoTerrainConsole::Report(bValue ? TEXT("Finestre accese di notte: ON") : TEXT("Finestre accese di notte: OFF"));
+	}));
+
+static FAutoConsoleCommandWithWorldAndArgs GeoSkyDebugCommand(
+	TEXT("geo.Sky.Debug"),
+	TEXT("geo.Sky.Debug <0|1> - overlay del cielo: ora, sole e luna (altezza, levate, tramonti, fase), luce, la scena."),
+	FConsoleCommandWithWorldAndArgsDelegate::CreateStatic(
+		[](const TArray<FString>& Args, UWorld* World)
+	{
+		UGeoSkySubsystem* Sky = GeoSkyConsole::Get(World);
+		if (!Sky) { return; }
+		const bool bValue = GeoSkyConsole::Flag(Args, Sky->IsDebugOverlayEnabled());
+		Sky->SetDebugOverlayEnabled(bValue);
+		if (!bValue && GEngine) { GEngine->ClearOnScreenDebugMessages(); }
+	}));
+
+static FAutoConsoleCommandWithWorld GeoSkyStatsCommand(
+	TEXT("geo.Sky.Stats"),
+	TEXT("Dove sono il sole e la luna, e che ora e'."),
+	FConsoleCommandWithWorldDelegate::CreateStatic([](UWorld* World)
+	{
+		if (UGeoSkySubsystem* Sky = GeoSkyConsole::Get(World)) { GeoSkyConsole::ReportState(Sky); }
+	}));
+
+static FAutoConsoleCommandWithWorldAndArgs GeoSkyDemoCommand(
+	TEXT("geo.Sky.Demo"),
+	TEXT("geo.Sky.Demo [velocita'] - un giorno intero di corsa: da prima dell'alba, 300 volte piu' veloce (un giorno in poco meno di 5 minuti), con l'overlay."),
+	FConsoleCommandWithWorldAndArgsDelegate::CreateStatic(
+		[](const TArray<FString>& Args, UWorld* World)
+	{
+		UGeoSkySubsystem* Sky = GeoSkyConsole::Get(World);
+		if (!Sky) { return; }
+		Sky->SetEnabled(true);
+		Sky->Tick(0.0f);
+		const FGeoSkyState& State = Sky->GetState();
+		// Quaranta minuti prima dell'alba di oggi (o le 5, se l'alba non c'e').
+		double Hours = 5.0;
+		if (GeoWorld::Sky::ParseClock(TCHAR_TO_UTF8(*State.Sunrise), Hours)) { Hours = FMath::Max(0.0, Hours - 40.0 / 60.0); }
+		Sky->SetLocalHour(Hours);
+		Sky->SetSpeed(Args.Num() >= 1 ? FCString::Atod(*Args[0]) : 300.0);
+		Sky->SetDebugOverlayEnabled(true);
+		Sky->Tick(0.0f);
+		GeoTerrainConsole::Report(TEXT("Un giorno di corsa: l'alba, il sole che gira (e le ombre con lui), il tramonto, la notte con la luna e le finestre accese."));
+		GeoTerrainConsole::Report(TEXT("Fermarsi: geo.Sky.Speed 0. Un'ora precisa: geo.Sky.Time 18:30. Le ombre delle montagne: geo.Terrain.Shadows 1"));
+		GeoSkyConsole::ReportState(Sky);
 	}));

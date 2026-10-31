@@ -184,6 +184,9 @@ nuvole e gli alberi).
   copertura del suolo (MPC_GeoWeather, come terreno e alberi).
 - **Il bagnato** scurisce i tetti più dei muri: la pioggia batte dall'alto.
 - **Il colore** arriva in sRGB: al quadrato è (quasi) lineare.
+- **Di notte le finestre si accendono** (un secondo blocco dello stesso
+  shader, `GEO_BUILDING_LIGHTS`, nell'Emissive): quante dipende dall'ora e dal
+  buio, vedi `docs/cielo-design.md`, sezione 5.4.
 
 Perché le finestre nel materiale: un condominio di 6 piani con 10 campate
 per lato avrebbe 240 finestre. Come triangoli sarebbero ~2.000 triangoli

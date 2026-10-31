@@ -2,6 +2,7 @@
 
 #include "GeoCoreModule.h"
 #include "Geo/GeoUnits.h"
+#include "Sky/GeoSkySubsystem.h"
 
 #include "Components/DynamicMeshComponent.h"
 #include "Components/ExponentialHeightFogComponent.h"
@@ -192,7 +193,11 @@ void FGeoPrecipitationRenderer::WriteParameters(UWorld* World, const Weather::FP
 		Instance->SetVectorParameterValue(VelocityNames[Type],
 			ToLinearColour(Layer.Velocity[0], Layer.Velocity[1], Layer.Velocity[2], Layer.Size));
 	}
-	Instance->SetVectorParameterValue(TEXT("PrecipBox"), ToLinearColour(Particles.Box[0], Particles.Box[1], Particles.Box[2], 0.9));
+	// La luminosita' delle gocce: il materiale e' unlit, la luce non lo
+	// tocca. Di notte la da' il cielo (1 di giorno, 1/600 con la luna).
+	const UGeoSkySubsystem* SkySubsystem = World->GetSubsystem<UGeoSkySubsystem>();
+	const double Brightness = 0.9 * (SkySubsystem ? SkySubsystem->GetUnlitBrightness() : 1.0);
+	Instance->SetVectorParameterValue(TEXT("PrecipBox"), ToLinearColour(Particles.Box[0], Particles.Box[1], Particles.Box[2], Brightness));
 	double Rain = 1.0, Snow = 0.0, Hail = 0.0;
 	Particles.GetMix(Rain, Snow, Hail);
 	Instance->SetVectorParameterValue(TEXT("PrecipMix"), ToLinearColour(Rain, Snow, Hail, 0.0));

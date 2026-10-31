@@ -27,7 +27,7 @@ Ultimo aggiornamento: 2026-10-31. Branch: `claude/charming-goodall-xd2r3g`.
 | — | **Ghiaccio e grandine sul terreno**: il ghiaccio segue lo zero termico (bagnato che gela, gelicidio con la pioggia imposta, disgelo), velo lucidissimo nel materiale; la grandine si posa in strisce sotto i nuclei su una griglia al suolo di 120 km (thread di lavoro, texture aggiornata sul posto) e fonde con il caldo, a chicchi da vicino; il nodo "Meteo sul suolo" ora è HLSL e C++ insieme, provato dai test; `geo.Weather.Ice`, `geo.Weather.HailGround`, `GroundIce`/`GroundHail` per i Blueprint | **da compilare e provare** (serve `geo.Imagery.CreateMaterial`) — `docs/meteo-design.md` (2.6, 2.11, 3.3), `docs/meteo-verifica.md` (sezione 8) |
 | 11 | **Vegetazione, le piante**: la copertura del suolo di ESA WorldCover (10 m, letta dalla rete a pezzi solo per l'area del terreno: `geoworld build-vegetation`), tile `.gvg`; alberi su una griglia geografica fissa (sempre gli stessi, nessuna cucitura), latifoglie, conifere, pini domestici e arbusti dalla quota e dalla latitudine, limite del bosco e pendenza; una **libreria di modelli** in Project Settings (di default otto modelli **Nanite** cotti nell'editor da `geo.Vegetation.CreateModels`, o modelli propri adattati dai bounds; senza, forme fatte da codice a due LOD); celle di ~600 m attorno alla camera con tre bande (tutti, la meta', un quarto) e isteresi, HISM con i dati per istanza, sul terreno DISEGNATO (rifatte quando si affina); `M_GeoVegetation` con vento (MPC `VegetationWind`) e neve; `geo.Vegetation.*` | **da compilare e provare** (serve `geo.Imagery.CreateMaterial` per `M_GeoVegetation`, poi `geo.Vegetation.CreateModels`) — `docs/vegetazione-design.md`, `docs/vegetazione-verifica.md`, `docs/manuale/16-vegetazione.md`. Gli animali: dopo |
 | 10 | **Edifici e monumenti**: le sagome di OpenStreetMap (`geoworld build-buildings`, o `costruisci-edifici.bat` che scarica anche l'estratto), tile `.gbd` al livello 15 con classe, altezze (dai tag o stimate), tetto, colori, id OSM e Wikidata; parti (`building:part`) disegnate al posto del contorno, che resta "solo contorno" per i monumenti; a runtime celle (= tile) entro 6 km con tre bande, una `FDynamicMesh3` per cella fatta sul worker (ear clipping con i cortili, muri dalla quota piu' bassa del terreno disegnato, tetti a falde su sagome semplici) in un `UDynamicMeshComponent`; `M_GeoBuilding` con finestre e marcapiani disegnati, neve e bagnato; **monumenti** da una libreria in Project Settings (id → static mesh, anche Nanite); `geo.Buildings.*` | **da compilare e provare** (serve `geo.Imagery.CreateMaterial` per `M_GeoBuilding`) — `docs/edifici-design.md`, `docs/edifici-verifica.md`, `docs/manuale/17-edifici.md` |
-| 12 | Atmosfera, cielo e luce — il PROSSIMO: **il ciclo del giorno e della notte** (sole e luna dalla data e dall'ora, per vedere le ombre), allargando il meteo | **da fare** |
+| 12 | **Il giorno e la notte** (primo pezzo dell'atmosfera): l'orologio (data, ora locale con l'ora legale, velocità), il sole e la luna calcolati per la camera (Meeus: sole ~0,01°, luna 120 termini con parallasse e fase; `Sky/Astronomy.h`), levate e tramonti; il sole del livello girato (la SkyAtmosphere fa il resto), la luna come seconda luce dell'atmosfera, l'esposizione −2 stop di notte (Post Process Volume), la nebbia scalata con la luce, stelle/Via Lattea/luna con le fasi su una sfera additiva (`M_GeoNightSky`), le finestre accese in `M_GeoBuilding`, la pioggia e i fulmini legati alla luce; `geo.Sky.*` | **da compilare e provare** (serve `geo.Imagery.CreateMaterial`) — `docs/cielo-design.md`, `docs/cielo-verifica.md`, `docs/manuale/18-cielo.md`. Il resto dell'atmosfera (brezze dal sole, luci delle strade, stelle da catalogo): dopo |
 | — | Animali | da collocare: dopo, se servono ancora |
 | dopo | **Residenza**: selezione indipendente dalla vista, precarico da posizione e velocità, mesh nascoste | **codice completo, mai compilato in UE** — `docs/residenza-design.md` |
 | dopo | **Terza prova**: niente flash grigi (tile mostrate solo vestite), isteresi sul LOD, nuvole tolte con la maschera SCL | **codice completo, da riprovare** — `docs/prova-torino-3.md` |
@@ -130,7 +130,8 @@ build\Debug\georoads_tests.exe                      :: 80 test (dalla radice del
 build\Debug\geowater_tests.exe Plugins\GeoWorld\Source\GeoTiles\TestData\water_fixture.gwa   :: 71 test (anche il Po vero e il mare aperto)
 build\Debug\geoweather_tests.exe                    :: 97 test (il vento, pioggia e neve, fulmini, nuvole, ghiaccio e grandine al suolo)
 build\Debug\geovegetation_tests.exe Plugins\GeoWorld\Source\GeoTiles\TestData\vegetation_fixture.gvg   :: 34 test (la vegetazione)
-build\Debug\geobuildings_tests.exe Plugins\GeoWorld\Source\GeoTiles\TestData\buildings_fixture.gbd    :: 24 test (gli edifici)
+build\Debug\geobuildings_tests.exe Plugins\GeoWorld\Source\GeoTiles\TestData\buildings_fixture.gbd    :: 26 test (gli edifici)
+build\Debug\geosky_tests.exe                       :: 33 test (il cielo: sole, luna, ora legale, notte)
 Plugins\GeoWorld\Tools\CheckSourceDiscipline.sh      :: serve bash (Git Bash)
 ```
 
@@ -139,7 +140,7 @@ indici, header e giunzioni leggendoli davvero.
 
 ### Console di Unreal
 
-**L'elenco completo, con la spiegazione di ognuno: `docs/comandi-unreal.md`** (125 comandi,
+**L'elenco completo, con la spiegazione di ognuno: `docs/comandi-unreal.md`** (139 comandi,
 generato dal codice). Dentro Unreal: `geo.Help` (i gruppi) e `geo.Help Weather`
 (un gruppo). Qui sotto i piu' usati.
 
@@ -239,6 +240,11 @@ geo.Buildings.Open <cartella>  apre un dataset di edifici (geoworld build-buildi
 geo.Buildings.Radius <m>       fin dove ci sono edifici (6000); Shadows <0|1|2>: ombre
 geo.Buildings.ReloadLandmarks  rilegge la libreria dei monumenti (Project Settings > Plugins > GeoWorld - Edifici)
 geo.Buildings.Debug <0|1>      overlay: celle per banda, edifici, triangoli, monumenti; Stats: in console
+geo.Sky.Demo [velocita']       un giorno intero di corsa, da prima dell'alba, con l'overlay
+geo.Sky.Time <HH:MM> [data]    l'ora locale (e il giorno); senza argomenti dove sono sole e luna
+geo.Sky.Speed <x>              0 fermo, 1 orologio, 60 un minuto al secondo; geo.Sky.Now: l'ora vera
+geo.Sky.NightExposure <stop>   quanto e' scura la notte (-2); MoonLight <rapporto>: quanto illumina la luna
+geo.Sky.Enable <0|1>           il cielo muove il sole del livello (0: tutto torna com'era)
 ```
 
 Se hai un dataset e vuoi vedere subito qualcosa, il comando e'
@@ -419,6 +425,8 @@ Plugins/GeoWorld/Source/
     Public/Mesh/GroundCells.h  celle, bande, firma, terreno disegnato: alberi ed edifici
     Public/Buildings/ edifici: BuildingMesh.h (puro), BuildingShader.inl (HLSL e C++),
                       UGeoBuildingsSubsystem, UGeoBuildingSettings (i monumenti) [Fase 10]
+    Public/Sky/       il giorno e la notte: Astronomy.h, DayLight.h (puri), NightSkyShader.inl
+                      (HLSL e C++), UGeoSkySubsystem, UGeoSkySettings [Fase 12]
     GeoPositionHudSubsystem   le stampe della posizione                   [Fase 9]
   GeoWorldEditor/ i materiali costruiti da codice (geo.Imagery.CreateMaterial)
 
@@ -595,6 +603,7 @@ Limitazioni note, lasciate aperte di proposito:
 | Design e verifica di pioggia, neve, grandine | `docs/meteo-design.md`, `docs/meteo-verifica.md` |
 | Design e verifica della vegetazione | `docs/vegetazione-design.md`, `docs/vegetazione-verifica.md` |
 | Design e verifica degli edifici | `docs/edifici-design.md`, `docs/edifici-verifica.md` |
+| Design e verifica del giorno e della notte | `docs/cielo-design.md`, `docs/cielo-verifica.md` |
 | Tutti i comandi della console di Unreal | `docs/comandi-unreal.md` (generato dal codice) |
 | Issue aperte | `docs/issues-aperte.md` |
 | Uso della pipeline, installazione Windows | `Pipeline/README.md` |

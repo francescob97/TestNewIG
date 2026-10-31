@@ -538,6 +538,7 @@ static void TestCell(const char* FixturePath)
 // ===========================================================================
 
 #define GEO_BUILDING_COLOUR(...) __VA_ARGS__
+#define GEO_BUILDING_LIGHTS(...)
 static HlslShim::float4 RunColour(const HlslShim::float4& Paint, const HlslShim::float2& Facade, const HlslShim::float2& Style,
                                   const HlslShim::float3& Normal, const HlslShim::float3& Pos, const HlslShim::float4& Ground,
                                   const HlslShim::float4& Frame, float UuPerMetre)
@@ -546,6 +547,18 @@ static HlslShim::float4 RunColour(const HlslShim::float4& Paint, const HlslShim:
 #include "Buildings/BuildingShader.inl"
 }
 #undef GEO_BUILDING_COLOUR
+#undef GEO_BUILDING_LIGHTS
+
+#define GEO_BUILDING_COLOUR(...)
+#define GEO_BUILDING_LIGHTS(...) __VA_ARGS__
+static HlslShim::float3 RunLights(const HlslShim::float4& Paint, const HlslShim::float2& Facade, const HlslShim::float2& Style,
+                                  const HlslShim::float3& Normal, const HlslShim::float4& Night)
+{
+	using namespace HlslShim;
+#include "Buildings/BuildingShader.inl"
+}
+#undef GEO_BUILDING_COLOUR
+#undef GEO_BUILDING_LIGHTS
 
 static void TestShader()
 {
@@ -579,6 +592,47 @@ static void TestShader()
 		"la neve sui tetti e non sui muri; il bagnato scurisce i tetti piu' dei muri",
 		Fmt("tetto innevato %.2f; bagnato: tetto %.0f%%, muro %.0f%% del colore asciutto", RoofSnow.x,   /* percentuale, non-unita */
 			100.0 * RoofWet.x / RoofDry, 100.0 * WallWet.x / Expected));   /* percentuale, non-unita */
+
+	// Le finestre accese: una facciata di 20 campate per 6 piani, di notte con
+	// meta' delle finestre accese, poi di giorno (quota zero).
+	const float DayLux = 10.0f;
+	int Lit = 0, Windows = 0;
+	bool bWarm = true, bPiersDark = true;
+	for (int Column = 0; Column < 20; ++Column)
+	{
+		for (int Storey = 0; Storey < 6; ++Storey)
+		{
+			const float2 Centre(1.8 + 3.6 * Column, 3.0 * Storey + 1.68);
+			const float3 Glow = RunLights(Plaster, Centre, float2(3.0, 0.5), Side, float4(0.0, DayLux, 0.5, 0.0));
+			++Windows;
+			if (Glow.x > 0.0f) { ++Lit; bWarm = bWarm && Glow.x >= Glow.z * 0.7f; }
+			const float3 Between = RunLights(Plaster, float2(0.2 + 3.6 * Column, 3.0 * Storey + 1.68), float2(3.0, 0.5), Side,
+				float4(0.0, DayLux, 0.5, 0.0));
+			bPiersDark = bPiersDark && Between.x == 0.0f && Between.y == 0.0f && Between.z == 0.0f;
+		}
+	}
+	const float3 Daytime = RunLights(Plaster, float2(1.8, 1.68), float2(3.0, 0.5), Side, float4(0.0, DayLux, 0.0, 0.0));
+	const float3 Roofless = RunLights(Roof, float2(1.8, 1.68), float2(3.0, 0.5), Up, float4(0.0, DayLux, 1.0, 0.0));
+	const float3 Basement = RunLights(Plaster, float2(1.8, -1.32), float2(3.0, 0.5), Side, float4(0.0, DayLux, 1.0, 0.0));
+	Check(Lit > Windows * 35 / 100 && Lit < Windows * 65 / 100 && bPiersDark && bWarm && Daytime.x == 0.0f && Roofless.x == 0.0f
+		&& Basement.x == 0.0f,
+		"di notte meta' delle finestre accese (sempre le stesse), mai fra una e l'altra, mai sui tetti ne' sotto il suolo; di giorno spente",
+		Fmt("%.0f accese su %.0f", Lit, Windows));
+	int StillLit = 0;
+	bool bSubset = true;
+	for (int Column = 0; Column < 20; ++Column)
+	{
+		for (int Storey = 0; Storey < 6; ++Storey)
+		{
+			const float2 Centre(1.8 + 3.6 * Column, 3.0 * Storey + 1.68);
+			const bool bLate = RunLights(Plaster, Centre, float2(3.0, 0.5), Side, float4(0.0, DayLux, 0.1, 0.0)).x > 0.0f;
+			const bool bEvening = RunLights(Plaster, Centre, float2(3.0, 0.5), Side, float4(0.0, DayLux, 0.5, 0.0)).x > 0.0f;
+			StillLit += bLate ? 1 : 0;
+			bSubset = bSubset && (!bLate || bEvening);
+		}
+	}
+	Check(bSubset && StillLit < Lit, "a notte fonda restano accese poche finestre, tutte fra quelle accese la sera",
+		Fmt("%.0f su %.0f", StillLit, Lit));
 }
 
 int main(int ArgumentCount, char** Arguments)
