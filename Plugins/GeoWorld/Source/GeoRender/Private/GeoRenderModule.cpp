@@ -8,10 +8,12 @@
 #include "GeoPositionHudSubsystem.h"
 #include "GeoMarkerActor.h"
 #include "Georeference/GeoTransformComponent.h"
+#include "Buildings/GeoBuildingsSubsystem.h"
 #include "Imagery/GeoImagerySubsystem.h"
 #include "Lod/GeoQuadtreeSubsystem.h"
 #include "Roads/GeoRoadsSubsystem.h"
 #include "Terrain/GeoTerrainSubsystem.h"
+#include "Streaming/GeoBuildingStreamingSubsystem.h"
 #include "Streaming/GeoImageryStreamingSubsystem.h"
 #include "Streaming/GeoVectorStreamingSubsystem.h"
 #include "Streaming/GeoVegetationStreamingSubsystem.h"
@@ -2652,4 +2654,278 @@ static FAutoConsoleCommandWithWorldAndArgs GeoVegetationDemoCommand(
 		GeoTerrainConsole::Report(TEXT("Vegetazione accesa, 250 m sopra il centro del dataset. Scendi verso il bosco: le celle vicine hanno tutti gli alberi."));
 		GeoTerrainConsole::Report(TEXT("Il vento li piega: geo.Weather.Wind 12 270. La neve li imbianca: geo.Weather.SnowCover 0"));
 		GeoTerrainConsole::Report(TEXT("Se gli alberi sono grigi e fermi: geo.Imagery.CreateMaterial (crea M_GeoVegetation)"));
+	}));
+
+// ============================================================================
+//  geo.Buildings.* -- gli edifici (geoworld build-buildings)
+// ============================================================================
+
+namespace GeoBuildingsConsole
+{
+	static UGeoBuildingsSubsystem* Get(UWorld* World)
+	{
+		return World ? World->GetSubsystem<UGeoBuildingsSubsystem>() : nullptr;
+	}
+
+	static UGeoBuildingStreamingSubsystem* GetStreaming(UWorld* World)
+	{
+		return World ? World->GetSubsystem<UGeoBuildingStreamingSubsystem>() : nullptr;
+	}
+
+	/** I numeri del manifest, "case 1200, condomini 800, ...", i piu' numerosi per primi. */
+	static FString ClassText(const FGeoBuildingDataset& Dataset)
+	{
+		static const TPair<const TCHAR*, const TCHAR*> Names[] = {
+			{ TEXT("Other"), TEXT("generici") }, { TEXT("House"), TEXT("case") }, { TEXT("Apartments"), TEXT("condomini") },
+			{ TEXT("Commercial"), TEXT("commerciali") }, { TEXT("Industrial"), TEXT("industriali") },
+			{ TEXT("Religious"), TEXT("chiese") }, { TEXT("Civic"), TEXT("pubblici") }, { TEXT("Agricultural"), TEXT("agricoli") },
+			{ TEXT("Small"), TEXT("box e baracche") }, { TEXT("Roof"), TEXT("pensiline") }, { TEXT("Tower"), TEXT("torri") },
+			{ TEXT("Historic"), TEXT("storici") } };
+		TArray<TPair<double, const TCHAR*>> Counts;
+		for (const TPair<const TCHAR*, const TCHAR*>& Name : Names)
+		{
+			const double* Count = Dataset.GetByClass().Find(Name.Key);
+			if (Count && *Count >= 1.0) { Counts.Emplace(*Count, Name.Value); }
+		}
+		Counts.Sort([](const TPair<double, const TCHAR*>& A, const TPair<double, const TCHAR*>& B) { return A.Key > B.Key; });
+		FString Text;
+		for (const TPair<double, const TCHAR*>& Count : Counts)
+		{
+			if (!Text.IsEmpty()) { Text += TEXT(", "); }
+			Text += FString::Printf(TEXT("%s %.0f"), Count.Value, Count.Key);
+		}
+		return Text;
+	}
+
+	/** Apre il dataset e dice cosa c'e' dentro. Usato da Open e da Demo. */
+	static bool Open(UWorld* World, const FString& Directory)
+	{
+		UGeoBuildingStreamingSubsystem* Streaming = GetStreaming(World);
+		UGeoBuildingsSubsystem* Buildings = Get(World);
+		if (!Streaming || !Buildings) { return false; }
+
+		FString Error;
+		if (!Streaming->OpenDataset(Directory, Error))
+		{
+			GeoTerrainConsole::Report(FString::Printf(TEXT("Edifici: %s"), *Error), FColor::Red);
+			return false;
+		}
+		Buildings->OnDatasetChanged();
+
+		const FGeoBuildingDataset& Dataset = Streaming->GetDataset();
+		double West, South, East, North;
+		Dataset.GetBoundingBox(West, South, East, North);
+		GeoTerrainConsole::Report(FString::Printf(TEXT("Edifici '%s': livello %d, %lld tile, %lld edifici"),
+			*Dataset.GetDatasetName(), Dataset.GetLevel(), static_cast<long long>(Dataset.GetIndexedTileCount()),
+			static_cast<long long>(Dataset.GetBuildingCount())));
+		GeoTerrainConsole::Report(FString::Printf(TEXT("Per tipo: %s"), *ClassText(Dataset)));
+		GeoTerrainConsole::Report(FString::Printf(TEXT("Cartella: %s"), *Dataset.GetRootDirectory()));
+		GeoTerrainConsole::Report(FString::Printf(TEXT("Area: ovest %.4f  sud %.4f  est %.4f  nord %.4f"), West, South, East, North));
+		const FString Problem = Buildings->GetMaterialProblem();
+		if (!Problem.IsEmpty()) { GeoTerrainConsole::Report(Problem, FColor::Red); }
+		return true;
+	}
+
+	/** "1" / "0", o niente per invertire. */
+	static bool Flag(const TArray<FString>& Args, bool bCurrent)
+	{
+		return (Args.Num() >= 1) ? (FCString::Atoi(*Args[0]) != 0) : !bCurrent;
+	}
+}
+
+static FAutoConsoleCommandWithWorldAndArgs GeoBuildingsOpenCommand(
+	TEXT("geo.Buildings.Open"),
+	TEXT("geo.Buildings.Open <cartella> - apre un dataset di edifici (geoworld build-buildings): le citta' si alzano attorno alla camera."),
+	FConsoleCommandWithWorldAndArgsDelegate::CreateStatic(
+		[](const TArray<FString>& RawArgs, UWorld* World)
+	{
+		// I percorsi fra virgolette restano interi anche con gli spazi (GeoConsoleArgs.h).
+		const TArray<FString> Args = GeoWorld::Console::QuotedArgs(RawArgs);
+		if (Args.Num() < 1)
+		{
+			GeoTerrainConsole::Report(TEXT("Uso: geo.Buildings.Open <cartella del dataset di edifici>"), FColor::Red);
+			return;
+		}
+		GeoBuildingsConsole::Open(World, Args[0]);
+	}));
+
+static FAutoConsoleCommandWithWorld GeoBuildingsCloseCommand(
+	TEXT("geo.Buildings.Close"),
+	TEXT("geo.Buildings.Close - chiude il dataset di edifici: spariscono tutti gli edifici."),
+	FConsoleCommandWithWorldDelegate::CreateStatic([](UWorld* World)
+	{
+		UGeoBuildingStreamingSubsystem* Streaming = GeoBuildingsConsole::GetStreaming(World);
+		UGeoBuildingsSubsystem* Buildings = GeoBuildingsConsole::Get(World);
+		if (!Streaming || !Buildings) { return; }
+		Streaming->CloseDataset();
+		Buildings->OnDatasetChanged();
+		GeoTerrainConsole::Report(TEXT("Edifici chiusi."));
+	}));
+
+static FAutoConsoleCommandWithWorldAndArgs GeoBuildingsEnableCommand(
+	TEXT("geo.Buildings.Enable"),
+	TEXT("geo.Buildings.Enable <0|1> - accende e spegne gli edifici (il dataset resta aperto)."),
+	FConsoleCommandWithWorldAndArgsDelegate::CreateStatic(
+		[](const TArray<FString>& Args, UWorld* World)
+	{
+		UGeoBuildingsSubsystem* Buildings = GeoBuildingsConsole::Get(World);
+		if (!Buildings) { return; }
+		const bool bValue = GeoBuildingsConsole::Flag(Args, Buildings->IsEnabled());
+		Buildings->SetEnabled(bValue);
+		GeoTerrainConsole::Report(bValue ? TEXT("Edifici: ON") : TEXT("Edifici: OFF"));
+	}));
+
+static FAutoConsoleCommandWithWorldAndArgs GeoBuildingsRadiusCommand(
+	TEXT("geo.Buildings.Radius"),
+	TEXT("geo.Buildings.Radius <m> - fin dove ci sono edifici (default 6000). Le bande vicina e media si allargano insieme."),
+	FConsoleCommandWithWorldAndArgsDelegate::CreateStatic(
+		[](const TArray<FString>& Args, UWorld* World)
+	{
+		UGeoBuildingsSubsystem* Buildings = GeoBuildingsConsole::Get(World);
+		if (!Buildings) { return; }
+		if (Args.Num() >= 1) { Buildings->SetRadiusM(FCString::Atod(*Args[0])); }
+		const GeoWorld::Cells::FBandSettings& Bands = Buildings->GetBands();
+		GeoTerrainConsole::Report(FString::Printf(TEXT("Edifici: tutti fino a %.0f m, senza i piu' piccoli fino a %.0f m, solo i grandi fino a %.0f m"),
+			Bands.NearM, Bands.MidM, Bands.FarM));
+	}));
+
+static FAutoConsoleCommandWithWorldAndArgs GeoBuildingsShadowsCommand(
+	TEXT("geo.Buildings.Shadows"),
+	TEXT("geo.Buildings.Shadows <0|1|2> - chi fa ombra: 0 nessuno, 1 gli edifici vicini (default), 2 tutti."),
+	FConsoleCommandWithWorldAndArgsDelegate::CreateStatic(
+		[](const TArray<FString>& Args, UWorld* World)
+	{
+		UGeoBuildingsSubsystem* Buildings = GeoBuildingsConsole::Get(World);
+		if (!Buildings) { return; }
+		if (Args.Num() >= 1) { Buildings->SetShadowMode(FCString::Atoi(*Args[0])); }
+		static const TCHAR* Names[3] = { TEXT("nessun edificio"), TEXT("gli edifici vicini"), TEXT("tutti gli edifici") };
+		GeoTerrainConsole::Report(FString::Printf(TEXT("Ombre degli edifici: %s"), Names[FMath::Clamp(Buildings->GetShadowMode(), 0, 2)]));
+	}));
+
+static FAutoConsoleCommandWithWorld GeoBuildingsReloadLandmarksCommand(
+	TEXT("geo.Buildings.ReloadLandmarks"),
+	TEXT("geo.Buildings.ReloadLandmarks - rilegge la libreria dei monumenti (Project Settings > Plugins > GeoWorld - Edifici) e rifa' le celle."),
+	FConsoleCommandWithWorldDelegate::CreateStatic([](UWorld* World)
+	{
+		UGeoBuildingsSubsystem* Buildings = GeoBuildingsConsole::Get(World);
+		if (!Buildings) { return; }
+		Buildings->ReloadLandmarks();
+		GeoTerrainConsole::Report(FString::Printf(TEXT("Monumenti nella libreria: %d (quelli scartati: Output Log, [GeoBuildings])"),
+			Buildings->GetLandmarkCount()));
+	}));
+
+static FAutoConsoleCommandWithWorldAndArgs GeoBuildingsDebugCommand(
+	TEXT("geo.Buildings.Debug"),
+	TEXT("geo.Buildings.Debug <0|1> - overlay degli edifici: celle per banda (contorni colorati), edifici, triangoli, monumenti."),
+	FConsoleCommandWithWorldAndArgsDelegate::CreateStatic(
+		[](const TArray<FString>& Args, UWorld* World)
+	{
+		UGeoBuildingsSubsystem* Buildings = GeoBuildingsConsole::Get(World);
+		if (!Buildings) { return; }
+		const bool bValue = GeoBuildingsConsole::Flag(Args, Buildings->IsDebugOverlayEnabled());
+		Buildings->SetDebugOverlayEnabled(bValue);
+		if (!bValue && GEngine) { GEngine->ClearOnScreenDebugMessages(); }
+	}));
+
+static FAutoConsoleCommandWithWorld GeoBuildingsStatsCommand(
+	TEXT("geo.Buildings.Stats"),
+	TEXT("Statistiche degli edifici."),
+	FConsoleCommandWithWorldDelegate::CreateStatic([](UWorld* World)
+	{
+		UGeoBuildingsSubsystem* Buildings = GeoBuildingsConsole::Get(World);
+		UGeoBuildingStreamingSubsystem* Streaming = GeoBuildingsConsole::GetStreaming(World);
+		if (!Buildings || !Streaming) { return; }
+		if (!Streaming->IsDatasetOpen())
+		{
+			GeoTerrainConsole::Report(TEXT("Nessun dataset di edifici: geo.Buildings.Open <cartella>"), FColor::Yellow);
+			return;
+		}
+		const FGeoBuildingsStats Stats = Buildings->GetStats();
+		GeoTerrainConsole::Report(FString::Printf(TEXT("Edifici a schermo: %d, %d triangoli; monumenti: %d (%d nella libreria)"),
+			Stats.Edifici, Stats.Triangoli, Stats.Monumenti, Buildings->GetLandmarkCount()));
+		GeoTerrainConsole::Report(FString::Printf(TEXT("Celle: %d vicine, %d medie, %d lontane, %d in attesa, %d in costruzione; %.1f ms per cella"),
+			Stats.CelleVicine, Stats.CelleMedie, Stats.CelleLontane, Stats.CelleInAttesa, Stats.CostruzioniInCorso, Stats.MillisecondiPerCella));
+		const FGeoBuildingStreamingStats Loads = Streaming->GetStats();
+		GeoTerrainConsole::Report(FString::Printf(TEXT("Tile di edifici: %d in memoria (%.1f MB), %d caricate, %d errori"),
+			Loads.TileResidenti, Loads.MemoriaMB, Loads.CaricamentiTotali, Loads.ErroriDiCaricamento));
+		const FString Problem = Buildings->GetMaterialProblem();
+		if (!Problem.IsEmpty()) { GeoTerrainConsole::Report(Problem, FColor::Red); }
+	}));
+
+static FAutoConsoleCommandWithWorldAndArgs GeoBuildingsDemoCommand(
+	TEXT("geo.Buildings.Demo"),
+	TEXT("geo.Buildings.Demo <terreno> <ortofoto|-> <edifici> [vegetazione|-] - apre tutto, accende e si mette 300 m sopra la zona con piu' edifici."),
+	FConsoleCommandWithWorldAndArgsDelegate::CreateStatic(
+		[](const TArray<FString>& RawArgs, UWorld* World)
+	{
+		// I percorsi fra virgolette restano interi anche con gli spazi (GeoConsoleArgs.h).
+		const TArray<FString> Args = GeoWorld::Console::QuotedArgs(RawArgs);
+		UGeoTerrainSubsystem* Terrain = GeoTerrainConsole::Get(World);
+		UGeoImagerySubsystem* Imagery = World ? World->GetSubsystem<UGeoImagerySubsystem>() : nullptr;
+		UGeoImageryStreamingSubsystem* ImageStreaming = World ? World->GetSubsystem<UGeoImageryStreamingSubsystem>() : nullptr;
+		UGeoTileStreamingSubsystem* Heights = World ? World->GetSubsystem<UGeoTileStreamingSubsystem>() : nullptr;
+		UGeoQuadtreeSubsystem* Quadtree = World ? World->GetSubsystem<UGeoQuadtreeSubsystem>() : nullptr;
+		UGeoreferenceSubsystem* Georeference = World ? World->GetSubsystem<UGeoreferenceSubsystem>() : nullptr;
+		UGeoBuildingsSubsystem* Buildings = GeoBuildingsConsole::Get(World);
+		UGeoBuildingStreamingSubsystem* BuildingStreaming = GeoBuildingsConsole::GetStreaming(World);
+		if (!Terrain || !Imagery || !ImageStreaming || !Heights || !Quadtree || !Georeference || !Buildings || !BuildingStreaming)
+		{
+			return;
+		}
+		if (Args.Num() < 3)
+		{
+			GeoTerrainConsole::Report(TEXT("Uso: geo.Buildings.Demo <terreno> <ortofoto, o -> <edifici> [vegetazione, o -]"), FColor::Red);
+			return;
+		}
+
+		FString Error;
+		if (!Heights->OpenDataset(Args[0], Error))
+		{
+			GeoTerrainConsole::Report(FString::Printf(TEXT("Terreno: %s"), *Error), FColor::Red);
+			return;
+		}
+		const bool bWithImagery = (Args[1] != TEXT("-"));
+		if (bWithImagery && !ImageStreaming->OpenDataset(Args[1], Error))
+		{
+			GeoTerrainConsole::Report(FString::Printf(TEXT("Ortofoto: %s"), *Error), FColor::Red);
+			return;
+		}
+		if (!GeoBuildingsConsole::Open(World, Args[2])) { return; }
+		const bool bWithVegetation = Args.Num() >= 4 && Args[3] != TEXT("-");
+		if (bWithVegetation && !GeoVegetationConsole::Open(World, Args[3])) { return; }
+
+		// 300 m sopra la tile con piu' edifici (il centro, di solito), o sopra
+		// il centro del dataset: si vedono i tetti da vicino e la citta' che
+		// si semplifica verso l'orizzonte.
+		const FGeoBuildingDataset& Dataset = BuildingStreaming->GetDataset();
+		double West, South, East, North;
+		Dataset.GetBoundingBox(West, South, East, North);
+		double CentreLat = (South + North) * 0.5, CentreLon = (West + East) * 0.5;
+		GeoWorld::Tiles::FTileKey Busiest;
+		if (Dataset.GetBusiestTile(Busiest))
+		{
+			const GeoWorld::Tiles::FTileBounds Bounds = GeoWorld::Tiles::GetTileBounds(Busiest.Level, Busiest.X, Busiest.Y);
+			CentreLat = Bounds.CentreLat();
+			CentreLon = Bounds.CentreLon();
+		}
+		const FGeoTileDataset& HeightDataset = Heights->GetDataset();
+		float Lowest = 0.0f, Highest = 0.0f;
+		uint32 X = 0, Y = 0;
+		GeoWorld::Tiles::TileForLonLat(static_cast<uint32>(HeightDataset.GetMinLevel()), CentreLon, CentreLat, X, Y);
+		const bool bKnown = HeightDataset.GetTileHeightRange(
+			GeoWorld::Tiles::FTileKey{ static_cast<uint32>(HeightDataset.GetMinLevel()), X, Y }, Lowest, Highest);
+		const double Altitude = (bKnown ? static_cast<double>(Highest) : 500.0) + 300.0;
+		Georeference->TeleportViewTo(GeoWorld::Core::FGeodetic::FromDegrees(CentreLat, CentreLon, Altitude));
+
+		Quadtree->SetEnabled(true);
+		Terrain->SetEnabled(true);
+		Terrain->SetWireframe(false);
+		Imagery->SetEnabled(bWithImagery);
+		if (UGeoVegetationSubsystem* Vegetation = GeoVegetationConsole::Get(World)) { Vegetation->SetEnabled(bWithVegetation); }
+		Buildings->SetEnabled(true);
+		Buildings->SetDebugOverlayEnabled(true);
+
+		GeoTerrainConsole::Report(TEXT("Edifici accesi, 300 m sopra la zona con piu' edifici. Scendi: le celle vicine hanno tutto, con le finestre."));
+		GeoTerrainConsole::Report(TEXT("La neve sui tetti: geo.Weather.SnowCover 0. I monumenti: Project Settings > Plugins > GeoWorld - Edifici"));
+		GeoTerrainConsole::Report(TEXT("Se gli edifici sono grigi e senza finestre: geo.Imagery.CreateMaterial (crea M_GeoBuilding)"));
 	}));

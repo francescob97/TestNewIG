@@ -141,6 +141,18 @@ else()
 	target_compile_options(geovegetation_tests PRIVATE -Wall -Wextra -Werror=shadow -O2)
 endif()
 
+# --- Edifici: formato .gbd, triangolazione, muri, tetti, materiale -----------
+add_executable(geobuildings_tests geobuildings_main.cpp)
+target_include_directories(geobuildings_tests PRIVATE
+	${GEORENDER_DIR}/Public ${GEOTILES_DIR}/Public ${GEOCORE_DIR}/Public)
+target_link_libraries(geobuildings_tests PRIVATE ZLIB::ZLIB)
+
+if (MSVC)
+	target_compile_options(geobuildings_tests PRIVATE /W4)
+else()
+	target_compile_options(geobuildings_tests PRIVATE -Wall -Wextra -Werror=shadow -O2)
+endif()
+
 enable_testing()
 add_test(NAME geocore COMMAND geocore_tests)
 add_test(NAME geotiles COMMAND geotiles_tests)
@@ -154,3 +166,5 @@ add_test(NAME geowater COMMAND geowater_tests
 add_test(NAME geoweather COMMAND geoweather_tests)
 add_test(NAME geovegetation COMMAND geovegetation_tests
 	${CMAKE_CURRENT_SOURCE_DIR}/../../Source/GeoTiles/TestData/vegetation_fixture.gvg)
+add_test(NAME geobuildings COMMAND geobuildings_tests
+	${CMAKE_CURRENT_SOURCE_DIR}/../../Source/GeoTiles/TestData/buildings_fixture.gbd)

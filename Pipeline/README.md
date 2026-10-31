@@ -190,6 +190,34 @@ solo i blocchi che servono. Senza rete: scarica i file `ESA_WorldCover_10m_2021_
 e passa la cartella con `--worldcover`. Riavviabile a blocchi di ~40 km
 (`--force` rifà tutto). Le decisioni sono in `docs/vegetazione-design.md`.
 
+### Edifici (Fase 10)
+
+Il modo comodo: doppio clic su **`costruisci-edifici.bat`** (o trascinaci
+sopra la cartella del dataset del terreno). Chiede il dataset del terreno,
+cerca un estratto OpenStreetMap (`.osm.pbf`) in `Pipeline\dati\osm` e, se non
+c'e', chiede la regione e lo scarica da Geofabrik; costruisce
+`Pipeline\dataset\edifici_<terreno>`, lo verifica e mette negli appunti il
+comando per Unreal. Da riga di comando:
+`costruisci-edifici dted [file.osm.pbf] [nome]`.
+
+A mano:
+
+```bat
+geoworld fetch-osm --area nord-ovest -o dati/osm
+geoworld build-buildings --osm dati/osm/nord-ovest-latest.osm.pbf --terrain dataset/terreno -o dataset/edifici
+geoworld verify-buildings -o dataset/edifici
+geoworld inspect-buildings dataset/edifici/15/34166/8179.gbd --show 20
+```
+
+Le sagome degli edifici di OpenStreetMap (`building=*`, con i cortili, e le
+parti `building:part=*`) nell'area del terreno (o `--bbox`), con altezza,
+piani, tetto e colori dai tag; quando mancano, stimati dalla classe. Una tile
+`.gbd` al livello 15 (~600 m) solo dove c'e' almeno un edificio. Il file
+`.osm.pbf` si legge tutto una volta (per una regione qualche minuto), poi si
+lavora a blocchi di ~20 km: interrotto, riparte da dove era (`--force` rifà
+tutto). Dati (c) contributori di OpenStreetMap, ODbL. Le decisioni sono in
+`docs/edifici-design.md`.
+
 ## Stadi
 
 | # | Stadio | Produce |

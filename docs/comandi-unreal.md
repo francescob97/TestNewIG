@@ -4,7 +4,7 @@
 > Non modificarlo a mano: i controlli statici (`CheckSourceDiscipline.sh`, regola 7)
 > dicono quando e' indietro. In Unreal lo stesso elenco lo da' `geo.Help`.
 
-**116 comandi** in 10 gruppi.
+**125 comandi** in 11 gruppi.
 
 ## Come si usano
 
@@ -28,6 +28,8 @@
 | terreno e ortofoto | `geo.Imagery.Demo "<terreno>" "<ortofoto>"` |
 | terreno, ortofoto e strade | `geo.Roads.Demo "<terreno>" "<ortofoto>" "<strade>"` |
 | terreno, ortofoto, acqua (e strade) | `geo.Water.Demo "<terreno>" "<ortofoto>" "<acqua>" "<strade>"` |
+| terreno, ortofoto e alberi | `geo.Vegetation.Demo "<terreno>" "<ortofoto>" "<vegetazione>"` |
+| terreno, ortofoto ed edifici | `geo.Buildings.Demo "<terreno>" "<ortofoto>" "<edifici>"` |
 | andare in un posto | `geo.Goto 45.07 7.69 2000   oppure   geo.Goto Torino` |
 | sapere dove sono | `geo.Where   (e le stampe a destra: geo.Hud 1)` |
 | volare (in Play) | `geo.Fly` |
@@ -48,8 +50,9 @@
 - [Strade, ferrovie, piste](#strade-ferrovie-piste) — `geo.Roads.*`, 11 comandi
 - [L'acqua](#lacqua) — `geo.Water.*`, 5 comandi
 - [Il meteo](#il-meteo) — `geo.Weather.*`, 24 comandi
+- [La vegetazione](#la-vegetazione) — `geo.Vegetation.*`, 12 comandi
+- [Gli edifici](#gli-edifici) — `geo.Buildings.*`, 9 comandi
 - [La camera di volo](#la-camera-di-volo) — `geo.Fly.*`, 2 comandi
-- [Vegetation](#vegetation) — `geo.Vegetation.*`, 12 comandi
 
 ## Generale
 
@@ -146,7 +149,7 @@ Le foto sul terreno, e i materiali di tutto il progetto (Fase 6).
 | `geo.Imagery.Budget <N>` | texture create per frame (default 4). |
 | `geo.Imagery.Stats` | Statistiche del drappeggio e dello streaming delle ortofoto. |
 | `geo.Imagery.Demo <cartella_terreno> <cartella_ortofoto>` | apre tutto e accende. |
-| `geo.Imagery.CreateMaterial` | Costruisce (o RIFA') in /GeoWorld/Materials: M_GeoTerrain (foto e strade dipinte), M_GeoRoad (strade 3D), M_GeoWater e MPC_GeoWater (acqua), MPC_GeoWeather, M_GeoPrecipitation, M_GeoLightning e M_GeoClouds (meteo), M_GeoVegetation (alberi). *(solo nell'editor)* |
+| `geo.Imagery.CreateMaterial` | Costruisce (o RIFA') in /GeoWorld/Materials: M_GeoTerrain (foto e strade dipinte), M_GeoRoad (strade 3D), M_GeoWater e MPC_GeoWater (acqua), MPC_GeoWeather, M_GeoPrecipitation, M_GeoLightning e M_GeoClouds (meteo), M_GeoVegetation (alberi), M_GeoBuilding (edifici). *(solo nell'editor)* |
 
 ## Strade, ferrovie, piste
 
@@ -209,16 +212,9 @@ Vento, pioggia, neve, grandine, fulmini e tuono.
 | `geo.Weather.HailGround [mm] [raggio km] \| off` | grandine posata adesso attorno a te (default 8 mm in 3 km); poi fonde da sola. |
 | `geo.Weather.Fog <0\|1>` | la precipitazione toglie visibilita' con la nebbia del livello (default 1). |
 
-## La camera di volo
+## La vegetazione
 
-Solo in Play: velocita' proporzionale alla quota.
-
-| Comando | Cosa fa |
-|---|---|
-| `geo.Fly` | Sostituisce la camera del Play con una che vola a velocita' proporzionale alla quota. |
-| `geo.Fly.Speed <moltiplicatore>` | scala la velocita' calcolata dalla quota. |
-
-## Vegetation
+Alberi e arbusti dalla copertura del suolo, la libreria dei modelli (Fase 11).
 
 | Comando | Cosa fa |
 |---|---|
@@ -234,6 +230,31 @@ Solo in Play: velocita' proporzionale alla quota.
 | `geo.Vegetation.Stats` | Statistiche della vegetazione. |
 | `geo.Vegetation.Demo <terreno> <ortofoto\|-> <vegetazione> [acqua\|-]` | apre tutto, accende e si mette 250 m sopra il centro della vegetazione. |
 | `geo.Vegetation.CreateModels [1]` | salva in /GeoWorld/Vegetation le otto forme degli alberi come static mesh Nanite, la libreria di default. Con 1: facce invertite (se servi geo.Vegetation.FlipWinding 1). Prima: geo.Imagery.CreateMaterial. *(solo nell'editor)* |
+
+## Gli edifici
+
+Le sagome di OpenStreetMap estruse, i monumenti dalla libreria (Fase 10).
+
+| Comando | Cosa fa |
+|---|---|
+| `geo.Buildings.Open <cartella>` | apre un dataset di edifici (geoworld build-buildings): le citta' si alzano attorno alla camera. |
+| `geo.Buildings.Close` | chiude il dataset di edifici: spariscono tutti gli edifici. |
+| `geo.Buildings.Enable <0\|1>` | accende e spegne gli edifici (il dataset resta aperto). |
+| `geo.Buildings.Radius <m>` | fin dove ci sono edifici (default 6000). Le bande vicina e media si allargano insieme. |
+| `geo.Buildings.Shadows <0\|1\|2>` | chi fa ombra: 0 nessuno, 1 gli edifici vicini (default), 2 tutti. |
+| `geo.Buildings.ReloadLandmarks` | rilegge la libreria dei monumenti (Project Settings &gt; Plugins &gt; GeoWorld - Edifici) e rifa' le celle. |
+| `geo.Buildings.Debug <0\|1>` | overlay degli edifici: celle per banda (contorni colorati), edifici, triangoli, monumenti. |
+| `geo.Buildings.Stats` | Statistiche degli edifici. |
+| `geo.Buildings.Demo <terreno> <ortofoto\|-> <edifici> [vegetazione\|-]` | apre tutto, accende e si mette 300 m sopra la zona con piu' edifici. |
+
+## La camera di volo
+
+Solo in Play: velocita' proporzionale alla quota.
+
+| Comando | Cosa fa |
+|---|---|
+| `geo.Fly` | Sostituisce la camera del Play con una che vola a velocita' proporzionale alla quota. |
+| `geo.Fly.Speed <moltiplicatore>` | scala la velocita' calcolata dalla quota. |
 
 ## Comandi del motore utili
 
@@ -254,7 +275,7 @@ Non sono di GeoWorld, ma la documentazione li usa spesso.
 | File | Comandi |
 |---|---|
 | `Plugins/GeoWorld/Source/GeoCore/Private/GeoCoreModule.cpp` | 10 |
-| `Plugins/GeoWorld/Source/GeoRender/Private/GeoRenderModule.cpp` | 94 |
+| `Plugins/GeoWorld/Source/GeoRender/Private/GeoRenderModule.cpp` | 103 |
 | `Plugins/GeoWorld/Source/GeoTiles/Private/GeoTilesModule.cpp` | 10 |
 | `Plugins/GeoWorld/Source/GeoWorldEditor/Private/GeoTerrainMaterialFactory.cpp` | 1 |
 | `Plugins/GeoWorld/Source/GeoWorldEditor/Private/GeoVegetationModelFactory.cpp` | 1 |

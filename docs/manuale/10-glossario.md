@@ -29,6 +29,8 @@ griglia geoidica non applica lo scostamento verticale, in silenzio. (3)
 
 **Banda (della vegetazione)** — quanti alberi tiene una cella secondo la distanza dalla camera: vicino (fino a 700 m) tutti e con l'ombra, medio (1.500 m) la metà, lontano (2.500 m) un quarto. Si cambia banda solo 75 m oltre il confine (isteresi). (16)
 
+**Banda (degli edifici)** — come per gli alberi, ma più larga: vicino (fino a 1.500 m) tutti gli edifici con le finestre e l'ombra, medio (3.500 m) senza i più piccoli e con i contorni semplificati, lontano (6.000 m) solo i grandi, senza finestre. (17)
+
 **BC1 / DXT1** — compressione delle texture che la scheda video legge
 direttamente. Non usata oggi; il formato è pronto per aggiungerla. (7)
 
@@ -52,6 +54,8 @@ per fare prima. Fa scontrare le funzioni omonime nei namespace anonimi. (1)
 classe `UCLASS`, con i valori di default. I file `.ini` vengono applicati a lui. (1)
 
 **Cella (della vegetazione)** — una tile del livello 15 (~610 x 430 m) dentro cui gli alberi si costruiscono insieme, su un worker, e diventano qualche componente di istanze. Solo quelle entro 2,5 km dalla camera. (16)
+
+**Cella (degli edifici)** — una tile del dataset di edifici (livello 15): i suoi edifici diventano una mesh sola, su un worker, e un `UDynamicMeshComponent`. (17)
 
 **Copertura del suolo** (*land cover*) — una mappa che divide il territorio in classi: bosco, arbusti, prato, campi, costruito, acqua, roccia, neve. La nostra è ESA WorldCover. (16)
 
@@ -84,6 +88,8 @@ possano leggere pezzi via rete senza scaricarlo tutto. (7)
 **Draw call** — una richiesta di disegno dalla CPU alla scheda video. Ogni tile
 oggi ne costa una. (6)
 
+**Ear clipping** — un modo di triangolare un poligono: si taglia via un'"orecchia" (tre vertici consecutivi che fanno un triangolo tutto dentro) e si ricomincia. Con i buchi (i cortili) si collega prima ogni buco al contorno con un ponte. (17)
+
 **ECEF** (*Earth-Centered, Earth-Fixed*) — coordinate cartesiane con l'origine nel
 centro della Terra. **L'unica autorità** del progetto. (2)
 
@@ -91,6 +97,8 @@ centro della Terra. **L'unica autorità** del progetto. (2)
 camera non è un attore. (1)
 
 **Ellissoide** — la forma matematica della Terra: un'ellisse fatta ruotare. (2)
+
+**Estrusione** — alzare una sagoma piana fino a un'altezza: i lati diventano muri verticali, la sagoma in alto il tetto. (17)
 
 **Errore geometrico** — di quanti metri, al massimo, un livello si discosta dal
 terreno vero. Qui approssimato con il passo fra i post. (5)
@@ -105,6 +113,8 @@ del LOD. Soglia di default: 8 pixel (era 4: vedi `docs/prova-torino-2.md`). (5)
 **ExponentialHeightFog** — l'attore della nebbia di Unreal: una densità che cala con la quota. La precipitazione ne alza la densità (`56,4 / visibilità in m`) e la rimette com'era; nell'editor quella del livello non si tocca, perché si salverebbe. (15)
 
 **Fascia** (del piano di residenza) — un gruppo di tile del piano con la stessa urgenza: 0 = adesso, 1..3 = posizioni previste, l'ultima = anello di sicurezza. (11)
+
+**FDynamicMesh3** — la mesh "da lavoro" di Unreal (modulo GeometryCore): vertici e triangoli più gli overlay degli attributi (normali, UV, colori). Si prepara su un worker e si consegna a un `UDynamicMeshComponent` con uno spostamento. (6, 17)
 
 **Firma del terreno** — un hash delle tile di terreno visibili sotto una cella (e del passo della mesh). Quando cambia, il terreno sotto si è affinato e la cella si rifà sopra il terreno nuovo. (16)
 
@@ -180,6 +190,8 @@ float normale, e per questo passa da un nodo `TruncateLWC`. (1, 2, 13)
 
 **Mappa meteo** — la texture di 256 × 256 texel (160 km attorno alla camera) con le nubi di pioggia, calcolata dal C++ su un thread di lavoro ogni 8 s e spostata dallo shader con il vento fra un ricalcolo e l'altro. (15)
 
+**Marcapiano** — la fascia orizzontale fra un piano e l'altro di una facciata. Il materiale degli edifici la fa con una riga più scura. (17)
+
 **Mare aperto** — il mare lontano dalla costa, dove il dataset del terreno non ha tile (nemmeno un post di dato). `build-water` annota le tile che mancano e sono tutte mare (`opensea.bin`), e il runtime ci costruisce terreno e acqua virtuali. (13)
 
 **MarkRenderStateDirty** — dire a Unreal che una proprietà di disegno è cambiata e
@@ -196,6 +208,8 @@ Sentinel-2. (7)
 modificabili a runtime. (1, 7)
 
 **Modulo** — un'unità di compilazione di Unreal, che diventa una DLL. (1)
+
+**Monumento (della libreria)** — un edificio di OSM sostituito da un modello: Project Settings → Plugins → GeoWorld - Edifici, una voce per id (Wikidata `Q…` o OSM `way/…`). Il modello va sul baricentro della sagoma, girato come il lato lungo. (17)
 
 **MPSC** (*multiple producers, single consumer*) — una coda in cui molti thread
 aggiungono e uno solo toglie. (4)
@@ -222,6 +236,8 @@ edifici, boschi, acqua. Licenza ODbL, da citare. Fonte della Fase 8 e delle succ
 
 **Ortofoto** — immagine aerea o satellitare raddrizzata, in cui ogni pixel sta alla
 sua coordinata. (7)
+
+**Parte (di un edificio)** (`building:part`) — nello schema Simple 3D Buildings di OSM, un pezzo di un edificio con la sua altezza e il suo tetto (la navata, il campanile). Si disegnano le parti e non il contorno, che resta "solo contorno" per i monumenti. (17)
 
 **Per Instance Custom Data** — qualche numero per ogni istanza di un componente di istanze, letto dal materiale con il nodo PerInstanceCustomData. Per gli alberi: il verde, l'altezza, la fase del vento. (16)
 
@@ -280,6 +296,8 @@ quote) o un'area (i pixel). Decide se il bordo è condiviso. (3, 7)
 
 **Rumore periodico** — un rumore che si ripete identico dopo un certo passo (le celle che escono da una parte rientrano dall'altra). Permette di riportare un numero che cresce dentro il periodo, per la precisione dei `float`, senza che si veda: così il disegno dei cumuli ogni 1.500 km e il loro orologio ogni giorno. (15)
 
+**Sagoma** (*footprint*) — il contorno di un edificio visto dall'alto, con i cortili come buchi. È quello che OSM disegna. (17)
+
 **Scavo** — abbassare le quote del terreno sotto l'acqua fino al fondale prima di costruirne la mesh, così l'acqua ha una profondità vera. Lo fa il terreno, con la funzione che gli consegna l'acqua (`SetHeightEditor`). (13)
 
 **SCL** (*Scene Classification Layer*) — il file di Sentinel-2 L2A che classifica ogni pixel da 20 m: nuvole, ombre di nuvole, cirri, neve, acqua... Serve a togliere le nuvole dalle ortofoto. (7)
@@ -289,6 +307,8 @@ quote) o un'area (i pixel). Decide se il bordo è condiviso. (3, 7)
 **SDF** (*signed distance field*) — un'immagine in cui ogni pixel dice quanto si è lontani da un bordo, con il segno (positivo in acqua, negativo a terra). Filtrata, dà un bordo nitido a ogni ingrandimento. È la riva dell'acqua. (13)
 
 **Shader a doppia sintassi** — un testo che è HLSL e C++ insieme (`CloudShader.inl`): la factory lo trasforma in una stringa per il nodo Custom, i test lo compilano come C++ con dei tipi finti (`HlslShim.h`). Quello che si prova è quello che gira sulla scheda video. (15)
+
+**Simple 3D Buildings** — lo schema di OSM per gli edifici in 3D: altezze (`height`, `building:levels`), tetti (`roof:shape`, `roof:height`), colori, parti. (17)
 
 **Single Layer Water** — il modello d'ombreggiatura di Unreal per l'acqua: il colore viene da assorbimento e diffusione nello spessore d'acqua letto dal depth buffer, non da un BaseColor. (13)
 
@@ -360,6 +380,8 @@ uno solo. (3, 7)
 
 **WGS84** — l'ellissoide del GPS, usato dal progetto. (2)
 
+**Wikidata** — l'archivio libero dei fatti dietro Wikipedia: ogni monumento ha un numero (`Q…`), e su OSM l'edificio lo porta nel tag `wikidata=*`. La libreria dei monumenti lo usa per riconoscere un edificio. (17)
+
 **Wireframe** — la visualizzazione a reticolo dei triangoli. `viewmode wireframe` è
 il primo comando da provare quando non si vede niente. (6)
 
@@ -425,6 +447,8 @@ il primo comando da provare quando non si vede niente. (6)
 | `Public/Streaming/GeoWaterDataset.h`, `GeoWaterStreamingSubsystem.h` | dataset e streaming dell'acqua |
 | `Public/Tiles/VegetationClasses.h`, `VegetationTileFormat.h` | classi della copertura del suolo, formato `.gvg` e indice |
 | `Public/Streaming/GeoVegetationDataset.h`, `GeoVegetationStreamingSubsystem.h` | dataset e streaming della vegetazione |
+| `Public/Tiles/BuildingClasses.h`, `BuildingTileFormat.h` | classi, tetti, flag degli edifici, formato `.gbd` e indice |
+| `Public/Streaming/GeoBuildingDataset.h`, `GeoBuildingStreamingSubsystem.h` | dataset e streaming degli edifici |
 | `TestData/water_fixture.gwa` | una tile d'acqua scritta dalla pipeline, per i test |
 | `Private/GeoTilesModule.cpp` | comandi `geo.Tiles.*` |
 | `Private/Streaming/*.cpp` | le implementazioni dei cinque header sopra |
@@ -458,6 +482,9 @@ il primo comando da provare quando non si vede niente. (6)
 | `Public/Vegetation/TreePlacement.h`, `TreeMesh.h`, `VegetationCells.h` | la vegetazione (puro): chi cresce dove, le forme, celle e bande |
 | `Public/Vegetation/VegetationShader.inl`, `GeoVegetationSubsystem.h` | il materiale degli alberi (HLSL e C++), il subsystem in Unreal |
 | `Public/Vegetation/GeoVegetationSettings.h`, `GeoTreeModels.h` | la libreria dei modelli (Project Settings), le forme come mesh di Unreal |
+| `Public/Mesh/GroundCells.h` | celle, bande, isteresi, firma e terreno disegnato: condivisi da alberi ed edifici |
+| `Public/Buildings/BuildingMesh.h`, `BuildingShader.inl` | gli edifici (puro): pulizia, triangolazione, muri, tetti; il materiale (HLSL e C++) |
+| `Public/Buildings/GeoBuildingsSubsystem.h`, `GeoBuildingSettings.h` | il subsystem degli edifici in Unreal, la libreria dei monumenti (Project Settings) |
 | `Public/GeoPositionHudSubsystem.h` | le stampe della posizione |
 | `Private/GeoRenderModule.cpp` | comandi `geo.Lod.*`, `geo.Terrain.*`, `geo.Imagery.*`, `geo.Roads.*`, `geo.Water.*`, `geo.Weather.*`, `geo.Hud`, `geo.Fly*` |
 | `Private/**/*.cpp` | le implementazioni |
@@ -469,15 +496,15 @@ il primo comando da provare quando non si vede niente. (6)
 | `GeoWorldEditor.Build.cs` | `MaterialEditor`, `AssetTools` |
 | `Private/GeoWorldEditorModule.cpp` | il modulo |
 | `Private/GeoVegetationModelFactory.cpp` | `geo.Vegetation.CreateModels`: i modelli Nanite degli alberi |
-| `Private/GeoTerrainMaterialFactory.cpp` | `geo.Imagery.CreateMaterial`: `M_GeoTerrain`, `M_GeoRoad`, `M_GeoWater`, `MPC_GeoWater`, `MPC_GeoWeather`, `M_GeoPrecipitation`, `M_GeoLightning`, `M_GeoClouds`, `M_GeoVegetation` |
+| `Private/GeoTerrainMaterialFactory.cpp` | `geo.Imagery.CreateMaterial`: `M_GeoTerrain`, `M_GeoRoad`, `M_GeoWater`, `MPC_GeoWater`, `MPC_GeoWeather`, `M_GeoPrecipitation`, `M_GeoLightning`, `M_GeoClouds`, `M_GeoVegetation`, `M_GeoBuilding` |
 
 ### Strumenti
 
 | File | Contenuto |
 |---|---|
-| `Tools/StandaloneTests/*` | i cinque eseguibili di test senza Unreal |
-| `Tools/StandaloneTests/HlslShim.h` | quel tanto di HLSL che serve a compilare gli shader delle nuvole e del suolo come C++ |
-| `Tools/CheckSourceDiscipline.sh` | cinque regole di disciplina |
+| `Tools/StandaloneTests/*` | i dieci eseguibili di test senza Unreal |
+| `Tools/StandaloneTests/HlslShim.h` | quel tanto di HLSL che serve a compilare come C++ gli shader di nuvole, suolo, alberi ed edifici |
+| `Tools/CheckSourceDiscipline.sh` | sette regole di disciplina |
 | `Tools/CheckShadowedParameters.py` | parametri che nascondono campi |
 | `Tools/CheckModuleExports.py` | simboli invisibili fra moduli |
 | `Tools/CheckUnityCollisions.py` | collisioni da build unity |
@@ -504,7 +531,10 @@ il primo comando da provare quando non si vede niente. (6)
 | `geoworld/fetchimagery.py`, `mgrs.py` | download di Sentinel-2 |
 | `geoworld/waterclasses.py`, `waterformat.py`, `waterbuild.py` | la pipeline dell'acqua |
 | `geoworld/vegclasses.py`, `vegformat.py`, `vegbuild.py` | la pipeline della vegetazione (ESA WorldCover) |
-| `tests/*.py` | 77 test |
+| `geoworld/bldclasses.py`, `bldformat.py`, `bldbuild.py` | la pipeline degli edifici (OpenStreetMap) |
+| `geoworld.bat`, `geoworld.sh` | la pipeline senza installazione (prepara l'ambiente la prima volta) |
+| `costruisci-dted.bat`, `costruisci-vegetazione.bat`, `costruisci-edifici.bat` | i doppi clic: terreno, alberi, edifici |
+| `tests/*.py` | 229 test |
 
 ### Documenti
 
@@ -527,6 +557,8 @@ il primo comando da provare quando non si vede niente. (6)
 | `docs/vento-verifica.md` | come provare il vento |
 | `docs/vegetazione-design.md` | la vegetazione: dati, regole, celle, Unreal |
 | `docs/vegetazione-verifica.md` | come provare la vegetazione |
+| `docs/edifici-design.md` | gli edifici: dati, formato, muri e tetti, materiale, celle, monumenti |
+| `docs/edifici-verifica.md` | come provare gli edifici |
 | `docs/residenza-design.md` | cosa tenere pronto: posizione, velocità, mesh nascoste |
 | `docs/residenza-verifica.md` | come verificare la residenza |
 | `docs/prova-torino.md` | la prima prova vera: cause del mosaico, prestazioni, tutta Italia |

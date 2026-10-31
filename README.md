@@ -53,8 +53,14 @@ Il progetto `TestNewIG` e' un guscio vuoto: tutto il codice vive in
       strisce sotto i temporali
       *(`docs/meteo-design.md`, prova:
       `docs/meteo-verifica.md`, per chi impara: `docs/manuale/15-meteo.md`)*
-- [ ] Fase 10 — edifici e monumenti **(il prossimo: case dalle sagome, modelli
-      Nanite piazzati dai tile come gli alberi)**
+- [x] **Fase 10 — edifici e monumenti** — le sagome di OpenStreetMap estruse
+      a runtime attorno alla camera, con altezze, piani, tetti (a falde, a
+      padiglione, a piramide, a cupola) e colori dai tag o stimati dalla
+      classe; cortili e parti (`building:part`); finestre e marcapiani
+      disegnati dal materiale, neve sui tetti; i **monumenti** da una
+      libreria in Project Settings (id Wikidata o OSM → un modello, anche
+      Nanite) al posto delle loro sagome *(`docs/edifici-design.md`, prova:
+      `docs/edifici-verifica.md`, per chi impara: `docs/manuale/17-edifici.md`)*
 - [x] **Fase 11, primo pezzo: le piante** — alberi e arbusti dove dice ESA
       WorldCover (10 m, letto dalla rete solo per la tua area), latifoglie,
       conifere, pini domestici e arbusti scelti dalla quota, fino al limite del
@@ -64,7 +70,7 @@ Il progetto `TestNewIG` e' un guscio vuoto: tutto il codice vive in
       imbiancate dalla neve *(`docs/vegetazione-design.md`, prova:
       `docs/vegetazione-verifica.md`, per chi impara:
       `docs/manuale/16-vegetazione.md`)*. Gli animali verranno dopo.
-- [ ] Fase 12 — atmosfera, cielo, nuvole e luce **(dopo gli edifici: il ciclo
+- [ ] Fase 12 — atmosfera, cielo, nuvole e luce **(il prossimo: il ciclo
       del giorno e della notte, per vedere le ombre)**
       *(il perché di quest'ordine: `docs/fase8-design.md`, sezione 0)*
 
@@ -81,6 +87,7 @@ Il progetto `TestNewIG` e' un guscio vuoto: tutto il codice vive in
 | Ortofoto | piramide **separata**, stesso tiling; 256x256 pixel registrati sulle AREE (nessuna sovrapposizione), payload JPEG |
 | Strade | tile **vettoriali** `.gvt`, stesso tiling, livelli 10..13; linee in int16 locali (extent 16384, buffer 1/8), disegnate a runtime |
 | Vegetazione | tile `.gvg` a UN livello (13: 2,4 km, 256x256 pixel da ~10 m): la classe della copertura del suolo (bosco, arbusti, prato, campi, costruito, ...) per pixel, zlib; solo dove cresce qualcosa |
+| Edifici | tile `.gbd` a UN livello (15: ~600 m): le sagome di OSM (contorno e cortili, vertici int16) con classe, altezze, tetto, colori, id OSM e Wikidata, zlib; solo dove c'e' almeno un edificio |
 | Acqua | tile `.gwa`, una per tile di terreno: superficie e fondale sui 129x129 post, raster 256x256 (distanza dalla riva, onde, corrente), zlib; piu' il geoide e il mare aperto (`opensea.bin`: le tile senza terreno tutte in mare, e il fondale) |
 
 Dettagli e motivazioni in `docs/fase2-design.md`.
@@ -112,6 +119,8 @@ cmake --build build
 ./build/geoweather_tests     # 97 test  -- vento (strato limite, rugosita', rilievi, raffiche), precipitazione (quota neve, rovesci, visibilita', suolo, particelle), fulmini e tuono, nuvole e suolo (gli shader compilati come C++), ghiaccio, grandine posata
 ./build/geovegetation_tests Plugins/GeoWorld/Source/GeoTiles/TestData/vegetation_fixture.gvg
                              # 34 test  -- vegetazione: formato .gvg, griglia, chi cresce dove, forme (anche Nanite), materiale (colore, neve, vento), celle e bande
+./build/geobuildings_tests Plugins/GeoWorld/Source/GeoTiles/TestData/buildings_fixture.gbd
+                             # 24 test  -- edifici: formato .gbd, triangolazione con i cortili, muri e tetti, una tile intera, monumenti (anche a parti), materiale (finestre, neve, bagnato)
 
 ./Plugins/GeoWorld/Tools/CheckSourceDiscipline.sh
 python3 Plugins/GeoWorld/Tools/CheckShadowedParameters.py
@@ -125,7 +134,7 @@ le classi di errore di compilazione gia' incontrate su Windows -- shadowing,
 simboli non esportati fra moduli, tipi di comando console inesistenti,
 collisioni da build unity, metodi inesistenti chiamati sulle nostre classi.
 
-534 test C++ in totale, piu' 212 test Python della pipeline.
+558 test C++ in totale, piu' 229 test Python della pipeline.
 
 **Dopo la prima prova su Torino** (materiale, scene Sentinel, prestazioni): `docs/prova-torino.md`.
 **Dopo la seconda** (troppi triangoli, RAM): `docs/prova-torino-2.md`.
@@ -164,7 +173,12 @@ costruisci-vegetazione                         :: chiede il dataset del terreno,
 geoworld build-vegetation --terrain dataset/terreno -o dataset/vegetazione
 geoworld verify-vegetation -o dataset/vegetazione
 
-geoworld test                                      :: 212 test, sorgente sintetico
+:: edifici (Fase 10): le sagome di OpenStreetMap sull'area del terreno
+costruisci-edifici                             :: chiede terreno ed estratto OSM (lo scarica se manca), fa tutto
+geoworld build-buildings --osm dati/osm/nord-ovest-latest.osm.pbf --terrain dataset/terreno -o dataset/edifici
+geoworld verify-buildings -o dataset/edifici
+
+geoworld test                                      :: 229 test, sorgente sintetico
 ```
 
 Installazione, opzioni e conda a mano (se lo preferisci): `Pipeline/README.md`.
@@ -182,4 +196,6 @@ Vedi `docs/fase1-verifica.md`, `docs/fase2-verifica.md`, `docs/fase3-verifica.md
 
 Scorciatoie: `geo.Terrain.Demo <quote>` per il terreno,
 `geo.Imagery.Demo <quote> <ortofoto>` per il terreno vestito,
-`geo.Water.Demo <quote> <ortofoto> <acqua>` per l'acqua.
+`geo.Water.Demo <quote> <ortofoto> <acqua>` per l'acqua,
+`geo.Vegetation.Demo <quote> <ortofoto> <vegetazione>` per gli alberi,
+`geo.Buildings.Demo <quote> <ortofoto> <edifici>` per gli edifici.

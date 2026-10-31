@@ -26,8 +26,8 @@ Ultimo aggiornamento: 2026-10-31. Branch: `claude/charming-goodall-xd2r3g`.
 | — | **Nuvole**: cumuli di bel tempo (copertura misurata sullo shader, base piatta, cima a cupola, bordi sfrangiati) e nubi di pioggia dalla stessa mappa dei rovesci (torri sui temporali, cielo coperto sui fronti), con la VolumetricCloud di Unreal; mappa meteo su un thread di lavoro, spostata dal vento; shader HLSL e C++ insieme, provato dai test; fulmini che partono dalla base e accendono la nuvola; `geo.Weather.Clouds`, `geo.Weather.CloudDensity` | **da compilare e provare** (serve `geo.Imagery.CreateMaterial` per `M_GeoClouds`) — `docs/meteo-design.md` (2.10, 3.8), `docs/meteo-verifica.md` (sezione 7) |
 | — | **Ghiaccio e grandine sul terreno**: il ghiaccio segue lo zero termico (bagnato che gela, gelicidio con la pioggia imposta, disgelo), velo lucidissimo nel materiale; la grandine si posa in strisce sotto i nuclei su una griglia al suolo di 120 km (thread di lavoro, texture aggiornata sul posto) e fonde con il caldo, a chicchi da vicino; il nodo "Meteo sul suolo" ora è HLSL e C++ insieme, provato dai test; `geo.Weather.Ice`, `geo.Weather.HailGround`, `GroundIce`/`GroundHail` per i Blueprint | **da compilare e provare** (serve `geo.Imagery.CreateMaterial`) — `docs/meteo-design.md` (2.6, 2.11, 3.3), `docs/meteo-verifica.md` (sezione 8) |
 | 11 | **Vegetazione, le piante**: la copertura del suolo di ESA WorldCover (10 m, letta dalla rete a pezzi solo per l'area del terreno: `geoworld build-vegetation`), tile `.gvg`; alberi su una griglia geografica fissa (sempre gli stessi, nessuna cucitura), latifoglie, conifere, pini domestici e arbusti dalla quota e dalla latitudine, limite del bosco e pendenza; una **libreria di modelli** in Project Settings (di default otto modelli **Nanite** cotti nell'editor da `geo.Vegetation.CreateModels`, o modelli propri adattati dai bounds; senza, forme fatte da codice a due LOD); celle di ~600 m attorno alla camera con tre bande (tutti, la meta', un quarto) e isteresi, HISM con i dati per istanza, sul terreno DISEGNATO (rifatte quando si affina); `M_GeoVegetation` con vento (MPC `VegetationWind`) e neve; `geo.Vegetation.*` | **da compilare e provare** (serve `geo.Imagery.CreateMaterial` per `M_GeoVegetation`, poi `geo.Vegetation.CreateModels`) — `docs/vegetazione-design.md`, `docs/vegetazione-verifica.md`, `docs/manuale/16-vegetazione.md`. Gli animali: dopo |
-| 10 | **Edifici e monumenti** — il PROSSIMO: case estruse dalle sagome a runtime (mesh semplici), modelli dettagliati Nanite da una libreria, piazzati dai tile come gli alberi | **da fare** — programma in `docs/fase8-design.md`, sezione 0 |
-| 12 | Atmosfera, cielo e luce — dopo gli edifici: **il ciclo del giorno e della notte** (sole e luna dalla data e dall'ora, per vedere le ombre), allargando il meteo | **da fare** |
+| 10 | **Edifici e monumenti**: le sagome di OpenStreetMap (`geoworld build-buildings`, o `costruisci-edifici.bat` che scarica anche l'estratto), tile `.gbd` al livello 15 con classe, altezze (dai tag o stimate), tetto, colori, id OSM e Wikidata; parti (`building:part`) disegnate al posto del contorno, che resta "solo contorno" per i monumenti; a runtime celle (= tile) entro 6 km con tre bande, una `FDynamicMesh3` per cella fatta sul worker (ear clipping con i cortili, muri dalla quota piu' bassa del terreno disegnato, tetti a falde su sagome semplici) in un `UDynamicMeshComponent`; `M_GeoBuilding` con finestre e marcapiani disegnati, neve e bagnato; **monumenti** da una libreria in Project Settings (id → static mesh, anche Nanite); `geo.Buildings.*` | **da compilare e provare** (serve `geo.Imagery.CreateMaterial` per `M_GeoBuilding`) — `docs/edifici-design.md`, `docs/edifici-verifica.md`, `docs/manuale/17-edifici.md` |
+| 12 | Atmosfera, cielo e luce — il PROSSIMO: **il ciclo del giorno e della notte** (sole e luna dalla data e dall'ora, per vedere le ombre), allargando il meteo | **da fare** |
 | — | Animali | da collocare: dopo, se servono ancora |
 | dopo | **Residenza**: selezione indipendente dalla vista, precarico da posizione e velocità, mesh nascoste | **codice completo, mai compilato in UE** — `docs/residenza-design.md` |
 | dopo | **Terza prova**: niente flash grigi (tile mostrate solo vestite), isteresi sul LOD, nuvole tolte con la maschera SCL | **codice completo, da riprovare** — `docs/prova-torino-3.md` |
@@ -89,7 +89,7 @@ costruisci-dted                                 :: i tuoi .dt2 -> dataset, in un
 geoworld fetch --area test -o dati/copernicus   :: DEM libero, 19 MB
 geoworld build -i "dati/copernicus/*.tif" -o dataset/test
 geoworld verify -o dataset/test
-geoworld test                                        :: 212 test
+geoworld test                                        :: 229 test
 
 :: Fase 8: strade su Torino (dettagli in docs/fase8-verifica.md)
 geoworld fetch-osm --area torino -o dati/osm
@@ -105,6 +105,11 @@ geoworld verify-water -o dataset/acqua_torino
 costruisci-vegetazione                          :: chiede il dataset del terreno, fa tutto (o a mano:)
 geoworld build-vegetation --terrain dataset/terreno -o dataset/vegetazione
 geoworld verify-vegetation -o dataset/vegetazione
+
+:: Edifici (dettagli in docs/edifici-verifica.md): le sagome di OSM, sull'area del terreno
+costruisci-edifici                              :: chiede terreno ed estratto OSM (lo scarica se manca), fa tutto (o a mano:)
+geoworld build-buildings --osm dati/osm/nord-ovest-latest.osm.pbf --terrain dataset/terreno -o dataset/edifici
+geoworld verify-buildings -o dataset/edifici
 ```
 
 `check-env` e' l'unico comando che sta fra te e un dataset sbagliato di 48
@@ -124,6 +129,8 @@ build\Debug\geoimagery_tests.exe                    :: 52 test
 build\Debug\georoads_tests.exe                      :: 80 test (dalla radice del repository)
 build\Debug\geowater_tests.exe Plugins\GeoWorld\Source\GeoTiles\TestData\water_fixture.gwa   :: 71 test (anche il Po vero e il mare aperto)
 build\Debug\geoweather_tests.exe                    :: 97 test (il vento, pioggia e neve, fulmini, nuvole, ghiaccio e grandine al suolo)
+build\Debug\geovegetation_tests.exe Plugins\GeoWorld\Source\GeoTiles\TestData\vegetation_fixture.gvg   :: 34 test (la vegetazione)
+build\Debug\geobuildings_tests.exe Plugins\GeoWorld\Source\GeoTiles\TestData\buildings_fixture.gbd    :: 24 test (gli edifici)
 Plugins\GeoWorld\Tools\CheckSourceDiscipline.sh      :: serve bash (Git Bash)
 ```
 
@@ -132,7 +139,7 @@ indici, header e giunzioni leggendoli davvero.
 
 ### Console di Unreal
 
-**L'elenco completo, con la spiegazione di ognuno: `docs/comandi-unreal.md`** (96 comandi,
+**L'elenco completo, con la spiegazione di ognuno: `docs/comandi-unreal.md`** (125 comandi,
 generato dal codice). Dentro Unreal: `geo.Help` (i gruppi) e `geo.Help Weather`
 (un gruppo). Qui sotto i piu' usati.
 
@@ -227,6 +234,11 @@ geo.Vegetation.Density <0..4>  quanti alberi (1 = come in natura); Radius <m>: f
 geo.Vegetation.Shadows <0|1|2> ombre: nessuna, i vicini, tutti; FlipWinding: se li vedi dal di dentro
 geo.Vegetation.CreateModels    (editor) gli otto modelli Nanite della libreria; ReloadModels: rileggerla
 geo.Vegetation.Debug <0|1>     overlay: celle per banda, alberi per specie; Stats: in console
+geo.Buildings.Demo <q> <o|-> <e> [v|-]  terreno, ortofoto, edifici (e vegetazione), 300 m sopra la zona piu' fitta
+geo.Buildings.Open <cartella>  apre un dataset di edifici (geoworld build-buildings)
+geo.Buildings.Radius <m>       fin dove ci sono edifici (6000); Shadows <0|1|2>: ombre
+geo.Buildings.ReloadLandmarks  rilegge la libreria dei monumenti (Project Settings > Plugins > GeoWorld - Edifici)
+geo.Buildings.Debug <0|1>      overlay: celle per banda, edifici, triangoli, monumenti; Stats: in console
 ```
 
 Se hai un dataset e vuoi vedere subito qualcosa, il comando e'
@@ -404,6 +416,9 @@ Plugins/GeoWorld/Source/
                       FGeoHailMap + UGeoWeatherSubsystem [meteo]
     Public/Vegetation/ alberi: TreePlacement.h, TreeMesh.h, VegetationCells.h (puri),
                       VegetationShader.inl (HLSL e C++) + UGeoVegetationSubsystem [Fase 11]
+    Public/Mesh/GroundCells.h  celle, bande, firma, terreno disegnato: alberi ed edifici
+    Public/Buildings/ edifici: BuildingMesh.h (puro), BuildingShader.inl (HLSL e C++),
+                      UGeoBuildingsSubsystem, UGeoBuildingSettings (i monumenti) [Fase 10]
     GeoPositionHudSubsystem   le stampe della posizione                   [Fase 9]
   GeoWorldEditor/ i materiali costruiti da codice (geo.Imagery.CreateMaterial)
 
@@ -579,6 +594,7 @@ Limitazioni note, lasciate aperte di proposito:
 | Design e verifica del vento | `docs/vento-design.md`, `docs/vento-verifica.md` |
 | Design e verifica di pioggia, neve, grandine | `docs/meteo-design.md`, `docs/meteo-verifica.md` |
 | Design e verifica della vegetazione | `docs/vegetazione-design.md`, `docs/vegetazione-verifica.md` |
+| Design e verifica degli edifici | `docs/edifici-design.md`, `docs/edifici-verifica.md` |
 | Tutti i comandi della console di Unreal | `docs/comandi-unreal.md` (generato dal codice) |
 | Issue aperte | `docs/issues-aperte.md` |
 | Uso della pipeline, installazione Windows | `Pipeline/README.md` |

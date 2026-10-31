@@ -4,7 +4,7 @@
 //  Per i test di Weather/CloudShader.inl e Weather/GroundShader.inl: lo stesso
 //  testo che la factory mette nel materiale, qui compilato come corpo di una
 //  funzione C++. Tipi (float2/3/4, uint), le funzioni intrinseche usate
-//  (floor, lerp, saturate, min, max, length, sqrt, sin) e la lettura di una texture
+//  (floor, lerp, saturate, min, max, length, sqrt, sin, abs) e la lettura di una texture
 //  (bilineare, bordi bloccati, come il campionatore della mappa meteo).
 // =============================================================================
 #pragma once
@@ -56,6 +56,7 @@ namespace HlslShim
 	inline float length(const float3& A) { return std::sqrt(A.x * A.x + A.y * A.y + A.z * A.z); }
 	inline float sqrt(float A) { return std::sqrt(A); }
 	inline float sin(float A) { return std::sin(A); }
+	inline float abs(float A) { return std::fabs(A); }
 
 	/** Una texture BGRA8 quadrata, come la mappa meteo. */
 	struct FTexture

@@ -45,6 +45,7 @@
 #include <vector>
 
 #include "Geo/Ellipsoid.h"
+#include "Mesh/GroundCells.h"
 #include "Tiles/VegetationClasses.h"
 
 namespace GeoWorld::Vegetation
@@ -312,41 +313,9 @@ namespace GeoWorld::Vegetation
 			});
 	}
 
-	// =========================================================================
-	//  Dal punto geografico al frame locale della cella
-	// =========================================================================
-
-	/**
-	 * Il frame di una cella: origine al suo centro sull'ellissoide, assi NEU
-	 * (nord, est, alto: gli stessi delle tile del terreno, vedi TileMesh.h).
-	 * Le istanze degli alberi stanno qui, in metri; la trasformazione del
-	 * componente porta il frame nel mondo (e il rebase cambia solo quella).
-	 */
-	struct FCellFrame
-	{
-		Core::FGeodetic Origin;
-		Core::FEcef OriginEcef;
-		Core::FMat3 EcefToLocal;
-
-		static FCellFrame At(double LatDeg, double LonDeg)
-		{
-			FCellFrame Frame;
-			Frame.Origin = Core::FGeodetic::FromDegrees(LatDeg, LonDeg, 0.0);
-			Frame.OriginEcef = Core::GeodeticToEcef(Frame.Origin, Core::WGS84);
-			Frame.EcefToLocal = Core::MakeNeuBasis(Frame.Origin.LatRad, Frame.Origin.LonRad);
-			return Frame;
-		}
-
-		/** Il punto (gradi, quota ellissoidica) in metri nel frame: nord, est, alto. */
-		void Local(double LatDeg, double LonDeg, double HeightM, double Out[3]) const
-		{
-			const Core::FEcef Point = Core::GeodeticToEcef(Core::FGeodetic::FromDegrees(LatDeg, LonDeg, HeightM), Core::WGS84);
-			const Core::FEcef Local = EcefToLocal.Transform(Point - OriginEcef);
-			Out[0] = Local.X;
-			Out[1] = Local.Y;
-			Out[2] = Local.Z;
-		}
-	};
+	// Il frame locale della cella (nord, est, alto) sta in Mesh/GroundCells.h:
+	// lo usano anche gli edifici.
+	using Cells::FCellFrame;
 
 	/**
 	 * Quanti alberi tiene una cella a questa distanza dalla camera (0..1): tutti

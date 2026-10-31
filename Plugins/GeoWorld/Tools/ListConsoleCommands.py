@@ -43,6 +43,8 @@ GROUPS = [
     ("Roads", "Strade, ferrovie, piste", "Dipinte sul terreno e 3D da vicino (Fase 8)."),
     ("Water", "L'acqua", "Mare, laghi, fiumi (Fase 9)."),
     ("Weather", "Il meteo", "Vento, pioggia, neve, grandine, fulmini e tuono."),
+    ("Vegetation", "La vegetazione", "Alberi e arbusti dalla copertura del suolo, la libreria dei modelli (Fase 11)."),
+    ("Buildings", "Gli edifici", "Le sagome di OpenStreetMap estruse, i monumenti dalla libreria (Fase 10)."),
     ("Fly", "La camera di volo", "Solo in Play: velocita' proporzionale alla quota."),
 ]
 
@@ -55,6 +57,8 @@ START_HERE = [
     ("terreno e ortofoto", 'geo.Imagery.Demo "<terreno>" "<ortofoto>"'),
     ("terreno, ortofoto e strade", 'geo.Roads.Demo "<terreno>" "<ortofoto>" "<strade>"'),
     ("terreno, ortofoto, acqua (e strade)", 'geo.Water.Demo "<terreno>" "<ortofoto>" "<acqua>" "<strade>"'),
+    ("terreno, ortofoto e alberi", 'geo.Vegetation.Demo "<terreno>" "<ortofoto>" "<vegetazione>"'),
+    ("terreno, ortofoto ed edifici", 'geo.Buildings.Demo "<terreno>" "<ortofoto>" "<edifici>"'),
     ("andare in un posto", "geo.Goto 45.07 7.69 2000   oppure   geo.Goto Torino"),
     ("sapere dove sono", "geo.Where   (e le stampe a destra: geo.Hud 1)"),
     ("volare (in Play)", "geo.Fly"),

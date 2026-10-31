@@ -41,6 +41,7 @@ from . import (fetchimagery, imagecut, imageformat, imagerybuild,
 from . import fetchosm, roadclasses, vectorbuild, vectorformat
 from . import waterbuild, waterclasses, waterformat
 from . import vegbuild, vegclasses, vegformat
+from . import bldbuild, bldclasses, bldformat
 from .raster import (LevelGrid, level_grid_for_bbox, build_source_vrt, source_bounds_wgs84,
                      source_ground_resolution, check_level_is_feasible,
                      warp_and_convert_heights, reduce_level,
@@ -885,6 +886,54 @@ def command_inspect_vegetation(args: argparse.Namespace) -> int:
     return 0
 
 
+def command_build_buildings(args: argparse.Namespace) -> int:
+    bbox = tuple(args.bbox) if args.bbox else None
+    if bbox is None and not args.terrain:
+        log("ERRORE: serve --terrain (il dataset del terreno: la sua area) o --bbox")
+        return 1
+    try:
+        bldbuild.build(output=args.output, osm_paths=args.osm, terrain_root=args.terrain, bbox=bbox,
+                       name=args.name, level=args.level, force=args.force, report=log)
+    except (FileNotFoundError, RuntimeError, ValueError) as error:
+        log(f"ERRORE: {error}")
+        return 1
+    return 0
+
+
+def command_verify_buildings(args: argparse.Namespace) -> int:
+    try:
+        problems = bldbuild.verify(args.output, report=log)
+    except (FileNotFoundError, ValueError) as error:
+        log(f"ERRORE: {error}")
+        return 1
+    return 0 if problems == 0 else 1
+
+
+def command_inspect_buildings(args: argparse.Namespace) -> int:
+    from collections import Counter
+    tile = bldformat.read_tile(args.tile)
+    bounds = tiling.tile_bounds(tile.level, tile.x, tile.y)
+    log(f"tile      : livello {tile.level}, x={tile.x}, y={tile.y}")
+    log(f"bbox      : ovest {bounds.west:.6f}  sud {bounds.south:.6f}  "
+        f"est {bounds.east:.6f}  nord {bounds.north:.6f}")
+    names = {item.id: item.name for item in bldclasses.CLASSES}
+    roofs = {value: key for key, value in bldclasses.ROOF_SHAPES.items()}
+    classes = Counter(names.get(building.building_class, "?") for building in tile.buildings)
+    log(f"edifici   : {len(tile.buildings)}  " + ", ".join(f"{name} {count}" for name, count in classes.most_common()))
+    heights = sorted(building.height_dm / 10.0 for building in tile.buildings)
+    if heights:
+        log(f"altezze   : da {heights[0]:.1f} a {heights[-1]:.1f} m, mediana {heights[len(heights) // 2]:.1f} m")
+    for building in tile.buildings[:args.show]:
+        log(f"  {names.get(building.building_class, '?'):<12} {building.height_dm / 10.0:5.1f} m, "
+            f"{building.levels} piani, tetto {roofs.get(building.roof, '?')}, "
+            f"{len(building.rings[0])} vertici, {len(building.rings) - 1} cortili, "
+            f"osm {building.osm_id & ((1 << 62) - 1)}"
+            + (f", Q{building.wikidata}" if building.wikidata else "")
+            + (" (parte)" if building.flags & bldclasses.FLAG_PART else "")
+            + (" (contorno con le parti: non si disegna)" if building.flags & bldclasses.FLAG_OUTLINE else ""))
+    return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="geoworld-pipeline",
@@ -1131,6 +1180,28 @@ def build_parser() -> argparse.ArgumentParser:
     inspect_veg = subparsers.add_parser("inspect-vegetation", help="stampa il contenuto di una tile di vegetazione")
     inspect_veg.add_argument("tile")
     inspect_veg.set_defaults(func=command_inspect_vegetation)
+
+    build_bld = subparsers.add_parser(
+        "build-buildings", help="da un estratto OSM (sagome, altezze, tetti) a tile di edifici")
+    build_bld.add_argument("--osm", nargs="+", required=True, help="estratto OpenStreetMap .osm.pbf (geoworld fetch-osm)")
+    build_bld.add_argument("--terrain", help="dataset del TERRENO: la sua area")
+    build_bld.add_argument("--bbox", nargs=4, type=float, metavar=("OVEST", "SUD", "EST", "NORD"),
+                           help="quest'area invece di quella del terreno")
+    build_bld.add_argument("-o", "--output", required=True, help="cartella radice del dataset di edifici")
+    build_bld.add_argument("--name", default="edifici")
+    build_bld.add_argument("--level", type=int, default=bldbuild.DEFAULT_LEVEL,
+                           help=f"livello delle tile (default {bldbuild.DEFAULT_LEVEL}: ~600 m)")
+    build_bld.add_argument("--force", action="store_true", help="rifa' tutto, anche la lettura del file OSM")
+    build_bld.set_defaults(func=command_build_buildings)
+
+    verify_bld = subparsers.add_parser("verify-buildings", help="controlla un dataset di edifici")
+    verify_bld.add_argument("-o", "--output", required=True)
+    verify_bld.set_defaults(func=command_verify_buildings)
+
+    inspect_bld = subparsers.add_parser("inspect-buildings", help="stampa il contenuto di una tile di edifici")
+    inspect_bld.add_argument("tile")
+    inspect_bld.add_argument("--show", type=int, default=10, help="quanti edifici elencare")
+    inspect_bld.set_defaults(func=command_inspect_buildings)
 
     return parser
 

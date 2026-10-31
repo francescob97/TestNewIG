@@ -78,6 +78,8 @@ DerivedDataCache/*
 Pipeline/**/__pycache__/
 Pipeline/synthetic_source/
 Pipeline/dataset/
+# I file scaricati a mano o dalla pipeline (estratti OSM, WorldCover...): pesanti
+Pipeline/dati/
 _work/
 
 # Test standalone (cmake -S Plugins/GeoWorld/Tools/StandaloneTests -B build)

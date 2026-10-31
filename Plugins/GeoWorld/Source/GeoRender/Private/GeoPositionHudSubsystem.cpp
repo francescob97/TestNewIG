@@ -1,5 +1,6 @@
 #include "GeoPositionHudSubsystem.h"
 
+#include "Buildings/GeoBuildingsSubsystem.h"
 #include "Geo/GeoFormat.h"
 #include "Georeference/GeoreferenceSubsystem.h"
 #include "Mesh/TileMesh.h"
@@ -211,6 +212,21 @@ void UGeoPositionHudSubsystem::Draw(UCanvas* Canvas, APlayerController* /*Contro
 			if (Trees.CelleInAttesa > 0) { Text += ", " + Format::Number(Trees.CelleInAttesa, 0) + " in attesa"; }
 			if (!Vegetation->GetMaterialProblem().IsEmpty()) { Text += " (manca il materiale)"; }
 			Add(TEXT("Vegetazione"), Text);
+		}
+	}
+
+	// Gli edifici: quanti a schermo, i monumenti, quante celle aspettano.
+	if (const UGeoBuildingsSubsystem* Buildings = GetWorld()->GetSubsystem<UGeoBuildingsSubsystem>())
+	{
+		const FGeoBuildingsStats Built = Buildings->GetStats();
+		const int32 Shown = Built.CelleVicine + Built.CelleMedie + Built.CelleLontane;
+		if (Buildings->IsEnabled() && (Shown > 0 || Built.CelleInAttesa > 0))
+		{
+			std::string Text = Format::Number(Built.Edifici, 0) + " in " + Format::Number(Shown, 0) + " celle";
+			if (Built.Monumenti > 0) { Text += ", " + Format::Number(Built.Monumenti, 0) + " monumenti"; }
+			if (Built.CelleInAttesa > 0) { Text += ", " + Format::Number(Built.CelleInAttesa, 0) + " in attesa"; }
+			if (!Buildings->GetMaterialProblem().IsEmpty()) { Text += " (manca il materiale)"; }
+			Add(TEXT("Edifici"), Text);
 		}
 	}
 

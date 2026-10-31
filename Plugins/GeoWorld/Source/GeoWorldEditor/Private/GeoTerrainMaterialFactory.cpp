@@ -1844,9 +1844,113 @@ namespace
 	}
 }
 
+// ============================================================================
+//  GLI EDIFICI: M_GeoBuilding
+// ============================================================================
+
+namespace
+{
+	const TCHAR* BuildingMaterialPackagePath = TEXT("/GeoWorld/Materials/M_GeoBuilding");
+	const TCHAR* BuildingMaterialAssetName = TEXT("M_GeoBuilding");
+
+	/** Il nodo Custom: il testo di Buildings/BuildingShader.inl (i test lo compilano come C++). */
+#define GEO_BUILDING_COLOUR(...) #__VA_ARGS__
+	const char* BuildingColourCode =
+#include "Buildings/BuildingShader.inl"
+		;
+#undef GEO_BUILDING_COLOUR
+
+	/**
+	 * M_GeoBuilding: il materiale degli edifici estrusi (UGeoBuildingsSubsystem).
+	 * Default Lit, opaco.
+	 *
+	 *   VertexColor RGB + A --Append--> Paint (colore sRGB; A: 1 muro, 0 tetto)
+	 *   TexCoord 0 (Facade: metri lungo il muro, metri sopra la base)
+	 *   TexCoord 1 (Style: altezza di un piano, caso dell'edificio)
+	 *   VertexNormalWS, WorldPosition, MPC_GeoWeather GroundWeather e GroundFrame
+	 *       --> Custom "Edifici (colore)" = float4(colore, ruvidita')
+	 *       --> Base Color (RGB), Roughness (A)
+	 *
+	 * NOTA UE: le finestre sono DISEGNATE dal materiale (BuildingShader.inl),
+	 * non sono triangoli: una facciata e' un quadrilatero solo. Il colore del
+	 * vertice arriva dal componente cosi' com'e' (byte / 255): lo shader lo
+	 * tratta come sRGB e lo porta in lineare.
+	 */
+	bool BuildBuildingGraph(UMaterial* Material)
+	{
+		UMaterialParameterCollection* Collection = LoadObject<UMaterialParameterCollection>(nullptr,
+			*FString::Printf(TEXT("%s.%s"), WeatherCollectionPackagePath, WeatherCollectionAssetName), nullptr,
+			LOAD_NoWarn | LOAD_Quiet);
+		if (!Collection)
+		{
+			Report(TEXT("M_GeoBuilding: manca MPC_GeoWeather."), FColor::Red);
+			return false;
+		}
+
+		Material->MaterialDomain = MD_Surface;
+		Material->SetShadingModel(MSM_DefaultLit);
+
+		FGraph G{ Material };
+		UMaterialExpressionVertexColor* VertexPaint = G.Make<UMaterialExpressionVertexColor>(-1600, -300);
+		UMaterialExpressionAppendVector* PaintColour = G.Make<UMaterialExpressionAppendVector>(-1350, -300);
+		UMaterialExpressionTextureCoordinate* Facade = G.Make<UMaterialExpressionTextureCoordinate>(-1350, -150);
+		UMaterialExpressionTextureCoordinate* Style = G.Make<UMaterialExpressionTextureCoordinate>(-1350, -50);
+		UMaterialExpressionVertexNormalWS* Normal = G.Make<UMaterialExpressionVertexNormalWS>(-1350, 50);
+		UMaterialExpressionConstant* UuPerMetre = G.Make<UMaterialExpressionConstant>(-1350, 450);
+		if (!G.bOk) { return false; }
+		Facade->CoordinateIndex = 0;
+		Style->CoordinateIndex = 1;
+		UuPerMetre->R = static_cast<float>(GeoWorld::Units::MetersToUu);
+
+		// Il colore del vertice in un float4: le uscite RGB e A (per maschera:
+		// vedi FindOutputByChannels), unite da un Append.
+		const int32 PaintRgb = FindOutputByChannels(VertexPaint, true, true, true, false);
+		const int32 PaintAlpha = FindOutputByChannels(VertexPaint, false, false, false, true);
+		if (PaintRgb == INDEX_NONE || PaintAlpha == INDEX_NONE)
+		{
+			Report(TEXT("M_GeoBuilding: il nodo VertexColor non ha le uscite RGB e A."), FColor::Red);
+			return false;
+		}
+		PaintColour->A.Connect(PaintRgb, VertexPaint);
+		PaintColour->B.Connect(PaintAlpha, VertexPaint);
+
+		TArray<FNamedPin> ColourInputs;
+		ColourInputs.Add(FNamedPin{ TEXT("Paint"), FPin{ PaintColour, 0 } });
+		ColourInputs.Add(FNamedPin{ TEXT("Facade"), FPin{ Facade, 0 } });
+		ColourInputs.Add(FNamedPin{ TEXT("Style"), FPin{ Style, 0 } });
+		ColourInputs.Add(FNamedPin{ TEXT("Normal"), FPin{ Normal, 0 } });
+		ColourInputs.Add(FNamedPin{ TEXT("Pos"), TruncatedWorldPosition(G, false, -1350, 150) });
+		ColourInputs.Add(FNamedPin{ TEXT("Ground"), CollectionParameter(G, Collection, TEXT("GroundWeather"), -1350, 250) });
+		ColourInputs.Add(FNamedPin{ TEXT("Frame"), CollectionParameter(G, Collection, TEXT("GroundFrame"), -1350, 350) });
+		ColourInputs.Add(FNamedPin{ TEXT("UuPerMetre"), FPin{ UuPerMetre, 0 } });
+		const FString ColourCode(ANSI_TO_TCHAR(BuildingColourCode));
+		UMaterialExpressionCustom* Colour = MakeCustom(G, TEXT("Edifici (colore)"), *ColourCode, CMOT_Float4, ColourInputs, -700, -100);
+
+		UMaterialExpressionComponentMask* ColourMask = G.Make<UMaterialExpressionComponentMask>(-350, -150);
+		UMaterialExpressionComponentMask* RoughMask = G.Make<UMaterialExpressionComponentMask>(-350, 0);
+		if (!G.bOk) { return false; }
+		ColourMask->R = true;
+		ColourMask->G = true;
+		ColourMask->B = true;
+		ColourMask->A = false;
+		RoughMask->R = false;
+		RoughMask->G = false;
+		RoughMask->B = false;
+		RoughMask->A = true;
+		G.Connect(Colour, TEXT(""), ColourMask, TEXT(""));
+		G.Connect(Colour, TEXT(""), RoughMask, TEXT(""));
+		G.Connect(ColourMask, TEXT(""), MP_BaseColor);
+		G.Connect(RoughMask, TEXT(""), MP_Roughness);
+
+		if (!G.bOk) { return false; }
+		UMaterialEditingLibrary::RecompileMaterial(Material);
+		return true;
+	}
+}
+
 static FAutoConsoleCommand GeoImageryCreateMaterialCommand(
 	TEXT("geo.Imagery.CreateMaterial"),
-	TEXT("Costruisce (o RIFA') in /GeoWorld/Materials: M_GeoTerrain (foto e strade dipinte), M_GeoRoad (strade 3D), M_GeoWater e MPC_GeoWater (acqua), MPC_GeoWeather, M_GeoPrecipitation, M_GeoLightning e M_GeoClouds (meteo), M_GeoVegetation (alberi)."),
+	TEXT("Costruisce (o RIFA') in /GeoWorld/Materials: M_GeoTerrain (foto e strade dipinte), M_GeoRoad (strade 3D), M_GeoWater e MPC_GeoWater (acqua), MPC_GeoWeather, M_GeoPrecipitation, M_GeoLightning e M_GeoClouds (meteo), M_GeoVegetation (alberi), M_GeoBuilding (edifici)."),
 	FConsoleCommandDelegate::CreateStatic([]()
 	{
 		// Il meteo per primo: terreno e strade leggono MPC_GeoWeather (suolo
@@ -1870,8 +1974,10 @@ static FAutoConsoleCommand GeoImageryCreateMaterialCommand(
 			&& CreateOrRebuildMaterial(CloudMaterialPackagePath, CloudMaterialAssetName, &BuildCloudGraph);
 		const bool bVegetation = bWeatherCollection
 			&& CreateOrRebuildMaterial(VegetationMaterialPackagePath, VegetationMaterialAssetName, &BuildVegetationGraph);
+		const bool bBuildings = bWeatherCollection
+			&& CreateOrRebuildMaterial(BuildingMaterialPackagePath, BuildingMaterialAssetName, &BuildBuildingGraph);
 
-		if (bTerrain && bRoad && bWater && bPrecipitation && bLightning && bClouds && bVegetation)
+		if (bTerrain && bRoad && bWater && bPrecipitation && bLightning && bClouds && bVegetation && bBuildings)
 		{
 			Report(TEXT("Materiali pronti. Riavvia il Play (o rilancia geo.Roads.Demo / geo.Water.Demo)."));
 		}
@@ -1892,6 +1998,11 @@ static FAutoConsoleCommand GeoImageryCreateMaterialCommand(
 		if (!bVegetation)
 		{
 			Report(TEXT("M_GeoVegetation non fatto: gli alberi restano grigi e fermi. Output Log (LogGeoWorld) e docs/vegetazione-verifica.md"),
+				FColor::Red);
+		}
+		if (!bBuildings)
+		{
+			Report(TEXT("M_GeoBuilding non fatto: edifici grigi, senza finestre. Output Log (LogGeoWorld) e docs/edifici-verifica.md"),
 				FColor::Red);
 		}
 		if (!bTerrain)
