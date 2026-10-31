@@ -14,7 +14,9 @@
 #include "Terrain/GeoTerrainSubsystem.h"
 #include "Streaming/GeoImageryStreamingSubsystem.h"
 #include "Streaming/GeoVectorStreamingSubsystem.h"
+#include "Streaming/GeoVegetationStreamingSubsystem.h"
 #include "Streaming/GeoWaterStreamingSubsystem.h"
+#include "Vegetation/GeoVegetationSubsystem.h"
 #include "Water/GeoWaterSubsystem.h"
 #include "Weather/GeoWeatherSubsystem.h"
 #include "Streaming/GeoTileStreamingSubsystem.h"
@@ -31,6 +33,7 @@
 #include "HAL/IConsoleManager.h"
 #include "Geo/GeoFormat.h"
 #include "Geo/GeoUnits.h"
+#include "Tiles/TilingScheme.h"
 
 #include <cmath>
 
@@ -2361,4 +2364,280 @@ static FAutoConsoleCommandWithWorldAndArgs GeoWaterDemoCommand(
 		GeoTerrainConsole::Report(TEXT("Acqua accesa. Quota 1,5 km sopra il centro del dataset d'acqua."));
 		GeoTerrainConsole::Report(TEXT("Il vento: geo.Weather.Wind 12 270 (12 m/s da ovest). Le stampe della posizione: a destra."));
 		GeoTerrainConsole::Report(TEXT("Se l'acqua non si vede: geo.Imagery.CreateMaterial (crea M_GeoWater e MPC_GeoWater)"));
+	}));
+
+// ============================================================================
+//  geo.Vegetation.* -- gli alberi (geoworld build-vegetation)
+// ============================================================================
+
+namespace GeoVegetationConsole
+{
+	static UGeoVegetationSubsystem* Get(UWorld* World)
+	{
+		return World ? World->GetSubsystem<UGeoVegetationSubsystem>() : nullptr;
+	}
+
+	static UGeoVegetationStreamingSubsystem* GetStreaming(UWorld* World)
+	{
+		return World ? World->GetSubsystem<UGeoVegetationStreamingSubsystem>() : nullptr;
+	}
+
+	/** Le percentuali del manifest, "bosco 28%, prato 3%". */
+	static FString CoverText(const FGeoVegetationDataset& Dataset)
+	{
+		static const TPair<const TCHAR*, const TCHAR*> Names[] = {
+			{ TEXT("Trees"), TEXT("bosco") }, { TEXT("Shrubs"), TEXT("arbusti") }, { TEXT("Grass"), TEXT("prato") },
+			{ TEXT("Crops"), TEXT("campi") }, { TEXT("Built"), TEXT("costruito") }, { TEXT("Water"), TEXT("acqua") },
+			{ TEXT("Bare"), TEXT("roccia") }, { TEXT("Snow"), TEXT("neve") } };
+		FString Text;
+		for (const TPair<const TCHAR*, const TCHAR*>& Name : Names)
+		{
+			const double* Fraction = Dataset.GetCover().Find(Name.Key);
+			if (!Fraction || *Fraction < 0.005) { continue; }
+			if (!Text.IsEmpty()) { Text += TEXT(", "); }
+			Text += FString::Printf(TEXT("%s %.0f%%"), Name.Value, 100.0 * *Fraction);   /* percentuale, non-unita */
+		}
+		return Text;
+	}
+
+	/** Apre il dataset e dice cosa c'e' dentro. Usato da Open e da Demo. */
+	static bool Open(UWorld* World, const FString& Directory)
+	{
+		UGeoVegetationStreamingSubsystem* Streaming = GetStreaming(World);
+		UGeoVegetationSubsystem* Vegetation = Get(World);
+		if (!Streaming || !Vegetation) { return false; }
+
+		FString Error;
+		if (!Streaming->OpenDataset(Directory, Error))
+		{
+			GeoTerrainConsole::Report(FString::Printf(TEXT("Vegetazione: %s"), *Error), FColor::Red);
+			return false;
+		}
+		Vegetation->OnDatasetChanged();
+
+		const FGeoVegetationDataset& Dataset = Streaming->GetDataset();
+		double West, South, East, North;
+		Dataset.GetBoundingBox(West, South, East, North);
+		GeoTerrainConsole::Report(FString::Printf(TEXT("Vegetazione '%s': livello %d, %lld tile; %s"),
+			*Dataset.GetDatasetName(), Dataset.GetLevel(), static_cast<long long>(Dataset.GetIndexedTileCount()), *CoverText(Dataset)));
+		GeoTerrainConsole::Report(FString::Printf(TEXT("Cartella: %s"), *Dataset.GetRootDirectory()));
+		GeoTerrainConsole::Report(FString::Printf(TEXT("Area: ovest %.4f  sud %.4f  est %.4f  nord %.4f"), West, South, East, North));
+		const FString Problem = Vegetation->GetMaterialProblem();
+		if (!Problem.IsEmpty()) { GeoTerrainConsole::Report(Problem, FColor::Red); }
+		return true;
+	}
+
+	/** "1" / "0", o niente per invertire. */
+	static bool Flag(const TArray<FString>& Args, bool bCurrent)
+	{
+		return (Args.Num() >= 1) ? (FCString::Atoi(*Args[0]) != 0) : !bCurrent;
+	}
+}
+
+static FAutoConsoleCommandWithWorldAndArgs GeoVegetationOpenCommand(
+	TEXT("geo.Vegetation.Open"),
+	TEXT("geo.Vegetation.Open <cartella> - apre un dataset di vegetazione (geoworld build-vegetation): gli alberi crescono attorno alla camera."),
+	FConsoleCommandWithWorldAndArgsDelegate::CreateStatic(
+		[](const TArray<FString>& RawArgs, UWorld* World)
+	{
+		// I percorsi fra virgolette restano interi anche con gli spazi (GeoConsoleArgs.h).
+		const TArray<FString> Args = GeoWorld::Console::QuotedArgs(RawArgs);
+		if (Args.Num() < 1)
+		{
+			GeoTerrainConsole::Report(TEXT("Uso: geo.Vegetation.Open <cartella del dataset di vegetazione>"), FColor::Red);
+			return;
+		}
+		GeoVegetationConsole::Open(World, Args[0]);
+	}));
+
+static FAutoConsoleCommandWithWorld GeoVegetationCloseCommand(
+	TEXT("geo.Vegetation.Close"),
+	TEXT("geo.Vegetation.Close - chiude il dataset di vegetazione: spariscono tutti gli alberi."),
+	FConsoleCommandWithWorldDelegate::CreateStatic([](UWorld* World)
+	{
+		UGeoVegetationStreamingSubsystem* Streaming = GeoVegetationConsole::GetStreaming(World);
+		UGeoVegetationSubsystem* Vegetation = GeoVegetationConsole::Get(World);
+		if (!Streaming || !Vegetation) { return; }
+		Streaming->CloseDataset();
+		Vegetation->OnDatasetChanged();
+		GeoTerrainConsole::Report(TEXT("Vegetazione chiusa."));
+	}));
+
+static FAutoConsoleCommandWithWorldAndArgs GeoVegetationEnableCommand(
+	TEXT("geo.Vegetation.Enable"),
+	TEXT("geo.Vegetation.Enable <0|1> - accende e spegne gli alberi (il dataset resta aperto)."),
+	FConsoleCommandWithWorldAndArgsDelegate::CreateStatic(
+		[](const TArray<FString>& Args, UWorld* World)
+	{
+		UGeoVegetationSubsystem* Vegetation = GeoVegetationConsole::Get(World);
+		if (!Vegetation) { return; }
+		const bool bValue = GeoVegetationConsole::Flag(Args, Vegetation->IsEnabled());
+		Vegetation->SetEnabled(bValue);
+		GeoTerrainConsole::Report(bValue ? TEXT("Vegetazione: ON") : TEXT("Vegetazione: OFF"));
+	}));
+
+static FAutoConsoleCommandWithWorldAndArgs GeoVegetationDensityCommand(
+	TEXT("geo.Vegetation.Density"),
+	TEXT("geo.Vegetation.Density <0..4> - quanti alberi rispetto alla natura (1 = come la copertura del suolo; 0,5 = la meta'). Default 1."),
+	FConsoleCommandWithWorldAndArgsDelegate::CreateStatic(
+		[](const TArray<FString>& Args, UWorld* World)
+	{
+		UGeoVegetationSubsystem* Vegetation = GeoVegetationConsole::Get(World);
+		if (!Vegetation) { return; }
+		if (Args.Num() >= 1) { Vegetation->SetDensity(FCString::Atod(*Args[0])); }
+		GeoTerrainConsole::Report(FString::Printf(TEXT("Densita' della vegetazione: %.2f (le celle si rifanno)"), Vegetation->GetDensity()));
+	}));
+
+static FAutoConsoleCommandWithWorldAndArgs GeoVegetationRadiusCommand(
+	TEXT("geo.Vegetation.Radius"),
+	TEXT("geo.Vegetation.Radius <m> - fin dove ci sono alberi (default 2500). Le bande vicina e media si allargano insieme."),
+	FConsoleCommandWithWorldAndArgsDelegate::CreateStatic(
+		[](const TArray<FString>& Args, UWorld* World)
+	{
+		UGeoVegetationSubsystem* Vegetation = GeoVegetationConsole::Get(World);
+		if (!Vegetation) { return; }
+		if (Args.Num() >= 1) { Vegetation->SetRadiusM(FCString::Atod(*Args[0])); }
+		const GeoWorld::Vegetation::FBandSettings& Bands = Vegetation->GetBands();
+		GeoTerrainConsole::Report(FString::Printf(TEXT("Vegetazione: tutti gli alberi fino a %.0f m, la meta' fino a %.0f m, un quarto fino a %.0f m"),
+			Bands.NearM, Bands.MidM, Bands.FarM));
+	}));
+
+static FAutoConsoleCommandWithWorldAndArgs GeoVegetationShadowsCommand(
+	TEXT("geo.Vegetation.Shadows"),
+	TEXT("geo.Vegetation.Shadows <0|1> - gli alberi vicini fanno ombra (default 1; quelli lontani mai)."),
+	FConsoleCommandWithWorldAndArgsDelegate::CreateStatic(
+		[](const TArray<FString>& Args, UWorld* World)
+	{
+		UGeoVegetationSubsystem* Vegetation = GeoVegetationConsole::Get(World);
+		if (!Vegetation) { return; }
+		const bool bValue = GeoVegetationConsole::Flag(Args, Vegetation->AreShadowsEnabled());
+		Vegetation->SetShadows(bValue);
+		GeoTerrainConsole::Report(bValue ? TEXT("Ombre degli alberi vicini: ON") : TEXT("Ombre degli alberi: OFF"));
+	}));
+
+static FAutoConsoleCommandWithWorldAndArgs GeoVegetationFlipCommand(
+	TEXT("geo.Vegetation.FlipWinding"),
+	TEXT("geo.Vegetation.FlipWinding <0|1> - inverte le facce degli alberi: se li vedi \"dal di dentro\" (la chioma sparisce dal lato verso di te)."),
+	FConsoleCommandWithWorldAndArgsDelegate::CreateStatic(
+		[](const TArray<FString>& Args, UWorld* World)
+	{
+		UGeoVegetationSubsystem* Vegetation = GeoVegetationConsole::Get(World);
+		if (!Vegetation) { return; }
+		const bool bWas = Vegetation->IsFlipWinding();
+		const bool bValue = GeoVegetationConsole::Flag(Args, bWas);
+		Vegetation->SetFlipWinding(bValue);
+		if (bValue == bWas)
+		{
+			GeoTerrainConsole::Report(FString::Printf(TEXT("Facce degli alberi: era GIA' %s, nessun cambiamento"),
+				bValue ? TEXT("invertito") : TEXT("normale")), FColor::Yellow);
+			return;
+		}
+		GeoTerrainConsole::Report(bValue ? TEXT("Facce degli alberi: invertite") : TEXT("Facce degli alberi: normali"));
+	}));
+
+static FAutoConsoleCommandWithWorldAndArgs GeoVegetationDebugCommand(
+	TEXT("geo.Vegetation.Debug"),
+	TEXT("geo.Vegetation.Debug <0|1> - overlay della vegetazione: celle per banda (contorni colorati), alberi per specie, attese."),
+	FConsoleCommandWithWorldAndArgsDelegate::CreateStatic(
+		[](const TArray<FString>& Args, UWorld* World)
+	{
+		UGeoVegetationSubsystem* Vegetation = GeoVegetationConsole::Get(World);
+		if (!Vegetation) { return; }
+		const bool bValue = GeoVegetationConsole::Flag(Args, Vegetation->IsDebugOverlayEnabled());
+		Vegetation->SetDebugOverlayEnabled(bValue);
+		if (!bValue && GEngine) { GEngine->ClearOnScreenDebugMessages(); }
+	}));
+
+static FAutoConsoleCommandWithWorld GeoVegetationStatsCommand(
+	TEXT("geo.Vegetation.Stats"),
+	TEXT("Statistiche della vegetazione."),
+	FConsoleCommandWithWorldDelegate::CreateStatic([](UWorld* World)
+	{
+		UGeoVegetationSubsystem* Vegetation = GeoVegetationConsole::Get(World);
+		UGeoVegetationStreamingSubsystem* Streaming = GeoVegetationConsole::GetStreaming(World);
+		if (!Vegetation || !Streaming) { return; }
+		if (!Streaming->IsDatasetOpen())
+		{
+			GeoTerrainConsole::Report(TEXT("Nessun dataset di vegetazione: geo.Vegetation.Open <cartella>"), FColor::Yellow);
+			return;
+		}
+		const FGeoVegetationStats Stats = Vegetation->GetStats();
+		GeoTerrainConsole::Report(FString::Printf(TEXT("Alberi: %d (latifoglie %d, conifere %d, pini domestici %d, arbusti %d) in %d componenti"),
+			Stats.GetTreeCount(), Stats.Latifoglie, Stats.Conifere, Stats.PiniDomestici, Stats.Arbusti, Stats.Componenti));
+		GeoTerrainConsole::Report(FString::Printf(TEXT("Celle: %d vicine, %d medie, %d lontane, %d vuote, %d in attesa; %.1f ms per cella"),
+			Stats.CelleVicine, Stats.CelleMedie, Stats.CelleLontane, Stats.CelleVuote, Stats.CelleInAttesa, Stats.MillisecondiPerCella));
+		const FGeoVegetationStreamingStats Loads = Streaming->GetStats();
+		GeoTerrainConsole::Report(FString::Printf(TEXT("Copertura del suolo: %d tile in memoria (%.1f MB), %d caricate, %d errori"),
+			Loads.TileResidenti, Loads.MemoriaMB, Loads.CaricamentiTotali, Loads.ErroriDiCaricamento));
+		const FString Problem = Vegetation->GetMaterialProblem();
+		if (!Problem.IsEmpty()) { GeoTerrainConsole::Report(Problem, FColor::Red); }
+	}));
+
+static FAutoConsoleCommandWithWorldAndArgs GeoVegetationDemoCommand(
+	TEXT("geo.Vegetation.Demo"),
+	TEXT("geo.Vegetation.Demo <terreno> <ortofoto|-> <vegetazione> [acqua|-] - apre tutto, accende e si mette 250 m sopra il centro della vegetazione."),
+	FConsoleCommandWithWorldAndArgsDelegate::CreateStatic(
+		[](const TArray<FString>& RawArgs, UWorld* World)
+	{
+		// I percorsi fra virgolette restano interi anche con gli spazi (GeoConsoleArgs.h).
+		const TArray<FString> Args = GeoWorld::Console::QuotedArgs(RawArgs);
+		UGeoTerrainSubsystem* Terrain = GeoTerrainConsole::Get(World);
+		UGeoImagerySubsystem* Imagery = World ? World->GetSubsystem<UGeoImagerySubsystem>() : nullptr;
+		UGeoImageryStreamingSubsystem* ImageStreaming = World ? World->GetSubsystem<UGeoImageryStreamingSubsystem>() : nullptr;
+		UGeoTileStreamingSubsystem* Heights = World ? World->GetSubsystem<UGeoTileStreamingSubsystem>() : nullptr;
+		UGeoQuadtreeSubsystem* Quadtree = World ? World->GetSubsystem<UGeoQuadtreeSubsystem>() : nullptr;
+		UGeoreferenceSubsystem* Georeference = World ? World->GetSubsystem<UGeoreferenceSubsystem>() : nullptr;
+		UGeoVegetationSubsystem* Vegetation = GeoVegetationConsole::Get(World);
+		UGeoVegetationStreamingSubsystem* VegetationStreaming = GeoVegetationConsole::GetStreaming(World);
+		if (!Terrain || !Imagery || !ImageStreaming || !Heights || !Quadtree || !Georeference || !Vegetation || !VegetationStreaming)
+		{
+			return;
+		}
+		if (Args.Num() < 3)
+		{
+			GeoTerrainConsole::Report(TEXT("Uso: geo.Vegetation.Demo <terreno> <ortofoto, o -> <vegetazione> [acqua, o -]"), FColor::Red);
+			return;
+		}
+
+		FString Error;
+		if (!Heights->OpenDataset(Args[0], Error))
+		{
+			GeoTerrainConsole::Report(FString::Printf(TEXT("Terreno: %s"), *Error), FColor::Red);
+			return;
+		}
+		const bool bWithImagery = (Args[1] != TEXT("-"));
+		if (bWithImagery && !ImageStreaming->OpenDataset(Args[1], Error))
+		{
+			GeoTerrainConsole::Report(FString::Printf(TEXT("Ortofoto: %s"), *Error), FColor::Red);
+			return;
+		}
+		if (!GeoVegetationConsole::Open(World, Args[2])) { return; }
+		const bool bWithWater = Args.Num() >= 4 && Args[3] != TEXT("-");
+		if (bWithWater && !GeoWaterConsole::Open(World, Args[3])) { return; }
+
+		// 250 m sopra il punto piu' alto della tile di terreno al centro: si
+		// vedono le chiome da vicino e il bosco che si dirada verso l'orizzonte.
+		double West, South, East, North;
+		VegetationStreaming->GetDataset().GetBoundingBox(West, South, East, North);
+		const double CentreLat = (South + North) * 0.5, CentreLon = (West + East) * 0.5;
+		const FGeoTileDataset& HeightDataset = Heights->GetDataset();
+		float Lowest = 0.0f, Highest = 0.0f;
+		uint32 X = 0, Y = 0;
+		GeoWorld::Tiles::TileForLonLat(static_cast<uint32>(HeightDataset.GetMinLevel()), CentreLon, CentreLat, X, Y);
+		const bool bKnown = HeightDataset.GetTileHeightRange(
+			GeoWorld::Tiles::FTileKey{ static_cast<uint32>(HeightDataset.GetMinLevel()), X, Y }, Lowest, Highest);
+		const double Altitude = (bKnown ? static_cast<double>(Highest) : 500.0) + 250.0;
+		Georeference->TeleportViewTo(GeoWorld::Core::FGeodetic::FromDegrees(CentreLat, CentreLon, Altitude));
+
+		Quadtree->SetEnabled(true);
+		Terrain->SetEnabled(true);
+		Terrain->SetWireframe(false);
+		Imagery->SetEnabled(bWithImagery);
+		if (UGeoWaterSubsystem* Water = GeoWaterConsole::Get(World)) { Water->SetEnabled(bWithWater); }
+		Vegetation->SetEnabled(true);
+		Vegetation->SetDebugOverlayEnabled(true);
+
+		GeoTerrainConsole::Report(TEXT("Vegetazione accesa, 250 m sopra il centro del dataset. Scendi verso il bosco: le celle vicine hanno tutti gli alberi."));
+		GeoTerrainConsole::Report(TEXT("Il vento li piega: geo.Weather.Wind 12 270. La neve li imbianca: geo.Weather.SnowCover 0"));
+		GeoTerrainConsole::Report(TEXT("Se gli alberi sono grigi e fermi: geo.Imagery.CreateMaterial (crea M_GeoVegetation)"));
 	}));

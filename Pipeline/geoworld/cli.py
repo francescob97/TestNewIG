@@ -40,6 +40,7 @@ from . import (fetchimagery, imagecut, imageformat, imagerybuild,
 # numpy solo dentro le funzioni, come gli altri.
 from . import fetchosm, roadclasses, vectorbuild, vectorformat
 from . import waterbuild, waterclasses, waterformat
+from . import vegbuild, vegclasses, vegformat
 from .raster import (LevelGrid, level_grid_for_bbox, build_source_vrt, source_bounds_wgs84,
                      source_ground_resolution, check_level_is_feasible,
                      warp_and_convert_heights, reduce_level,
@@ -846,6 +847,44 @@ def command_inspect_water(args: argparse.Namespace) -> int:
     return 0
 
 
+def command_build_vegetation(args: argparse.Namespace) -> int:
+    bbox = tuple(args.bbox) if args.bbox else None
+    if bbox is None and not args.terrain:
+        log("ERRORE: serve --terrain (il dataset del terreno: la sua area) o --bbox")
+        return 1
+    try:
+        vegbuild.build(output=args.output, terrain_root=args.terrain, bbox=bbox, worldcover=args.worldcover,
+                       name=args.name, level=args.level, force=args.force, report=log)
+    except (FileNotFoundError, RuntimeError, ValueError) as error:
+        log(f"ERRORE: {error}")
+        return 1
+    return 0
+
+
+def command_verify_vegetation(args: argparse.Namespace) -> int:
+    try:
+        problems = vegbuild.verify(args.output, report=log)
+    except (FileNotFoundError, ValueError) as error:
+        log(f"ERRORE: {error}")
+        return 1
+    return 0 if problems == 0 else 1
+
+
+def command_inspect_vegetation(args: argparse.Namespace) -> int:
+    import numpy as np
+    tile = vegformat.read_tile(args.tile)
+    bounds = tiling.tile_bounds(tile.level, tile.x, tile.y)
+    log(f"tile      : livello {tile.level}, x={tile.x}, y={tile.y}")
+    log(f"bbox      : ovest {bounds.west:.6f}  sud {bounds.south:.6f}  "
+        f"est {bounds.east:.6f}  nord {bounds.north:.6f}")
+    counts = np.bincount(tile.classes.ravel(), minlength=len(vegclasses.CLASSES))
+    total = max(1, int(counts.sum()))
+    for cover in vegclasses.CLASSES:
+        if counts[cover.id]:
+            log(f"  {cover.name:<9} {100.0 * counts[cover.id] / total:5.1f}%  {cover.description}")
+    return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="geoworld-pipeline",
@@ -1071,6 +1110,27 @@ def build_parser() -> argparse.ArgumentParser:
     inspect_water = subparsers.add_parser("inspect-water", help="stampa il contenuto di una tile d'acqua")
     inspect_water.add_argument("tile")
     inspect_water.set_defaults(func=command_inspect_water)
+
+    build_veg = subparsers.add_parser(
+        "build-vegetation", help="da ESA WorldCover (10 m, letto dalla rete a pezzi) a tile di vegetazione")
+    build_veg.add_argument("--terrain", help="dataset del TERRENO: la sua area")
+    build_veg.add_argument("--bbox", nargs=4, type=float, metavar=("OVEST", "SUD", "EST", "NORD"),
+                           help="quest'area invece di quella del terreno")
+    build_veg.add_argument("--worldcover", help="cartella (o file) WorldCover gia' scaricati: senza, si leggono dalla rete")
+    build_veg.add_argument("-o", "--output", required=True, help="cartella radice del dataset di vegetazione")
+    build_veg.add_argument("--name", default="vegetazione")
+    build_veg.add_argument("--level", type=int, default=vegbuild.DEFAULT_LEVEL,
+                           help=f"livello delle tile (default {vegbuild.DEFAULT_LEVEL}: 2,4 km, pixel da ~10 m)")
+    build_veg.add_argument("--force", action="store_true", help="rifa' anche i blocchi gia' fatti")
+    build_veg.set_defaults(func=command_build_vegetation)
+
+    verify_veg = subparsers.add_parser("verify-vegetation", help="controlla un dataset di vegetazione")
+    verify_veg.add_argument("-o", "--output", required=True)
+    verify_veg.set_defaults(func=command_verify_vegetation)
+
+    inspect_veg = subparsers.add_parser("inspect-vegetation", help="stampa il contenuto di una tile di vegetazione")
+    inspect_veg.add_argument("tile")
+    inspect_veg.set_defaults(func=command_inspect_vegetation)
 
     return parser
 

@@ -4,7 +4,7 @@
 > Non modificarlo a mano: i controlli statici (`CheckSourceDiscipline.sh`, regola 7)
 > dicono quando e' indietro. In Unreal lo stesso elenco lo da' `geo.Help`.
 
-**104 comandi** in 9 gruppi.
+**114 comandi** in 10 gruppi.
 
 ## Come si usano
 
@@ -49,6 +49,7 @@
 - [L'acqua](#lacqua) — `geo.Water.*`, 5 comandi
 - [Il meteo](#il-meteo) — `geo.Weather.*`, 24 comandi
 - [La camera di volo](#la-camera-di-volo) — `geo.Fly.*`, 2 comandi
+- [Vegetation](#vegetation) — `geo.Vegetation.*`, 10 comandi
 
 ## Generale
 
@@ -145,7 +146,7 @@ Le foto sul terreno, e i materiali di tutto il progetto (Fase 6).
 | `geo.Imagery.Budget <N>` | texture create per frame (default 4). |
 | `geo.Imagery.Stats` | Statistiche del drappeggio e dello streaming delle ortofoto. |
 | `geo.Imagery.Demo <cartella_terreno> <cartella_ortofoto>` | apre tutto e accende. |
-| `geo.Imagery.CreateMaterial` | Costruisce (o RIFA') in /GeoWorld/Materials: M_GeoTerrain (foto e strade dipinte), M_GeoRoad (strade 3D), M_GeoWater e MPC_GeoWater (acqua), MPC_GeoWeather, M_GeoPrecipitation, M_GeoLightning e M_GeoClouds (meteo). *(solo nell'editor)* |
+| `geo.Imagery.CreateMaterial` | Costruisce (o RIFA') in /GeoWorld/Materials: M_GeoTerrain (foto e strade dipinte), M_GeoRoad (strade 3D), M_GeoWater e MPC_GeoWater (acqua), MPC_GeoWeather, M_GeoPrecipitation, M_GeoLightning e M_GeoClouds (meteo), M_GeoVegetation (alberi). *(solo nell'editor)* |
 
 ## Strade, ferrovie, piste
 
@@ -217,6 +218,21 @@ Solo in Play: velocita' proporzionale alla quota.
 | `geo.Fly` | Sostituisce la camera del Play con una che vola a velocita' proporzionale alla quota. |
 | `geo.Fly.Speed <moltiplicatore>` | scala la velocita' calcolata dalla quota. |
 
+## Vegetation
+
+| Comando | Cosa fa |
+|---|---|
+| `geo.Vegetation.Open <cartella>` | apre un dataset di vegetazione (geoworld build-vegetation): gli alberi crescono attorno alla camera. |
+| `geo.Vegetation.Close` | chiude il dataset di vegetazione: spariscono tutti gli alberi. |
+| `geo.Vegetation.Enable <0\|1>` | accende e spegne gli alberi (il dataset resta aperto). |
+| `geo.Vegetation.Density <0..4>` | quanti alberi rispetto alla natura (1 = come la copertura del suolo; 0,5 = la meta'). Default 1. |
+| `geo.Vegetation.Radius <m>` | fin dove ci sono alberi (default 2500). Le bande vicina e media si allargano insieme. |
+| `geo.Vegetation.Shadows <0\|1>` | gli alberi vicini fanno ombra (default 1; quelli lontani mai). |
+| `geo.Vegetation.FlipWinding <0\|1>` | inverte le facce degli alberi: se li vedi "dal di dentro" (la chioma sparisce dal lato verso di te). |
+| `geo.Vegetation.Debug <0\|1>` | overlay della vegetazione: celle per banda (contorni colorati), alberi per specie, attese. |
+| `geo.Vegetation.Stats` | Statistiche della vegetazione. |
+| `geo.Vegetation.Demo <terreno> <ortofoto\|-> <vegetazione> [acqua\|-]` | apre tutto, accende e si mette 250 m sopra il centro della vegetazione. |
+
 ## Comandi del motore utili
 
 Non sono di GeoWorld, ma la documentazione li usa spesso.
@@ -236,6 +252,6 @@ Non sono di GeoWorld, ma la documentazione li usa spesso.
 | File | Comandi |
 |---|---|
 | `Plugins/GeoWorld/Source/GeoCore/Private/GeoCoreModule.cpp` | 10 |
-| `Plugins/GeoWorld/Source/GeoRender/Private/GeoRenderModule.cpp` | 83 |
+| `Plugins/GeoWorld/Source/GeoRender/Private/GeoRenderModule.cpp` | 93 |
 | `Plugins/GeoWorld/Source/GeoTiles/Private/GeoTilesModule.cpp` | 10 |
 | `Plugins/GeoWorld/Source/GeoWorldEditor/Private/GeoTerrainMaterialFactory.cpp` | 1 |

@@ -84,6 +84,7 @@
 #include "Materials/MaterialExpressionMultiply.h"
 #include "Materials/MaterialExpressionNormalize.h"
 #include "Materials/MaterialExpressionOneMinus.h"
+#include "Materials/MaterialExpressionPerInstanceCustomData.h"
 #include "Materials/MaterialExpressionPixelDepth.h"
 #include "Materials/MaterialExpressionScalarParameter.h"
 #include "Materials/MaterialExpressionSingleLayerWaterMaterialOutput.h"
@@ -94,6 +95,7 @@
 #include "Materials/MaterialExpressionTransform.h"
 #include "Materials/MaterialExpressionTransformPosition.h"
 #include "Materials/MaterialExpressionVectorParameter.h"
+#include "Materials/MaterialExpressionVertexColor.h"
 #include "Materials/MaterialExpressionVertexNormalWS.h"
 #include "Materials/MaterialExpressionWorldPosition.h"
 #include "Materials/MaterialParameterCollection.h"
@@ -494,6 +496,8 @@ namespace
 	 *   PrecipMix     = (frazione pioggia, neve, grandine, 0)
 	 *   CloudMap, CloudShift, CloudLayer, CloudLook, CloudFlash, CloudFair =
 	 *                   le nuvole: Weather/Clouds.h, FCloudShaderParameters
+	 *   VegetationWind = (vento a 10 m verso nord, verso est in m/s, raffica 0..1,
+	 *                   orologio in s): lo scrive UGeoVegetationSubsystem
 	 *
 	 * I valori di riposo non fanno niente: suolo asciutto, neve a 100 km,
 	 * nessuna particella, nessuna nuvola (la soglia dei cumuli a 2: mai).
@@ -520,6 +524,7 @@ namespace
 		Wanted.Emplace(FName(TEXT("CloudLook")), FLinearColor(0.03f, 47.0f, 975.0f, 0.0f));
 		Wanted.Emplace(FName(TEXT("CloudFlash")), FLinearColor(0.0f, 0.0f, 0.0f, 0.0f));
 		Wanted.Emplace(FName(TEXT("CloudFair")), FLinearColor(0.0f, 0.0f, 0.0f, 0.0f));
+		Wanted.Emplace(FName(TEXT("VegetationWind")), FLinearColor(0.0f, 0.0f, 0.0f, 0.0f));
 		return CreateOrUpdateCollection(WeatherCollectionPackagePath, WeatherCollectionAssetName, Wanted);
 	}
 
@@ -1667,9 +1672,146 @@ namespace
 	}
 }
 
+// ============================================================================
+//  LA VEGETAZIONE: M_GeoVegetation
+// ============================================================================
+
+namespace
+{
+	const TCHAR* VegetationMaterialPackagePath = TEXT("/GeoWorld/Materials/M_GeoVegetation");
+	const TCHAR* VegetationMaterialAssetName = TEXT("M_GeoVegetation");
+
+	/**
+	 * I due nodi Custom: il testo di Vegetation/VegetationShader.inl, una
+	 * macro per blocco. Si include due volte, ogni volta con una sola macro
+	 * che fa stringa e l'altra vuota. E' lo stesso testo che i test compilano
+	 * come C++ (geovegetation_main.cpp, sezione 6).
+	 */
+#define GEO_VEGETATION_COLOUR(...) #__VA_ARGS__
+#define GEO_VEGETATION_WIND(...)
+	const char* VegetationColourCode =
+#include "Vegetation/VegetationShader.inl"
+		;
+#undef GEO_VEGETATION_COLOUR
+#undef GEO_VEGETATION_WIND
+#define GEO_VEGETATION_COLOUR(...)
+#define GEO_VEGETATION_WIND(...) #__VA_ARGS__
+	const char* VegetationWindCode =
+#include "Vegetation/VegetationShader.inl"
+		;
+#undef GEO_VEGETATION_COLOUR
+#undef GEO_VEGETATION_WIND
+
+	/** Un dato per istanza (Per Instance Custom Data) dei componenti degli alberi. */
+	FPin InstanceFloat(FGraph& G, uint32 Index, int32 X, int32 Y)
+	{
+		UMaterialExpressionPerInstanceCustomData* Node = G.Make<UMaterialExpressionPerInstanceCustomData>(X, Y);
+		if (!Node) { return FPin{}; }
+		Node->DataIndex = Index;
+		return FPin{ Node, 0 };
+	}
+
+	/**
+	 * M_GeoVegetation: il materiale degli alberi (UGeoVegetationSubsystem).
+	 * Default Lit, opaco, per componenti di istanze.
+	 *
+	 *   PerInstanceCustomData 0,1,2 (il verde dell'istanza) --Append--> Leaf
+	 *   VertexColor RGB (chioma/tronco, luce, altezza) -------------> Paint
+	 *   VertexNormalWS, WorldPosition, MPC_GeoWeather GroundWeather e GroundFrame
+	 *       --> Custom "Alberi (colore)" = float4(colore, ruvidita')
+	 *   Paint, MPC_GeoWeather VegetationWind, PerInstanceCustomData 3 (altezza m)
+	 *   e 4 (caso) --> Custom "Alberi (vento)" --> World Position Offset
+	 *
+	 * NOTA UE: bUsedWithInstancedStaticMeshes e' OBBLIGATORIO. Senza, sui
+	 * componenti di istanze il motore usa il materiale di default (grigio a
+	 * scacchi) e lo dice solo nell'Output Log. DitheredLODTransition fa
+	 * sfumare il passaggio dalla forma dettagliata a quella semplice.
+	 */
+	bool BuildVegetationGraph(UMaterial* Material)
+	{
+		UMaterialParameterCollection* Collection = LoadObject<UMaterialParameterCollection>(nullptr,
+			*FString::Printf(TEXT("%s.%s"), WeatherCollectionPackagePath, WeatherCollectionAssetName), nullptr,
+			LOAD_NoWarn | LOAD_Quiet);
+		if (!Collection)
+		{
+			Report(TEXT("M_GeoVegetation: manca MPC_GeoWeather."), FColor::Red);
+			return false;
+		}
+
+		Material->MaterialDomain = MD_Surface;
+		Material->SetShadingModel(MSM_DefaultLit);
+		Material->bUsedWithInstancedStaticMeshes = true;
+		Material->DitheredLODTransition = true;
+
+		FGraph G{ Material };
+		const FPin Red = InstanceFloat(G, 0, -1600, -400);
+		const FPin Green = InstanceFloat(G, 1, -1600, -300);
+		const FPin Blue = InstanceFloat(G, 2, -1600, -200);
+		const FPin Size = InstanceFloat(G, 3, -1600, 600);
+		const FPin Phase = InstanceFloat(G, 4, -1600, 700);
+		UMaterialExpressionAppendVector* RedGreen = G.Make<UMaterialExpressionAppendVector>(-1350, -350);
+		UMaterialExpressionAppendVector* Leaf = G.Make<UMaterialExpressionAppendVector>(-1150, -300);
+		UMaterialExpressionVertexColor* Paint = G.Make<UMaterialExpressionVertexColor>(-1350, -100);
+		UMaterialExpressionVertexNormalWS* Normal = G.Make<UMaterialExpressionVertexNormalWS>(-1350, 0);
+		UMaterialExpressionConstant* UuPerMetre = G.Make<UMaterialExpressionConstant>(-1350, 450);
+		if (!G.bOk || !Red.Node || !Green.Node || !Blue.Node || !Size.Node || !Phase.Node) { return false; }
+		UuPerMetre->R = static_cast<float>(GeoWorld::Units::MetersToUu);
+		G.Connect(Red.Node, TEXT(""), RedGreen, TEXT("A"));
+		G.Connect(Green.Node, TEXT(""), RedGreen, TEXT("B"));
+		G.Connect(RedGreen, TEXT(""), Leaf, TEXT("A"));
+		G.Connect(Blue.Node, TEXT(""), Leaf, TEXT("B"));
+
+		// Il colore del vertice come float3: l'uscita con i canali RGB (si
+		// cerca per maschera, non per nome: vedi FindOutputByChannels).
+		const int32 PaintRgb = FindOutputByChannels(Paint, true, true, true, false);
+		const FPin PaintPin{ Paint, PaintRgb == INDEX_NONE ? 0 : PaintRgb };
+
+		TArray<FNamedPin> ColourInputs;
+		ColourInputs.Add(FNamedPin{ TEXT("Leaf"), FPin{ Leaf, 0 } });
+		ColourInputs.Add(FNamedPin{ TEXT("Paint"), PaintPin });
+		ColourInputs.Add(FNamedPin{ TEXT("Normal"), FPin{ Normal, 0 } });
+		ColourInputs.Add(FNamedPin{ TEXT("Pos"), TruncatedWorldPosition(G, false, -1350, 100) });
+		ColourInputs.Add(FNamedPin{ TEXT("Ground"), CollectionParameter(G, Collection, TEXT("GroundWeather"), -1350, 200) });
+		ColourInputs.Add(FNamedPin{ TEXT("Frame"), CollectionParameter(G, Collection, TEXT("GroundFrame"), -1350, 300) });
+		ColourInputs.Add(FNamedPin{ TEXT("UuPerMetre"), FPin{ UuPerMetre, 0 } });
+		const FString ColourCode(ANSI_TO_TCHAR(VegetationColourCode));
+		UMaterialExpressionCustom* Colour = MakeCustom(G, TEXT("Alberi (colore)"), *ColourCode, CMOT_Float4, ColourInputs, -700, -100);
+
+		TArray<FNamedPin> WindInputs;
+		WindInputs.Add(FNamedPin{ TEXT("Paint"), PaintPin });
+		WindInputs.Add(FNamedPin{ TEXT("Wind"), CollectionParameter(G, Collection, TEXT("VegetationWind"), -1350, 550) });
+		WindInputs.Add(FNamedPin{ TEXT("Size"), Size });
+		WindInputs.Add(FNamedPin{ TEXT("Phase"), Phase });
+		WindInputs.Add(FNamedPin{ TEXT("UuPerMetre"), FPin{ UuPerMetre, 0 } });
+		const FString WindCode(ANSI_TO_TCHAR(VegetationWindCode));
+		UMaterialExpressionCustom* Wind = MakeCustom(G, TEXT("Alberi (vento)"), *WindCode, CMOT_Float3, WindInputs, -700, 500);
+
+		UMaterialExpressionComponentMask* ColourMask = G.Make<UMaterialExpressionComponentMask>(-350, -150);
+		UMaterialExpressionComponentMask* RoughMask = G.Make<UMaterialExpressionComponentMask>(-350, 0);
+		if (!G.bOk) { return false; }
+		ColourMask->R = true;
+		ColourMask->G = true;
+		ColourMask->B = true;
+		ColourMask->A = false;
+		RoughMask->R = false;
+		RoughMask->G = false;
+		RoughMask->B = false;
+		RoughMask->A = true;
+		G.Connect(Colour, TEXT(""), ColourMask, TEXT(""));
+		G.Connect(Colour, TEXT(""), RoughMask, TEXT(""));
+		G.Connect(ColourMask, TEXT(""), MP_BaseColor);
+		G.Connect(RoughMask, TEXT(""), MP_Roughness);
+		G.Connect(Wind, TEXT(""), MP_WorldPositionOffset);
+
+		if (!G.bOk) { return false; }
+		UMaterialEditingLibrary::RecompileMaterial(Material);
+		return true;
+	}
+}
+
 static FAutoConsoleCommand GeoImageryCreateMaterialCommand(
 	TEXT("geo.Imagery.CreateMaterial"),
-	TEXT("Costruisce (o RIFA') in /GeoWorld/Materials: M_GeoTerrain (foto e strade dipinte), M_GeoRoad (strade 3D), M_GeoWater e MPC_GeoWater (acqua), MPC_GeoWeather, M_GeoPrecipitation, M_GeoLightning e M_GeoClouds (meteo)."),
+	TEXT("Costruisce (o RIFA') in /GeoWorld/Materials: M_GeoTerrain (foto e strade dipinte), M_GeoRoad (strade 3D), M_GeoWater e MPC_GeoWater (acqua), MPC_GeoWeather, M_GeoPrecipitation, M_GeoLightning e M_GeoClouds (meteo), M_GeoVegetation (alberi)."),
 	FConsoleCommandDelegate::CreateStatic([]()
 	{
 		// Il meteo per primo: terreno e strade leggono MPC_GeoWeather (suolo
@@ -1691,8 +1833,10 @@ static FAutoConsoleCommand GeoImageryCreateMaterialCommand(
 		const bool bLightning = CreateOrRebuildMaterial(LightningMaterialPackagePath, LightningMaterialAssetName, &BuildLightningGraph);
 		const bool bClouds = bWeatherCollection && bWeatherDefault
 			&& CreateOrRebuildMaterial(CloudMaterialPackagePath, CloudMaterialAssetName, &BuildCloudGraph);
+		const bool bVegetation = bWeatherCollection
+			&& CreateOrRebuildMaterial(VegetationMaterialPackagePath, VegetationMaterialAssetName, &BuildVegetationGraph);
 
-		if (bTerrain && bRoad && bWater && bPrecipitation && bLightning && bClouds)
+		if (bTerrain && bRoad && bWater && bPrecipitation && bLightning && bClouds && bVegetation)
 		{
 			Report(TEXT("Materiali pronti. Riavvia il Play (o rilancia geo.Roads.Demo / geo.Water.Demo)."));
 		}
@@ -1709,6 +1853,11 @@ static FAutoConsoleCommand GeoImageryCreateMaterialCommand(
 		if (!bClouds)
 		{
 			Report(TEXT("M_GeoClouds non fatto: niente nuvole. Output Log (LogGeoWorld) e docs/meteo-verifica.md"), FColor::Red);
+		}
+		if (!bVegetation)
+		{
+			Report(TEXT("M_GeoVegetation non fatto: gli alberi restano grigi e fermi. Output Log (LogGeoWorld) e docs/vegetazione-verifica.md"),
+				FColor::Red);
 		}
 		if (!bTerrain)
 		{

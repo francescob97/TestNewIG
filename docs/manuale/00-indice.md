@@ -52,6 +52,7 @@ Due convenzioni tipografiche:
 | 13 | `13-acqua.md` | Fase 9 — L'acqua, il vento, e le stampe della posizione; mari e oceani |
 | 14 | `14-vento.md` | Il vento: da un numero a un campo (strato limite, rilievi, raffiche) |
 | 15 | `15-meteo.md` | Il meteo: pioggia, neve, grandine (quota neve, visibilità, suolo, particelle), fulmini e tuono, nuvole, ghiaccio e grandine sul terreno |
+| 16 | `16-vegetazione.md` | Fase 11 — La vegetazione: alberi e arbusti dalla copertura del suolo, una griglia fissa nel mondo, forme fatte da codice, celle e bande attorno alla camera |
 
 Tutti i comandi della console di Unreal, con la spiegazione di ognuno, sono in
 `docs/comandi-unreal.md` (generato dal codice; in Unreal: `geo.Help`).

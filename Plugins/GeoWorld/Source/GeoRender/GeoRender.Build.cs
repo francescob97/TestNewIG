@@ -22,5 +22,10 @@ public class GeoRender : ModuleRules
 		// La grandine al suolo aggiorna una texture sul posto
 		// (UpdateTextureRegions): la regione da copiare e' un tipo dell'RHI.
 		PrivateDependencyModuleNames.AddRange(new string[] { "RHI" });
+
+		// La vegetazione costruisce le forme degli alberi come UStaticMesh a
+		// runtime: FMeshDescription (MeshDescription) con gli attributi delle
+		// static mesh (StaticMeshDescription), poi BuildFromMeshDescriptions.
+		PrivateDependencyModuleNames.AddRange(new string[] { "MeshDescription", "StaticMeshDescription" });
 	}
 }

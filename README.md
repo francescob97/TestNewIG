@@ -54,7 +54,14 @@ Il progetto `TestNewIG` e' un guscio vuoto: tutto il codice vive in
       *(`docs/meteo-design.md`, prova:
       `docs/meteo-verifica.md`, per chi impara: `docs/manuale/15-meteo.md`)*
 - [ ] Fase 10 — edifici e monumenti
-- [ ] Fase 11 — vegetazione
+- [x] **Fase 11, primo pezzo: le piante** — alberi e arbusti dove dice ESA
+      WorldCover (10 m, letto dalla rete solo per la tua area), latifoglie,
+      conifere, pini domestici e arbusti scelti dalla quota, fino al limite del
+      bosco; forme fatte da codice, istanziate in celle attorno alla camera,
+      appoggiate sul terreno disegnato; piu' rade da lontano, mosse dal vento,
+      imbiancate dalla neve *(`docs/vegetazione-design.md`, prova:
+      `docs/vegetazione-verifica.md`, per chi impara:
+      `docs/manuale/16-vegetazione.md`)*. Gli animali verranno dopo.
 - [ ] Fase 12 — atmosfera, cielo, nuvole e luce
       *(il perché di quest'ordine: `docs/fase8-design.md`, sezione 0)*
 
@@ -70,6 +77,7 @@ Il progetto `TestNewIG` e' un guscio vuoto: tutto il codice vive in
 | Quote | **ellissoidiche** WGS84 (ortometriche del sorgente + ondulazione del geoide) |
 | Ortofoto | piramide **separata**, stesso tiling; 256x256 pixel registrati sulle AREE (nessuna sovrapposizione), payload JPEG |
 | Strade | tile **vettoriali** `.gvt`, stesso tiling, livelli 10..13; linee in int16 locali (extent 16384, buffer 1/8), disegnate a runtime |
+| Vegetazione | tile `.gvg` a UN livello (13: 2,4 km, 256x256 pixel da ~10 m): la classe della copertura del suolo (bosco, arbusti, prato, campi, costruito, ...) per pixel, zlib; solo dove cresce qualcosa |
 | Acqua | tile `.gwa`, una per tile di terreno: superficie e fondale sui 129x129 post, raster 256x256 (distanza dalla riva, onde, corrente), zlib; piu' il geoide e il mare aperto (`opensea.bin`: le tile senza terreno tutte in mare, e il fondale) |
 
 Dettagli e motivazioni in `docs/fase2-design.md`.
@@ -99,6 +107,8 @@ cmake --build build
 ./build/geowater_tests Plugins/GeoWorld/Source/GeoTiles/TestData/water_fixture.gwa
                              # 71 test  -- acqua: formato .gwa, scavo, mesh, onde dal vento, texture, il Po vero, mare aperto
 ./build/geoweather_tests     # 97 test  -- vento (strato limite, rugosita', rilievi, raffiche), precipitazione (quota neve, rovesci, visibilita', suolo, particelle), fulmini e tuono, nuvole e suolo (gli shader compilati come C++), ghiaccio, grandine posata
+./build/geovegetation_tests Plugins/GeoWorld/Source/GeoTiles/TestData/vegetation_fixture.gvg
+                             # 33 test  -- vegetazione: formato .gvg, griglia, chi cresce dove, forme, materiale (colore, neve, vento), celle e bande
 
 ./Plugins/GeoWorld/Tools/CheckSourceDiscipline.sh
 python3 Plugins/GeoWorld/Tools/CheckShadowedParameters.py
@@ -112,7 +122,7 @@ le classi di errore di compilazione gia' incontrate su Windows -- shadowing,
 simboli non esportati fra moduli, tipi di comando console inesistenti,
 collisioni da build unity, metodi inesistenti chiamati sulle nostre classi.
 
-500 test C++ in totale, piu' 192 test Python della pipeline.
+533 test C++ in totale, piu' 212 test Python della pipeline.
 
 **Dopo la prima prova su Torino** (materiale, scene Sentinel, prestazioni): `docs/prova-torino.md`.
 **Dopo la seconda** (troppi triangoli, RAM): `docs/prova-torino-2.md`.
@@ -146,7 +156,11 @@ geoworld fetch-water -o dati/acqua
 geoworld build-water --osm dati/osm/nord-ovest-latest.osm.pbf --sea dati/acqua/water-polygons-split-4326.zip --terrain dataset/terreno -o dataset/acqua
 geoworld verify-water -o dataset/acqua
 
-geoworld test                                      :: 192 test, sorgente sintetico
+:: vegetazione: la copertura del suolo di ESA WorldCover sull'area del terreno (dalla rete, a pezzi)
+geoworld build-vegetation --terrain dataset/terreno -o dataset/vegetazione
+geoworld verify-vegetation -o dataset/vegetazione
+
+geoworld test                                      :: 212 test, sorgente sintetico
 ```
 
 Installazione, opzioni e conda a mano (se lo preferisci): `Pipeline/README.md`.

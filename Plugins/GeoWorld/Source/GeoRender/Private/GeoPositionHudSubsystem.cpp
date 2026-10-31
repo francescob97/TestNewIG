@@ -5,6 +5,7 @@
 #include "Mesh/TileMesh.h"
 #include "Streaming/GeoTileStreamingSubsystem.h"
 #include "Terrain/GeoTerrainSubsystem.h"
+#include "Vegetation/GeoVegetationSubsystem.h"
 #include "Water/GeoWaterSubsystem.h"
 #include "Weather/GeoWeatherSubsystem.h"
 
@@ -196,6 +197,20 @@ void UGeoPositionHudSubsystem::Draw(UCanvas* Canvas, APlayerController* /*Contro
 			std::string Strike = "a " + Format::Distance(Flashes.DistanceM) + ", " + Format::Number(Flashes.AgeSeconds, 0) + " s fa";
 			if (Flashes.ThunderInSeconds >= 0.0) { Strike += ", tuono fra " + Format::Number(Flashes.ThunderInSeconds, 0) + " s"; }
 			Add(TEXT("Fulmine"), Strike);
+		}
+	}
+
+	// La vegetazione: quanti alberi a schermo, in quante celle, quante aspettano.
+	if (const UGeoVegetationSubsystem* Vegetation = GetWorld()->GetSubsystem<UGeoVegetationSubsystem>())
+	{
+		const FGeoVegetationStats Trees = Vegetation->GetStats();
+		const int32 Shown = Trees.CelleVicine + Trees.CelleMedie + Trees.CelleLontane;
+		if (Vegetation->IsEnabled() && (Shown > 0 || Trees.CelleInAttesa > 0))
+		{
+			std::string Text = Format::Number(Trees.GetTreeCount(), 0) + " alberi in " + Format::Number(Shown, 0) + " celle";
+			if (Trees.CelleInAttesa > 0) { Text += ", " + Format::Number(Trees.CelleInAttesa, 0) + " in attesa"; }
+			if (!Vegetation->GetMaterialProblem().IsEmpty()) { Text += " (manca il materiale)"; }
+			Add(TEXT("Vegetazione"), Text);
 		}
 	}
 

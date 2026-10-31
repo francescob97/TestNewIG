@@ -27,6 +27,8 @@ posizione. È fatto di componenti. (1)
 **Ballpark** — la "trasformazione approssimata" di PROJ, che in mancanza della
 griglia geoidica non applica lo scostamento verticale, in silenzio. (3)
 
+**Banda (della vegetazione)** — quanti alberi tiene una cella secondo la distanza dalla camera: vicino (fino a 700 m) tutti e con l'ombra, medio (1.500 m) la metà, lontano (2.500 m) un quarto. Si cambia banda solo 75 m oltre il confine (isteresi). (16)
+
 **BC1 / DXT1** — compressione delle texture che la scheda video legge
 direttamente. Non usata oggi; il formato è pronto per aggiungerla. (7)
 
@@ -48,6 +50,10 @@ per fare prima. Fa scontrare le funzioni omonime nei namespace anonimi. (1)
 
 **CDO** (*Class Default Object*) — l'oggetto "prototipo" che Unreal crea per ogni
 classe `UCLASS`, con i valori di default. I file `.ini` vengono applicati a lui. (1)
+
+**Cella (della vegetazione)** — una tile del livello 15 (~610 x 430 m) dentro cui gli alberi si costruiscono insieme, su un worker, e diventano qualche componente di istanze. Solo quelle entro 2,5 km dalla camera. (16)
+
+**Copertura del suolo** (*land cover*) — una mappa che divide il territorio in classi: bosco, arbusti, prato, campi, costruito, acqua, roccia, neve. La nostra è ESA WorldCover. (16)
 
 **Custom Primitive Data** — float che un componente di Unreal porta con sé nella GPU Scene,
 letti dal materiale come parametri. Si possono cambiare a ogni frame senza ricostruire
@@ -92,13 +98,19 @@ terreno vero. Qui approssimato con il passo fra i post. (5)
 **Errore su schermo** (SSE) — l'errore geometrico proiettato in pixel. La manopola
 del LOD. Soglia di default: 8 pixel (era 4: vedi `docs/prova-torino-2.md`). (5)
 
+**ESA WorldCover** — la copertura del suolo di tutto il mondo a 10 m, fatta dall'Agenzia Spaziale Europea con Sentinel-1 e Sentinel-2 (2021, CC BY 4.0). File COG da 3 x 3 gradi su un bucket pubblico, letti a pezzi dalla pipeline. (16)
+
 **Esposizione (alle onde)** — quanto un punto d'acqua sente le onde del vento: 1 il mare aperto, 0,35 una laguna, da 0,12 a 0,8 un lago secondo la grandezza (il *fetch*, la distanza su cui il vento spinge), quasi 0 fiumi e canali. Sta nel canale G del raster. (13)
 
 **ExponentialHeightFog** — l'attore della nebbia di Unreal: una densità che cala con la quota. La precipitazione ne alza la densità (`56,4 / visibilità in m`) e la rimette com'era; nell'editor quella del livello non si tocca, perché si salverebbe. (15)
 
 **Fascia** (del piano di residenza) — un gruppo di tile del piano con la stessa urgenza: 0 = adesso, 1..3 = posizioni previste, l'ultima = anello di sicurezza. (11)
 
+**Firma del terreno** — un hash delle tile di terreno visibili sotto una cella (e del passo della mesh). Quando cambia, il terreno sotto si è affinato e la cella si rifà sopra il terreno nuovo. (16)
+
 **Flow map** — far scorrere una texture lungo una corrente con due fasi sfalsate di mezzo ciclo, ognuna che ricomincia quando ha peso zero: un flusso continuo senza che la texture si stiri. (13)
+
+**FMeshDescription** — il formato "modificabile" delle mesh in Unreal: vertici, istanze di vertice (normale, colore, UV), triangoli, gruppi di materiale. Da qui `BuildFromMeshDescriptions` fa una `UStaticMesh`, anche a runtime. (16)
 
 **Frame locale** — un sistema di assi appoggiato sulla superficie in un punto.
 Nel progetto è sempre NEU. (2, 6)
@@ -131,8 +143,12 @@ nascondere le crepe fra livelli diversi. (6)
 
 **Grandine posata** — la grandine al suolo, in strisce sotto il percorso dei nuclei dei temporali; una griglia di celle da 470 m ferma rispetto al terreno, che fonde con il caldo (`GroundHail.h`). (15)
 
+**Griglia fissa (degli alberi)** — un punto ogni 8 x 8 m numerato dall'equatore e da Greenwich, ognuno con il suo hash: lo stesso albero sta sempre nello stesso punto, da qualunque cella lo si guardi. (16)
+
 **Header-only** — codice scritto interamente negli header, con `inline`. Lo strato
 puro è così, per non dover esportare simboli dalle DLL. (0, 1)
+
+**HISM** (`UHierarchicalInstancedStaticMeshComponent`) — un componente che disegna migliaia di copie della stessa mesh, raggruppate in un albero gerarchico: per ogni gruppo sceglie se è visibile e quale LOD. Gli alberi sono HISM. (16)
 
 **Horizon culling** — scartare ciò che sta oltre la curvatura della Terra. Oggi sul rettangolo della tile nello spazio scalato. (5, 11)
 
@@ -146,6 +162,8 @@ quota minima e massima (quote) o copertura (immagini). (3)
 **Koschmieder** — la regola della visibilità: si vede fin dove il contrasto scende al 2%, cioè `visibilità = 3,912 / estinzione`. (15)
 
 **Latitudine parametrica** — tan β = (b/a)·tan φ. È la latitudine di un punto dell'ellissoide nello spazio scalato, dove l'ellissoide diventa una sfera. (11)
+
+**Limite del bosco** — la quota oltre la quale non crescono alberi (2.100 m s.l.m.): sopra solo arbusti, sopra i 2.700 m niente. Vicino al limite tutto si fa più piccolo. (16)
 
 **LOD** (*Level Of Detail*) — usare versioni più semplici di ciò che è lontano. (5)
 
@@ -200,6 +218,8 @@ edifici, boschi, acqua. Licenza ODbL, da citare. Fonte della Fase 8 e delle succ
 
 **Ortofoto** — immagine aerea o satellitare raddrizzata, in cui ogni pixel sta alla
 sua coordinata. (7)
+
+**Per Instance Custom Data** — qualche numero per ogni istanza di un componente di istanze, letto dal materiale con il nodo PerInstanceCustomData. Per gli alberi: il verde, l'altezza, la fase del vento. (16)
 
 **Piano di residenza** — la lista, in ordine di urgenza, delle tile da tenere pronte: qui, dove si sarà fra qualche secondo, e un anello di sicurezza. Rifatto ogni 0,25 s. (11)
 
@@ -259,6 +279,8 @@ quote) o un'area (i pixel). Decide se il bordo è condiviso. (3, 7)
 **Scavo** — abbassare le quote del terreno sotto l'acqua fino al fondale prima di costruirne la mesh, così l'acqua ha una profondità vera. Lo fa il terreno, con la funzione che gli consegna l'acqua (`SetHeightEditor`). (13)
 
 **SCL** (*Scene Classification Layer*) — il file di Sentinel-2 L2A che classifica ogni pixel da 20 m: nuvole, ombre di nuvole, cirri, neve, acqua... Serve a togliere le nuvole dalle ortofoto. (7)
+
+**ScreenSize** — quanto è grande un oggetto sullo schermo (circa il raggio diviso l'altezza dello schermo): decide quale LOD di una static mesh si disegna. Il LOD semplice degli alberi parte da 0,02, ~450 m per un albero di 15 m. (16)
 
 **SDF** (*signed distance field*) — un'immagine in cui ogni pixel dice quanto si è lontani da un bordo, con il segno (positivo in acqua, negativo a terra). Filtrata, dà un bordo nitido a ogni ingrandimento. È la riva dell'acqua. (13)
 
@@ -395,6 +417,8 @@ il primo comando da provare quando non si vede niente. (6)
 | `Public/Streaming/GeoImageryStreamingSubsystem.h` | streaming e decodifica delle immagini |
 | `Public/Tiles/WaterTileFormat.h` | formato `.gwa`, indice e geoide dell'acqua |
 | `Public/Streaming/GeoWaterDataset.h`, `GeoWaterStreamingSubsystem.h` | dataset e streaming dell'acqua |
+| `Public/Tiles/VegetationClasses.h`, `VegetationTileFormat.h` | classi della copertura del suolo, formato `.gvg` e indice |
+| `Public/Streaming/GeoVegetationDataset.h`, `GeoVegetationStreamingSubsystem.h` | dataset e streaming della vegetazione |
 | `TestData/water_fixture.gwa` | una tile d'acqua scritta dalla pipeline, per i test |
 | `Private/GeoTilesModule.cpp` | comandi `geo.Tiles.*` |
 | `Private/Streaming/*.cpp` | le implementazioni dei cinque header sopra |
@@ -425,6 +449,8 @@ il primo comando da provare quando non si vede niente. (6)
 | `Public/Weather/Lightning.h`, `GeoLightningRenderer.h` | fulmini e tuono: il modello (puro) e il disegno (canale, luce, suono) |
 | `Public/Weather/Clouds.h`, `CloudShader.inl`, `GeoCloudRenderer.h` | le nuvole: il modello (puro), lo shader (HLSL e C++ insieme) e il disegno (VolumetricCloud, mappa meteo) |
 | `Public/Weather/GroundHail.h`, `GroundShader.inl`, `GeoHailMap.h` | la grandine posata (puro), il meteo sul suolo nel materiale (HLSL e C++ insieme), la griglia in Unreal |
+| `Public/Vegetation/TreePlacement.h`, `TreeMesh.h`, `VegetationCells.h` | la vegetazione (puro): chi cresce dove, le forme, celle e bande |
+| `Public/Vegetation/VegetationShader.inl`, `GeoVegetationSubsystem.h` | il materiale degli alberi (HLSL e C++), il subsystem in Unreal |
 | `Public/GeoPositionHudSubsystem.h` | le stampe della posizione |
 | `Private/GeoRenderModule.cpp` | comandi `geo.Lod.*`, `geo.Terrain.*`, `geo.Imagery.*`, `geo.Roads.*`, `geo.Water.*`, `geo.Weather.*`, `geo.Hud`, `geo.Fly*` |
 | `Private/**/*.cpp` | le implementazioni |
@@ -435,7 +461,7 @@ il primo comando da provare quando non si vede niente. (6)
 |---|---|
 | `GeoWorldEditor.Build.cs` | `MaterialEditor`, `AssetTools` |
 | `Private/GeoWorldEditorModule.cpp` | il modulo |
-| `Private/GeoTerrainMaterialFactory.cpp` | `geo.Imagery.CreateMaterial`: `M_GeoTerrain`, `M_GeoRoad`, `M_GeoWater`, `MPC_GeoWater`, `MPC_GeoWeather`, `M_GeoPrecipitation`, `M_GeoLightning`, `M_GeoClouds` |
+| `Private/GeoTerrainMaterialFactory.cpp` | `geo.Imagery.CreateMaterial`: `M_GeoTerrain`, `M_GeoRoad`, `M_GeoWater`, `MPC_GeoWater`, `MPC_GeoWeather`, `M_GeoPrecipitation`, `M_GeoLightning`, `M_GeoClouds`, `M_GeoVegetation` |
 
 ### Strumenti
 
@@ -469,6 +495,7 @@ il primo comando da provare quando non si vede niente. (6)
 | `geoworld/imagecut.py`, `imagerybuild.py` | la pipeline delle immagini |
 | `geoworld/fetchimagery.py`, `mgrs.py` | download di Sentinel-2 |
 | `geoworld/waterclasses.py`, `waterformat.py`, `waterbuild.py` | la pipeline dell'acqua |
+| `geoworld/vegclasses.py`, `vegformat.py`, `vegbuild.py` | la pipeline della vegetazione (ESA WorldCover) |
 | `tests/*.py` | 77 test |
 
 ### Documenti
@@ -490,6 +517,8 @@ il primo comando da provare quando non si vede niente. (6)
 | `docs/fase9-verifica.md` | come provare l'acqua (e il mare aperto) |
 | `docs/vento-design.md` | il vento: la simulazione |
 | `docs/vento-verifica.md` | come provare il vento |
+| `docs/vegetazione-design.md` | la vegetazione: dati, regole, celle, Unreal |
+| `docs/vegetazione-verifica.md` | come provare la vegetazione |
 | `docs/residenza-design.md` | cosa tenere pronto: posizione, velocità, mesh nascoste |
 | `docs/residenza-verifica.md` | come verificare la residenza |
 | `docs/prova-torino.md` | la prima prova vera: cause del mosaico, prestazioni, tutta Italia |

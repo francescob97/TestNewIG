@@ -167,6 +167,20 @@ Tre stadi (estrai, taglia, indici), riavviabili; il taglio va in parallelo
 (`--jobs`). Serve GDAL con il driver OSM e GEOS: `check-env` lo dice. Le
 decisioni sono in `docs/fase8-design.md`.
 
+### Vegetazione (Fase 11)
+
+```bat
+geoworld build-vegetation --terrain dataset/terreno -o dataset/vegetazione
+geoworld verify-vegetation -o dataset/vegetazione
+geoworld inspect-vegetation dataset/vegetazione/13/8541/2044.gvg
+```
+
+La copertura del suolo di ESA WorldCover (10 m, gratuita, senza account) per
+l'area del terreno (o `--bbox`), letta **dalla rete a pezzi**: si scaricano
+solo i blocchi che servono. Senza rete: scarica i file `ESA_WorldCover_10m_2021_v200_*_Map.tif`
+e passa la cartella con `--worldcover`. Riavviabile a blocchi di ~40 km
+(`--force` rifà tutto). Le decisioni sono in `docs/vegetazione-design.md`.
+
 ## Stadi
 
 | # | Stadio | Produce |

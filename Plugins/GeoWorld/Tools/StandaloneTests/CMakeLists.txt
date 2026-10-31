@@ -129,6 +129,18 @@ else()
 	target_compile_options(geoweather_tests PRIVATE -Wall -Wextra -Werror=shadow -O2)
 endif()
 
+# --- Vegetazione: formato .gvg, griglia, specie, forme, materiale ------------
+add_executable(geovegetation_tests geovegetation_main.cpp)
+target_include_directories(geovegetation_tests PRIVATE
+	${GEORENDER_DIR}/Public ${GEOTILES_DIR}/Public ${GEOCORE_DIR}/Public)
+target_link_libraries(geovegetation_tests PRIVATE ZLIB::ZLIB)
+
+if (MSVC)
+	target_compile_options(geovegetation_tests PRIVATE /W4)
+else()
+	target_compile_options(geovegetation_tests PRIVATE -Wall -Wextra -Werror=shadow -O2)
+endif()
+
 enable_testing()
 add_test(NAME geocore COMMAND geocore_tests)
 add_test(NAME geotiles COMMAND geotiles_tests)
@@ -140,3 +152,5 @@ add_test(NAME georoads COMMAND georoads_tests
 add_test(NAME geowater COMMAND geowater_tests
 	${CMAKE_CURRENT_SOURCE_DIR}/../../Source/GeoTiles/TestData/water_fixture.gwa)
 add_test(NAME geoweather COMMAND geoweather_tests)
+add_test(NAME geovegetation COMMAND geovegetation_tests
+	${CMAKE_CURRENT_SOURCE_DIR}/../../Source/GeoTiles/TestData/vegetation_fixture.gvg)
