@@ -150,5 +150,7 @@ private:
 	double LayerBottomM = 0.0, LayerTopM = 0.0;
 	const TCHAR* State = TEXT("spente");
 	FString Problem;
+	/** Il materiale vecchio (senza "Used with Volumetric Cloud") si dice a schermo una volta sola. */
+	bool bReportedOldMaterial = false;
 	FString Advice;
 };

@@ -8,10 +8,12 @@
 #include "Components/DirectionalLightComponent.h"
 #include "Components/SkyAtmosphereComponent.h"
 #include "Components/VolumetricCloudComponent.h"
+#include "Engine/Engine.h"
 #include "Engine/Texture2D.h"
 #include "Engine/World.h"
 #include "GameFramework/Actor.h"
 #include "HAL/PlatformTime.h"
+#include "Materials/Material.h"
 #include "Materials/MaterialInstanceDynamic.h"
 #include "Materials/MaterialInterface.h"
 #include "Materials/MaterialParameterCollection.h"
@@ -87,6 +89,26 @@ bool FGeoCloudRenderer::EnsureAssets(UWorld* World)
 	}
 	if (!Instance)
 	{
+		// Un M_GeoClouds fatto prima della correzione non ha il flag "Used with
+		// Volumetric Cloud": la VolumetricCloud lo sostituirebbe con il materiale
+		// di ripiego, una nebbia bianca su tutto il cielo e sul terreno. Meglio
+		// niente nuvole, e la frase che dice cosa fare. (Il flag si cerca per nome:
+		// se questa versione del motore non lo ha, non serve.)
+		if (const UMaterial* Base = Material->GetMaterial())
+		{
+			const FBoolProperty* Flag = FindFProperty<FBoolProperty>(UMaterial::StaticClass(), FName(TEXT("bUsedWithVolumetricCloud")));
+			if (Flag && !Flag->GetPropertyValue_InContainer(Base))
+			{
+				Problem = TEXT("M_GeoClouds e' di prima (manca \"Used with Volumetric Cloud\"): niente nuvole. Rilancia geo.Imagery.CreateMaterial");
+				if (!bReportedOldMaterial)
+				{
+					bReportedOldMaterial = true;
+					UE_LOG(LogGeoWorld, Warning, TEXT("[GeoWeather] %s"), *Problem);
+					if (GEngine) { GEngine->AddOnScreenDebugMessage(-1, 15.0f, FColor::Red, Problem); }
+				}
+				return false;
+			}
+		}
 		// L'istanza porta la mappa meteo: una texture, che una collezione non puo' portare.
 		Instance.Reset(UMaterialInstanceDynamic::Create(Material.Get(), GetTransientPackage()));
 		if (!Instance) { Problem = TEXT("M_GeoClouds: non riesco a farne un'istanza"); return false; }

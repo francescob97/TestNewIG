@@ -106,19 +106,25 @@ def worldcover_sources(bbox: tuple[float, float, float, float], local: str | Non
             raise FileNotFoundError(f"nessun file .tif in {local}")
         return files
 
-    sources = []
+    sources, missing = [], []
     for name in worldcover_tile_names(*bbox):
         url = "/vsicurl/" + WORLDCOVER_URL.format(name=name)
         try:
             gdal.Open(url)
         except RuntimeError:
-            report(f"      {name}: non c'e' (mare aperto?), salto")
+            missing.append(name)
+            report(f"      {name}: non raggiungibile (mare aperto, o niente rete?), salto")
             continue
         sources.append(url)
         report(f"      {name}: ok")
     if not sources:
-        raise RuntimeError("nessun file WorldCover raggiungibile per quest'area: controlla la rete, "
-                           "o scarica i file e passali con --worldcover")
+        # Nessuno raggiungibile: quasi sempre e' la rete (o un proxy), non il
+        # mare. Si dice quali file scaricare a mano, con l'indirizzo intero.
+        links = "\n".join("    " + WORLDCOVER_URL.format(name=name) for name in missing)
+        raise RuntimeError(
+            "nessun file WorldCover raggiungibile per quest'area: controlla la rete (o il proxy).\n"
+            "Senza rete: scarica questi file con il browser, mettili in una cartella e rilancia con\n"
+            "--worldcover <cartella> (costruisci-vegetazione.bat li cerca da solo in dati\\worldcover):\n" + links)
     return sources
 
 

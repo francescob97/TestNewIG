@@ -67,7 +67,14 @@ codice (non Nanite), e gli alberi ci sono lo stesso.
 
 ## 2. Il dataset
 
-Con la pipeline (`Pipeline\geoworld.bat` su Windows):
+Il modo comodo: doppio clic su **`Pipeline\costruisci-vegetazione.bat`**.
+Chiede il dataset del terreno (il nome di una cartella in `Pipeline\dataset`,
+o la cartella trascinata dentro), costruisce `dataset\vegetazione_<terreno>`,
+lo verifica e mette negli appunti `geo.Vegetation.Open "..."`. Senza rete:
+scarica i file che l'errore elenca e mettili in `Pipeline\dati\worldcover`,
+poi rilancialo.
+
+A mano, con la pipeline (`Pipeline\geoworld.bat` su Windows):
 
 ```bat
 geoworld build-vegetation --terrain dataset/terreno -o dataset/vegetazione

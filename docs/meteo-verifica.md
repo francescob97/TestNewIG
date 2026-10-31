@@ -246,6 +246,16 @@ per abbassare il tuono; `geo.Weather.Clear` per finire.
 
 ## 7. Le nuvole
 
+> ⚠️ **Tutto bianco, e in rosso "... does not have the UsedWithVolumetricCloud
+> flag set"** (prima prova, UE 5.8). `M_GeoClouds` non aveva il flag di Usage
+> "Used with Volumetric Cloud": la VolumetricCloud lo sostituiva con il
+> materiale di ripiego, una nebbia bianca su tutto. **Corretto**: la factory lo
+> accende, e un `M_GeoClouds` vecchio non viene più usato (niente nuvole e una
+> riga rossa invece del bianco). Dopo aver ricompilato: **rilancia
+> `geo.Imagery.CreateMaterial`**. Subito, senza ricompilare: apri
+> `M_GeoClouds`, Details → Usage → spunta "Used with Volumetric Cloud", salva;
+> oppure `geo.Weather.Clouds off` per toglierle.
+
 Dopo `geo.Imagery.CreateMaterial`, in **Play**, con il sereno:
 
 ```

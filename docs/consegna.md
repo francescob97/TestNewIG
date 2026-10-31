@@ -102,6 +102,7 @@ geoworld build-water --osm dati/osm/nord-ovest-latest.osm.pbf --sea dati/acqua/w
 geoworld verify-water -o dataset/acqua_torino
 
 :: Vegetazione (dettagli in docs/vegetazione-verifica.md): WorldCover dalla rete, sull'area del terreno
+costruisci-vegetazione                          :: chiede il dataset del terreno, fa tutto (o a mano:)
 geoworld build-vegetation --terrain dataset/terreno -o dataset/vegetazione
 geoworld verify-vegetation -o dataset/vegetazione
 ```

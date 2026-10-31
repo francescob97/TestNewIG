@@ -169,6 +169,15 @@ decisioni sono in `docs/fase8-design.md`.
 
 ### Vegetazione (Fase 11)
 
+Il modo comodo: doppio clic su **`costruisci-vegetazione.bat`** (o trascinaci
+sopra la cartella del dataset del terreno). Chiede il dataset del terreno e il
+nome, costruisce `Pipeline\dataset\vegetazione_<terreno>`, lo verifica e mette
+negli appunti il comando per Unreal. Da riga di comando:
+`costruisci-vegetazione dted`. Se in `Pipeline\dati\worldcover` ci sono file
+WorldCover gia' scaricati, usa quelli invece della rete.
+
+A mano:
+
 ```bat
 geoworld build-vegetation --terrain dataset/terreno -o dataset/vegetazione
 geoworld verify-vegetation -o dataset/vegetazione

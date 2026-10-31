@@ -160,6 +160,7 @@ geoworld build-water --osm dati/osm/nord-ovest-latest.osm.pbf --sea dati/acqua/w
 geoworld verify-water -o dataset/acqua
 
 :: vegetazione: la copertura del suolo di ESA WorldCover sull'area del terreno (dalla rete, a pezzi)
+costruisci-vegetazione                         :: chiede il dataset del terreno, fa tutto
 geoworld build-vegetation --terrain dataset/terreno -o dataset/vegetazione
 geoworld verify-vegetation -o dataset/vegetazione
 

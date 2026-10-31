@@ -335,6 +335,30 @@ namespace
 	}
 
 	/**
+	 * Accende un flag di "Usage" del materiale cercandolo PER NOME fra le sue
+	 * proprieta' (per esempio "bUsedWithVolumetricCloud").
+	 *
+	 * NOTA UE: i flag di Usage dicono al motore per quali tipi di geometria
+	 * compilare il materiale. Alcuni l'editor li accende da solo quando il
+	 * materiale viene usato; altri no, e il componente allora disegna il
+	 * materiale di ripiego e lo scrive in rosso. Per nome e non con il campo
+	 * C++: se in questa versione del motore il flag non c'e', il file compila lo
+	 * stesso e il messaggio lo dice.
+	 */
+	bool SetUsageFlag(UMaterial* Material, const TCHAR* PropertyName)
+	{
+		FBoolProperty* Flag = Material ? FindFProperty<FBoolProperty>(UMaterial::StaticClass(), FName(PropertyName)) : nullptr;
+		if (!Flag)
+		{
+			Report(FString::Printf(TEXT("%s: questa versione del motore non ha il flag %s (accendilo a mano in Details > Usage, se c'e')."),
+				Material ? *Material->GetName() : TEXT("?"), PropertyName), FColor::Yellow);
+			return false;
+		}
+		Flag->SetPropertyValue_InContainer(Material, true);
+		return true;
+	}
+
+	/**
 	 * Un nodo Custom (HLSL scritto a mano) con gli ingressi dati per nome.
 	 * Gli ingressi si collegano direttamente (FExpressionInput::Connect),
 	 * senza cercarli per nome: cosi' non dipende da come l'editor chiama i
@@ -1609,6 +1633,10 @@ namespace
 		Material->MaterialDomain = MD_Volume;
 		Material->BlendMode = BLEND_Additive;
 		Material->SetShadingModel(MSM_DefaultLit);
+		// OBBLIGATORIO (UE 5.8): senza, la VolumetricCloud scrive in rosso "does
+		// not have the UsedWithVolumetricCloud flag set" e disegna il materiale
+		// di ripiego: una nebbia bianca su tutto.
+		SetUsageFlag(Material, TEXT("bUsedWithVolumetricCloud"));
 
 		FGraph G{ Material };
 		// La posizione del campione: senza offset (un volume non ne ha), in float normale.
