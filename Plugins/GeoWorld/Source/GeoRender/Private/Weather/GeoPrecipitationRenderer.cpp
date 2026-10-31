@@ -173,6 +173,15 @@ void FGeoPrecipitationRenderer::WriteParameters(UWorld* World, const Weather::FP
 	// Il raggio di curvatura: quello medio della Terra basta (l'errore sulla
 	// quota a 30 km e' meno di un metro).
 	Instance->SetVectorParameterValue(TEXT("GroundFrame"), ToLinearColour(Ground.GeoidAtOriginM, 6371000.0, 0.0, 0.0));
+	// Il ghiaccio e la grandine al suolo: una collezione fatta prima non li
+	// ha (Set ritorna false), e allora lo si dice.
+	const bool bIce = Instance->SetVectorParameterValue(TEXT("GroundIce"),
+		ToLinearColour(Ground.IceAmount, Ground.IceLineM, Ground.IceTransitionM, 0.0));
+	const bool bHail = Instance->SetVectorParameterValue(TEXT("GroundHailMap"), Ground.HailMap);
+	if ((!bIce || !bHail) && Problem.IsEmpty())
+	{
+		Problem = TEXT("MPC_GeoWeather e' di prima del ghiaccio e della grandine al suolo: rilancia geo.Imagery.CreateMaterial");
+	}
 
 	static const TCHAR* LayerNames[Weather::ParticleTypeCount] = { TEXT("PrecipRain"), TEXT("PrecipSnow"), TEXT("PrecipHail") };
 	static const TCHAR* VelocityNames[Weather::ParticleTypeCount] = { TEXT("PrecipRainVel"), TEXT("PrecipSnowVel"), TEXT("PrecipHailVel") };

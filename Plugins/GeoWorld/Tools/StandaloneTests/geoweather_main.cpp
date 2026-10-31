@@ -11,6 +11,7 @@
 
 #include "HlslShim.h"
 #include "Weather/Clouds.h"
+#include "Weather/GroundHail.h"
 #include "Weather/Lightning.h"
 #include "Weather/Precipitation.h"
 #include "Weather/WindField.h"
@@ -1089,6 +1090,269 @@ static void TestCloudShader()
 		Fmt("vicino %.2f, a 12 km %.3f", Near, Far));
 }
 
+// ===========================================================================
+//  16-18. Il ghiaccio e la grandine al suolo, e il materiale del suolo
+// ===========================================================================
+
+static void TestIce()
+{
+	Section("16. Il ghiaccio: il bagnato che gela, il gelicidio, il disgelo");
+	// Dopo la pioggia arriva il freddo: 5 °C al mare, zero termico a 770 m.
+	const FPrecipitationField Chilly = MakeWeather(EPrecipitationKind::Auto, 0.0, 1.0, 5.0);
+	FGroundWeather Ground;
+	Ground.SetWetness(1.0);
+	const FPrecipitationSample Still = Chilly.Sample(Lat, Lon, 200.0);
+	for (int Minute = 0; Minute < 10; ++Minute) { Ground.Advance(60.0, Still, Chilly); }
+	const double IceTen = Ground.GetIce(), LineTen = Ground.GetIceLineM();
+	Check(Ground.HasIce() && IceTen > 0.45 && std::fabs(LineTen - Chilly.FreezingLevelM()) < 1.0,
+		"il suolo bagnato gela sopra lo zero termico: in 10 minuti piu' di meta'",
+		Fmt("ghiaccio %.2f sopra %.0f m (zero termico %.0f m)", IceTen, LineTen, Chilly.FreezingLevelM()));
+
+	// Senz'acqua niente ghiaccio, anche al gelo; con la pioggia imposta e il gelo, il gelicidio;
+	// con lo stesso freddo senza la pioggia imposta nevica, e la neve non fa vetrato.
+	const FPrecipitationField Frost = MakeWeather(EPrecipitationKind::Auto, 0.0, 1.0, -5.0);
+	const FPrecipitationField FreezingRain = MakeWeather(EPrecipitationKind::Rain, 2.0, 1.0, -3.0);
+	const FPrecipitationField Snowing = MakeWeather(EPrecipitationKind::Auto, 2.0, 1.0, -3.0);
+	FGroundWeather DryGround, Glazed, Snowy;
+	for (int Minute = 0; Minute < 60; ++Minute) { DryGround.Advance(60.0, Frost.Sample(Lat, Lon, 200.0), Frost); }
+	for (int Minute = 0; Minute < 15; ++Minute)
+	{
+		Glazed.Advance(60.0, FreezingRain.Sample(Lat, Lon, 200.0), FreezingRain);
+		Snowy.Advance(60.0, Snowing.Sample(Lat, Lon, 200.0), Snowing);
+	}
+	Check(!DryGround.HasIce() && Glazed.GetIce() > 0.9 && Glazed.GetIceLineM() <= -499.0 && !Snowy.HasIce(),
+		"il gelicidio: pioggia su un suolo sotto zero, vetrato in un quarto d'ora; senz'acqua o con la neve, niente",
+		Fmt("vetrato %.2f sopra %.0f m", Glazed.GetIce(), Glazed.GetIceLineM()));
+
+	// Il disgelo: lo zero termico sale a 1.500 m, la quota del ghiaccio lo segue.
+	const FPrecipitationField Mild = MakeWeather(EPrecipitationKind::Auto, 0.0, 1.0, 9.75);
+	FGroundWeather Thaw;
+	Thaw.SetIce(1.0, 500.0);
+	const FPrecipitationSample MildAir = Mild.Sample(Lat, Lon, 200.0);
+	for (int Minute = 0; Minute < 15; ++Minute) { Thaw.Advance(60.0, MildAir, Mild); }
+	const double LineQuarter = Thaw.GetIceLineM();
+	for (int Minute = 0; Minute < 45; ++Minute) { Thaw.Advance(60.0, MildAir, Mild); }
+	Check(LineQuarter > 1100.0 && Thaw.GetIceLineM() > 1450.0 && Thaw.GetIceLineM() <= 1501.0 && Thaw.GetIce() > 0.8,
+		"il disgelo: la quota del ghiaccio sale con lo zero termico in un quarto d'ora; sopra, il ghiaccio resta",
+		Fmt("dopo 15 minuti sopra %.0f m, dopo un'ora %.0f m (ghiaccio %.2f)", LineQuarter, Thaw.GetIceLineM(), Thaw.GetIce()));
+}
+
+static void TestHailGround()
+{
+	Section("17. La grandine al suolo: le strisce sotto i nuclei, e come fonde");
+	FPrecipitationField Storm = MakeWeather(EPrecipitationKind::Hail, 30.0, 0.4, 15.0, 6.0);
+	bool bConsistent = true;
+	double Strongest = 0.0;
+	for (int Index = 0; Index < 400; ++Index)
+	{
+		const double LatDeg = Lat + 0.003 * (Index % 20), LonDeg = Lon + 0.004 * (Index / 20);
+		const FPrecipitationSample Falling = Storm.Sample(LatDeg, LonDeg, 300.0);
+		const double Rate = Storm.HailRateMmH(LatDeg, LonDeg);
+		bConsistent = bConsistent && std::fabs(Rate - Falling.RateMmH * Falling.Hail) < 1e-9;
+		Strongest = std::max(Strongest, Rate);
+	}
+	const FPrecipitationField Showers = MakeWeather(EPrecipitationKind::Auto, 30.0, 0.4, 15.0, 6.0);
+	Check(bConsistent && Strongest > 5.0 && Showers.HailRateMmH(Lat, Lon) == 0.0,
+		"la grandine al suolo e' quella che cade (Sample): stessa mappa, stessi nuclei; senza grandine, niente",
+		Fmt("fino a %.1f mm/h d'acqua", Strongest));
+
+	// Venti minuti di temporale che viaggia verso nord a 15 m/s.
+	FHailGround Hail;
+	Hail.Reset(128, 60000.0);
+	Hail.Recentre(Lat, Lon);
+	FHailGround Rainy = Hail;
+	FPrecipitationField RainOnly = Showers;
+	for (int Step = 0; Step < 40; ++Step)
+	{
+		Storm.Advance(30.0, 15.0, 0.0);
+		RainOnly.Advance(30.0, 15.0, 0.0);
+		Hail.Advance(Storm, 30.0, 15.0);
+		Rainy.Advance(RainOnly, 30.0, 15.0);
+	}
+	int White = 0, Total = 0, PairsNorth = 0, PairsEast = 0;
+	auto Covered = [&Hail](int Row, int Column)
+	{
+		double LatDeg = 0.0, LonDeg = 0.0;
+		Hail.CellLatLon(Row, Column, LatDeg, LonDeg);
+		return Hail.CoverAt(LatDeg, LonDeg) >= 0.3;
+	};
+	for (int Row = 0; Row + 1 < Hail.GetSize(); ++Row)
+	{
+		for (int Column = 0; Column + 1 < Hail.GetSize(); ++Column)
+		{
+			++Total;
+			if (!Covered(Row, Column)) { continue; }
+			++White;
+			PairsNorth += Covered(Row + 1, Column) ? 1 : 0;
+			PairsEast += Covered(Row, Column + 1) ? 1 : 0;
+		}
+	}
+	Check(White > 0 && White < Total * 0.3 && PairsNorth > PairsEast * 1.2 && Rainy.IsEmpty(),
+		"le strisce: bianco solo sotto i nuclei, allungato verso dove va il temporale; la pioggia non lascia niente",
+		Fmt("bianco il %.1f%% del suolo; celle bianche vicine verso nord %.0f, verso est %.0f",
+			100.0 * White / Total, PairsNorth, PairsEast));   /* percentuale, non-unita */
+
+	// Smette: a 20 °C fonde, sotto zero resta.
+	double PlaceLat = Lat, PlaceLon = Lon, PlaceDepth = 0.0;
+	for (int Row = 0; Row < Hail.GetSize(); ++Row)
+	{
+		for (int Column = 0; Column < Hail.GetSize(); ++Column)
+		{
+			double LatDeg = 0.0, LonDeg = 0.0;
+			Hail.CellLatLon(Row, Column, LatDeg, LonDeg);
+			const double Here = Hail.DepthAt(LatDeg, LonDeg);
+			if (Here > PlaceDepth) { PlaceDepth = Here; PlaceLat = LatDeg; PlaceLon = LonDeg; }
+		}
+	}
+	FPrecipitationSettings Calm = Storm.GetSettings();
+	Calm.RateMmH = 0.0;
+	Storm.SetSettings(Calm);
+	FHailGround Cold = Hail;
+	const double Before = Hail.MaxDepth();
+	for (int Minute = 0; Minute < 90; ++Minute)
+	{
+		Hail.Advance(Storm, 60.0, 20.0);
+		Cold.Advance(Storm, 60.0, -2.0);
+	}
+	Check(Before > 2.0 && Hail.IsEmpty() && Cold.MaxDepth() == Before,
+		"smette: a 20 °C la grandine fonde in meno di un'ora e mezza; sotto zero resta",
+		Fmt("strato piu' spesso %.1f mm", Before));
+
+	// Ricentrare sposta la griglia di celle intere: la grandine resta dov'era.
+	FHailGround Moved = Cold, Far = Cold;
+	Moved.Recentre(Lat + 0.05, Lon + 0.08);
+	Far.Recentre(Lat + 1.0, Lon);
+	Check(PlaceDepth > 0.0 && Moved.DepthAt(PlaceLat, PlaceLon) == Cold.DepthAt(PlaceLat, PlaceLon) && Far.IsEmpty(),
+		"la camera si sposta: la griglia la segue di celle intere, e la grandine resta esattamente dov'era",
+		Fmt("%.2f mm prima e dopo", Cold.DepthAt(PlaceLat, PlaceLon), Moved.DepthAt(PlaceLat, PlaceLon)));
+
+	FHailGround Disc;
+	Disc.Reset(128, 60000.0);
+	Disc.AddDisc(Lat, Lon, 3000.0, 8.0);
+	std::vector<uint8_t> Bgra;
+	Disc.WriteBgra(Bgra);
+	const size_t Centre = (static_cast<size_t>(64) * 128 + 64) * 4;
+	Check(Disc.CoverAt(Lat, Lon) == 1.0 && Disc.CoverAt(Lat + 5000.0 / 111132.0, Lon) == 0.0
+		&& Bgra.size() == 128u * 128u * 4u && Bgra[Centre + 2] == 255 && Bgra[Centre + 3] == 255 && Bgra[Centre] == 0,
+		"a mano: un disco di grandine di 3 km; la texture ha in R quanto e' bianco");
+}
+
+/** Il materiale del suolo, compilato come C++ (vedi GroundShader.inl). */
+static HlslShim::float4 RunGroundShader(HlslShim::float3 Colour, float Rough, HlslShim::float3 Normal, HlslShim::float3 Pos,
+                                        HlslShim::float4 Ground, HlslShim::float4 Frame, HlslShim::float4 IceState,
+                                        HlslShim::float4 HailMap, const HlslShim::FTexture& Hail, const HlslShim::FSampler& HailSampler,
+                                        float UuPerMetre, float Depth)
+{
+	using namespace HlslShim;
+#define GEO_GROUND_SHADER(...) __VA_ARGS__
+#include "Weather/GroundShader.inl"
+#undef GEO_GROUND_SHADER
+}
+
+/** Il suolo in un punto: (nord, est) in metri dall'origine, a una quota sul mare; distanza dalla camera in metri. */
+struct FGroundProbe
+{
+	HlslShim::float4 Ground = HlslShim::float4(0.0, 1.0e5, 150.0, 0.0);
+	HlslShim::float4 Frame = HlslShim::float4(47.0, 6371000.0, 0.0, 0.0);
+	HlslShim::float4 Ice = HlslShim::float4(0.0, 1.0e5, 100.0, 0.0);
+	HlslShim::float4 HailMap = HlslShim::float4(0.0, 0.0, 1.0, 1.0);
+	HlslShim::FTexture Texture;
+
+	HlslShim::float4 At(double NorthM, double EastM, double AltitudeM, double ColourValue, double Rough,
+	                    double NormalZ = 1.0, double DistanceM = 1000.0) const
+	{
+		const double Z = AltitudeM - (NorthM * NorthM + EastM * EastM) / (2.0 * Frame.y) + Frame.x;
+		const double Side = std::sqrt(std::max(0.0, 1.0 - NormalZ * NormalZ));
+		return RunGroundShader(HlslShim::float3(ColourValue, ColourValue, ColourValue), static_cast<float>(Rough),
+			HlslShim::float3(Side, 0.0, NormalZ), HlslShim::float3(NorthM * 100.0, EastM * 100.0, Z * 100.0),
+			Ground, Frame, Ice, HailMap, Texture, HlslShim::FSampler{}, 100.0f, static_cast<float>(DistanceM * 100.0));
+	}
+};
+
+static void TestGroundShader()
+{
+	Section("18. Il materiale del suolo (lo stesso testo del materiale, compilato come C++)");
+	FGroundProbe Probe;
+	const HlslShim::float4 Clear = Probe.At(1200.0, -800.0, 700.0, 0.3, 0.7);
+	Check(Clear.x == 0.3f && Clear.y == 0.3f && Clear.z == 0.3f && Clear.w == 0.7f,
+		"con il sereno il suolo resta com'era: stesso colore, stessa ruvidita'");
+
+	FGroundProbe Wintry = Probe;
+	Wintry.Ground = HlslShim::float4(0.0, 1000.0, 150.0, 1.0);
+	const HlslShim::float4 SnowAbove = Wintry.At(0.0, 0.0, 1200.0, 0.5, 0.7);
+	const HlslShim::float4 SnowBelow = Wintry.At(0.0, 0.0, 800.0, 0.5, 0.7);
+	const HlslShim::float4 SnowSteep = Wintry.At(0.0, 0.0, 1200.0, 0.5, 0.7, 0.5);
+	Check(SnowAbove.x > 0.85f && SnowBelow.x == 0.5f && SnowSteep.x == 0.5f,
+		"la neve: bianca sopra la copertura, niente sotto, niente sui pendii ripidi",
+		Fmt("sopra %.2f, sotto %.2f, ripido %.2f", SnowAbove.x, SnowBelow.x, SnowSteep.x));
+
+	FGroundProbe Icy = Probe;
+	Icy.Ice = HlslShim::float4(1.0, 600.0, 100.0, 0.0);
+	Icy.Ground = HlslShim::float4(1.0, 1.0e5, 150.0, 0.0);
+	const HlslShim::float4 Glazed = Icy.At(0.0, 0.0, 900.0, 0.5, 0.7);
+	const HlslShim::float4 WetBelow = Icy.At(0.0, 0.0, 300.0, 0.5, 0.7);
+	FGroundProbe Buried = Icy;
+	Buried.Ground = HlslShim::float4(0.0, 500.0, 150.0, 1.0);
+	const HlslShim::float4 UnderSnow = Buried.At(0.0, 0.0, 900.0, 0.5, 0.7);
+	Check(Glazed.w < 0.06f && Glazed.x < 0.5f && Glazed.z > Glazed.x && WetBelow.w == 0.18f && UnderSnow.w > 0.55f,
+		"il ghiaccio: lucidissimo, scuro e appena azzurro sopra la sua quota; sotto, solo bagnato; sotto la neve non si vede",
+		Fmt("ruvidita' %.2f sul ghiaccio, %.2f bagnato, %.2f sotto la neve", Glazed.w, WetBelow.w, UnderSnow.w));
+
+	// La grandine dalla mappa al suolo: un disco di 3 km, pieno, e uno meta' bianco.
+	FHailGround Map;
+	Map.Reset(128, 60000.0);
+	Map.Recentre(Lat, Lon);
+	Map.AddDisc(Lat, Lon, 3000.0, 8.0);
+	Map.AddDisc(Lat + 15000.0 / 111132.0, Lon, 3000.0, 0.5 * HailFullCoverMm);
+	std::vector<uint8_t> Bgra;
+	Map.WriteBgra(Bgra);
+	FGroundProbe Hailed = Probe;
+	Hailed.Texture.Size = Map.GetSize();
+	Hailed.Texture.Bgra = &Bgra;
+	Hailed.HailMap = HlslShim::float4((Map.GetCentreLatDeg() - Lat) * 111132.0,
+		(Map.GetCentreLonDeg() - Lon) * 111320.0 * std::cos(Lat * WindDegToRad), Map.GetExtentM(), Map.GetEastScale());
+	const HlslShim::float4 Far = Hailed.At(0.0, 0.0, 400.0, 0.3, 0.7);
+	const HlslShim::float4 Outside = Hailed.At(0.0, 6000.0, 400.0, 0.3, 0.7);
+	const HlslShim::float4 HalfFar = Hailed.At(15000.0, 0.0, 400.0, 0.3, 0.7);
+	// Da vicino: i chicchi. In media la stessa copertura che si vede da lontano,
+	// ma ogni pixel e' quasi sempre o chicco o suolo, non un grigio a meta'.
+	double CloseSum = 0.0;
+	int InBetween = 0, Samples = 0;
+	for (int Index = 0; Index < 2000; ++Index, ++Samples)
+	{
+		const HlslShim::float4 Close = Hailed.At(15000.0 + 0.0137 * Index, 0.0291 * (Index % 97), 400.0, 0.3, 0.7, 1.0, 2.0);
+		CloseSum += Close.x;
+		InBetween += (Close.x > 0.4f && Close.x < 0.78f) ? 1 : 0;
+	}
+	const double CloseMean = CloseSum / Samples;
+	Check(Far.x > 0.85f && std::fabs(Far.w - 0.35f) < 1e-4f && Outside.x == 0.3f && std::fabs(HalfFar.x - 0.59f) < 0.02f
+		&& std::fabs(CloseMean - HalfFar.x) < 0.03 && InBetween < Samples / 6,
+		"la grandine: bianca dove la mappa dice; da lontano la copertura media, da vicino chicchi bianchi su suolo scuro",
+		Fmt("lontano %.2f, meta' copertura %.2f; da vicino in media %.2f, grigi a meta' il %.0f%%",
+			Far.x, HalfFar.x, CloseMean, 100.0 * InBetween / Samples));   /* percentuale, non-unita */
+
+	// Lontano dal primo centro l'est della griglia e' stirato: lo shader lo corregge (HailMap.w).
+	FHailGround Travelled;
+	Travelled.Recentre(Lat, Lon);
+	const double NorthLat = Lat + 2.7, DiscLon = Lon + 50000.0 / (111320.0 * std::cos(NorthLat * WindDegToRad));
+	Travelled.Recentre(NorthLat, Lon);
+	Travelled.AddDisc(NorthLat, DiscLon, 1000.0, 8.0);
+	std::vector<uint8_t> TravelledBgra;
+	Travelled.WriteBgra(TravelledBgra);
+	FGroundProbe North = Probe;
+	North.Texture.Size = Travelled.GetSize();
+	North.Texture.Bgra = &TravelledBgra;
+	North.HailMap = HlslShim::float4((Travelled.GetCentreLatDeg() - NorthLat) * 111132.0,
+		(Travelled.GetCentreLonDeg() - Lon) * 111320.0 * std::cos(NorthLat * WindDegToRad), Travelled.GetExtentM(), Travelled.GetEastScale());
+	const HlslShim::float4 Found = North.At(0.0, 50000.0, 400.0, 0.3, 0.7);
+	FGroundProbe Unscaled = North;
+	Unscaled.HailMap.w = 1.0f;
+	const HlslShim::float4 Missed = Unscaled.At(0.0, 50000.0, 400.0, 0.3, 0.7);
+	Check(Found.x > 0.85f && Missed.x == 0.3f && Travelled.GetEastScale() > 1.03,
+		"300 km piu' a nord la grandine e' ancora al suo posto: l'est della griglia si corregge",
+		Fmt("fattore %.3f; senza la correzione il disco si mancherebbe", Travelled.GetEastScale()));
+}
+
 int main()
 {
 	std::printf("=====================================================\n");
@@ -1109,6 +1373,9 @@ int main()
 	TestThunder();
 	TestCloudMap();
 	TestCloudShader();
+	TestIce();
+	TestHailGround();
+	TestGroundShader();
 	std::printf("\n=====================================================\n");
 	std::printf(" RISULTATO: %d passati, %d falliti\n", GPassed, GFailed);
 	std::printf("=====================================================\n");

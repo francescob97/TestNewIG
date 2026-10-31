@@ -37,7 +37,11 @@ public:
 	/** Quante particelle: 32.768 (65.536 triangoli), circa una ogni due metri cubi nella scatola. */
 	static constexpr int32 ParticleCount = 32768;
 
-	/** Lo stato del suolo per il terreno: bagnato, quota della neve, transizione, quanta neve. */
+	/**
+	 * Lo stato del suolo per il terreno: bagnato, quota della neve,
+	 * transizione, quanta neve; il ghiaccio (quanto, sopra che quota); dove sta
+	 * la mappa della grandine (FGeoHailMap::GetPlacement).
+	 */
 	struct FGroundParameters
 	{
 		double Wetness = 0.0;
@@ -45,6 +49,10 @@ public:
 		double SnowTransitionM = 150.0;
 		double SnowAmount = 0.0;
 		double GeoidAtOriginM = 47.0;
+		double IceAmount = 0.0;
+		double IceLineM = 1.0e5;
+		double IceTransitionM = 100.0;
+		FLinearColor HailMap = FLinearColor(0.0f, 0.0f, 1.0f, 1.0f);
 	};
 
 	~FGeoPrecipitationRenderer();

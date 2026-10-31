@@ -113,6 +113,8 @@ che nessuno usa più. Vede solo i riferimenti che conosce. (1)
 
 **GDAL** — la libreria standard per leggere e trasformare dati geografici. (3)
 
+**Gelicidio** — pioggia che arriva liquida su un suolo sotto zero e gela al contatto, coprendolo di vetrato. Nel modello: pioggia imposta con il gelo. (15)
+
 **Geofabrik** — chi ripubblica ogni giorno OpenStreetMap tagliato per nazione e regione, in
 `.osm.pbf`. Da lì scarica `fetch-osm`. (12)
 
@@ -126,6 +128,8 @@ del raffinamento. (6)
 
 **Gonna** (*skirt*) — striscia verticale che scende dal bordo di una tile, per
 nascondere le crepe fra livelli diversi. (6)
+
+**Grandine posata** — la grandine al suolo, in strisce sotto il percorso dei nuclei dei temporali; una griglia di celle da 470 m ferma rispetto al terreno, che fonde con il caldo (`GroundHail.h`). (15)
 
 **Header-only** — codice scritto interamente negli header, con `inline`. Lo strato
 puro è così, per non dover esportare simboli dalle DLL. (0, 1)
@@ -306,12 +310,16 @@ A 6.371 km è 64 cm, a 10 km è 0,6 mm. (2)
 **UObject** — la classe base universale di Unreal, con riflessione e garbage
 collector. (1)
 
+**UpdateTextureRegions** — riscrive i pixel di una texture esistente: l'oggetto resta lo stesso, quindi chi lo usa non va avvisato. La copia la fa il render thread più tardi: i dati vanno tenuti vivi fino ad allora. Così si aggiorna la grandine posata. (15)
+
 **Vento di gradiente** — il vento sopra lo strato limite, che non sente il suolo. Con 10 m/s alla stazione meteo è ~17 m/s. (14)
 
 **Vento di riferimento** — il dato da cui parte la simulazione del vento: velocità e direzione a 10 m su un prato, come in un bollettino (METAR). Tutto il resto lo calcola il campo. (14)
 
 **Vestitore** — chi mette qualcosa sopra il terreno e decide quando una tile è pronta da
 mostrare: le ortofoto e le strade. Il terreno ne accetta più d'uno, per nome. (11, 12)
+
+**Vetrato** (*verglas*) — un velo di ghiaccio trasparente sul suolo: lucidissimo, scuro come il bagnato. Viene dal bagnato che gela o dal gelicidio. (15)
 
 **Vista-indipendente** — selezione che dipende solo dalla posizione della camera, non dalla direzione: il frustum lo applica il renderer di Unreal. È il default. (11)
 
@@ -416,6 +424,7 @@ il primo comando da provare quando non si vede niente. (6)
 | `Public/Weather/Precipitation.h`, `GeoPrecipitationRenderer.h` | pioggia, neve, grandine: il modello (puro) e il disegno (particelle, suolo, nebbia) |
 | `Public/Weather/Lightning.h`, `GeoLightningRenderer.h` | fulmini e tuono: il modello (puro) e il disegno (canale, luce, suono) |
 | `Public/Weather/Clouds.h`, `CloudShader.inl`, `GeoCloudRenderer.h` | le nuvole: il modello (puro), lo shader (HLSL e C++ insieme) e il disegno (VolumetricCloud, mappa meteo) |
+| `Public/Weather/GroundHail.h`, `GroundShader.inl`, `GeoHailMap.h` | la grandine posata (puro), il meteo sul suolo nel materiale (HLSL e C++ insieme), la griglia in Unreal |
 | `Public/GeoPositionHudSubsystem.h` | le stampe della posizione |
 | `Private/GeoRenderModule.cpp` | comandi `geo.Lod.*`, `geo.Terrain.*`, `geo.Imagery.*`, `geo.Roads.*`, `geo.Water.*`, `geo.Weather.*`, `geo.Hud`, `geo.Fly*` |
 | `Private/**/*.cpp` | le implementazioni |
@@ -433,7 +442,7 @@ il primo comando da provare quando non si vede niente. (6)
 | File | Contenuto |
 |---|---|
 | `Tools/StandaloneTests/*` | i cinque eseguibili di test senza Unreal |
-| `Tools/StandaloneTests/HlslShim.h` | quel tanto di HLSL che serve a compilare lo shader delle nuvole come C++ |
+| `Tools/StandaloneTests/HlslShim.h` | quel tanto di HLSL che serve a compilare gli shader delle nuvole e del suolo come C++ |
 | `Tools/CheckSourceDiscipline.sh` | cinque regole di disciplina |
 | `Tools/CheckShadowedParameters.py` | parametri che nascondono campi |
 | `Tools/CheckModuleExports.py` | simboli invisibili fra moduli |

@@ -309,13 +309,30 @@ namespace GeoWorld::Weather
 			const double Ceiling = Clamp((CloudTopM() - AltitudeM) / 1000.0, 0.0, 1.0);
 			if (Level <= 0.0 || Ceiling <= 0.0) { return Out; }
 			Out.RateMmH = Settings.RateMmH * Level * Ceiling;
-			// La grandine: nei nuclei (dove si sale verso il massimo), fino al 60%.
-			Out.Hail = (Settings.Kind == EPrecipitationKind::Hail) ? 0.6 * Smoothstep(0.55, 0.9, Level) : 0.0;
+			Out.Hail = HailFraction(Level);
 			const double Snow = SnowFractionAt(AltitudeM);
 			Out.Snow = (1.0 - Out.Hail) * Snow;
 			Out.Rain = (1.0 - Out.Hail) * (1.0 - Snow);
 			Out.VisibilityM = PrecipitationVisibilityM(Out.RateMmH, Out.Rain, Out.Snow, Out.Hail);
 			return Out;
+		}
+
+		/** La grandine: nei nuclei (dove il livello sale verso il massimo), fino al 60% di cio' che cade. */
+		double HailFraction(double Level) const
+		{
+			return (Settings.Kind == EPrecipitationKind::Hail) ? 0.6 * PrecipitationDetail::Smoothstep(0.55, 0.9, Level) : 0.0;
+		}
+
+		/**
+		 * Quanta grandine arriva al suolo in un punto, mm/h d'acqua: quella di
+		 * Sample() a una quota sotto la cima delle nuvole. Per la grandine al
+		 * suolo (GroundHail.h), che la accumula punto per punto.
+		 */
+		double HailRateMmH(double LatDeg, double LonDeg) const
+		{
+			if (Settings.Kind != EPrecipitationKind::Hail || Settings.RateMmH <= 0.0 || Settings.Coverage <= 0.0) { return 0.0; }
+			const double Level = Intensity(LatDeg, LonDeg);
+			return Settings.RateMmH * Level * HailFraction(Level);
 		}
 
 		double GetTime() const { return Seconds; }
@@ -346,12 +363,39 @@ namespace GeoWorld::Weather
 	 *     minuti);
 	 *   - senza neve fonde: la copertura sale di 20 m all'ora per ogni grado
 	 *     sopra zero alla sua quota.
+	 *
+	 * IL GHIACCIO (il vetrato, o "verglas"): un velo d'acqua gelata. Come la
+	 * neve sta sopra una QUOTA, perche' gela dove l'aria e' sotto zero, cioe'
+	 * sopra lo zero termico; e come il bagnato e' uno per il mondo. Due modi
+	 * di farlo:
+	 *
+	 *   - il suolo BAGNATO che gela: sopra lo zero termico il velo d'acqua
+	 *     diventa ghiaccio in una decina di minuti (dopo la pioggia arriva il
+	 *     freddo);
+	 *   - il GELICIDIO: pioggia (liquida) che cade su un suolo sotto zero e
+	 *     gela al contatto. Qui succede quando la pioggia arriva liquida sopra
+	 *     lo zero termico, cioe' con la pioggia imposta (geo.Weather.Rain)
+	 *     e il freddo: con 2 mm/h in un quarto d'ora il suolo e' vetrato.
+	 *
+	 * La quota del ghiaccio scende con lo zero termico in ~10 minuti (un velo
+	 * sottile gela in fretta) e risale quando fa piu' caldo: 600 m all'ora per
+	 * ogni grado sopra zero alla sua quota, cioe' segue lo zero termico in un
+	 * quarto d'ora. Senza acqua nuova il ghiaccio resta: sublima in ore.
 	 */
 	class FGroundWeather
 	{
 	public:
 		/** "Nessuna neve": la copertura sta piu' in alto di qualunque montagna. */
 		static constexpr double NoSnowM = 1.0e5;
+		/** "Nessun ghiaccio", allo stesso modo. */
+		static constexpr double NoIceM = 1.0e5;
+		/** Il ghiaccio: in quanto gela il bagnato, in quanto la quota segue lo zero termico che scende, in quanto sublima (s). */
+		static constexpr double FreezeSeconds = 600.0;
+		static constexpr double SublimationSeconds = 6.0 * 3600.0;
+		/** Quanto sale la quota del ghiaccio all'ora per ogni grado sopra zero alla sua quota, m. */
+		static constexpr double IceMeltMetresPerHourPerDegree = 600.0;
+		/** Il passaggio fra suolo gelato e no attorno alla quota del ghiaccio, m (il materiale e le stampe). */
+		static constexpr double IceTransitionM = 100.0;
 
 		void SetWetness(double Value) { Wetness = PrecipitationDetail::Clamp(Value, 0.0, 1.0); }
 		void SetSnowCover(double AltitudeM) { SnowCoverM = AltitudeM; }
@@ -359,6 +403,17 @@ namespace GeoWorld::Weather
 		double GetWetness() const { return Wetness; }
 		double GetSnowCoverM() const { return SnowCoverM; }
 		bool HasSnow() const { return SnowCoverM < NoSnowM * 0.5; }
+
+		/** Ghiaccio adesso: quanto (0..1) e sopra che quota (m s.l.m.). */
+		void SetIce(double Amount, double LineM)
+		{
+			IceAmount = PrecipitationDetail::Clamp(Amount, 0.0, 1.0);
+			IceLineM = IceAmount > 0.0 ? LineM : NoIceM;
+		}
+		void ClearIce() { IceAmount = 0.0; IceLineM = NoIceM; }
+		double GetIce() const { return IceAmount; }
+		double GetIceLineM() const { return IceLineM; }
+		bool HasIce() const { return IceAmount > 0.0 && IceLineM < NoIceM * 0.5; }
 
 		/**
 		 * @param Here      la precipitazione al suolo sotto la camera
@@ -395,11 +450,61 @@ namespace GeoWorld::Weather
 				SnowCoverM += DeltaSeconds * Warmth * 20.0 / 3600.0;
 				if (Warmth > 0.0 && SnowCoverM > 9000.0) { SnowCoverM = NoSnowM; }
 			}
+			AdvanceIce(DeltaSeconds, Here, Field);
 		}
 
 	private:
+		void AdvanceIce(double DeltaSeconds, const FPrecipitationSample& Here, const FPrecipitationField& Field)
+		{
+			// Dove gela: sopra lo zero termico. Se gela gia' al mare, dappertutto.
+			const double Freezing = (Field.GetSettings().SeaLevelTemperatureC <= 0.0) ? -500.0 : Field.FreezingLevelM();
+
+			// L'acqua da gelare: il suolo bagnato, o la pioggia che arriva
+			// liquida dove il suolo e' sotto zero (sopra lo zero termico la
+			// pioggia resta pioggia solo se e' imposta: altrimenti e' neve).
+			const double LiquidRain = Here.RateMmH * Here.Rain;
+			const bool bFreezingRain = LiquidRain > 0.1 && Field.SnowFractionAt(Freezing + 100.0) < 0.5;
+			double Target = Wetness;
+			double Rate = 1.0 / FreezeSeconds;
+			if (bFreezingRain)
+			{
+				Target = 1.0;
+				Rate = PrecipitationDetail::Clamp(LiquidRain, 0.25, 4.0) / FreezeSeconds;
+			}
+
+			const bool bHadIce = HasIce();
+			if (Target > IceAmount)
+			{
+				IceAmount += (Target - IceAmount) * (1.0 - std::exp(-DeltaSeconds * Rate));
+			}
+			else
+			{
+				IceAmount *= std::exp(-DeltaSeconds / SublimationSeconds);
+			}
+			if (IceAmount < 0.005) { ClearIce(); return; }
+
+			if (!bHadIce)
+			{
+				// Il primo ghiaccio nasce allo zero termico: il velo gela subito
+				// dove fa freddo, non scende dall'alto come la neve.
+				IceLineM = Freezing;
+			}
+			else if (Freezing < IceLineM)
+			{
+				IceLineM = Freezing + (IceLineM - Freezing) * std::exp(-DeltaSeconds / FreezeSeconds);
+			}
+			else
+			{
+				const double Warmth = std::max(0.0, Field.TemperatureAt(IceLineM));
+				IceLineM += DeltaSeconds * Warmth * IceMeltMetresPerHourPerDegree / 3600.0;
+				if (IceLineM > 9000.0) { ClearIce(); }
+			}
+		}
+
 		double Wetness = 0.0;
 		double SnowCoverM = NoSnowM;
+		double IceAmount = 0.0;
+		double IceLineM = NoIceM;
 	};
 
 	// =========================================================================

@@ -6,7 +6,8 @@
 > attorno alla camera, il suolo bagnato e la neve posata, la visibilità che
 > cala. E i **fulmini**, con il loro tuono (sezioni 2.8, 2.9 e 3.7). E le
 > **nuvole**: i cumuli di bel tempo e le nubi di pioggia sopra i rovesci
-> (sezioni 2.10 e 3.8).
+> (sezioni 2.10 e 3.8). E sul suolo, oltre al bagnato e alla neve, il
+> **ghiaccio** e la **grandine posata** (sezioni 2.6, 2.11 e 3.3).
 >
 > Come provarlo: `docs/meteo-verifica.md`. Per chi impara: `docs/manuale/15-meteo.md`.
 
@@ -141,9 +142,30 @@ sotto la camera** (quella che si vede):
 - **neve**: una quota sopra cui il suolo è bianco. Mentre nevica scende verso
   la quota neve (con 1 mm/h metà della strada in ~10 minuti; da nessuna neve,
   si comincia 3 km sopra la quota neve); quando smette, sale di **20 m all'ora
-  per ogni grado** sopra zero alla sua quota. Sotto zero non fonde.
+  per ogni grado** sopra zero alla sua quota. Sotto zero non fonde;
+- **ghiaccio** (il vetrato): quanto, 0..1, e una quota sopra cui c'è. Come la
+  neve dipende dalla quota, perché gela dove l'aria è sotto zero: sopra lo
+  zero termico. Nasce in due modi:
+  - il **suolo bagnato che gela**: dopo la pioggia arriva il freddo, e sopra
+    lo zero termico il velo d'acqua diventa ghiaccio in una decina di minuti
+    (tende al bagnato con una costante di tempo di 10 minuti);
+  - il **gelicidio**: pioggia che arriva **liquida** su un suolo sotto zero e
+    gela al contatto. Qui succede quando sopra lo zero termico la pioggia
+    resta pioggia, cioè con la pioggia imposta (`geo.Weather.Rain`) e il
+    freddo: il velo cresce con una costante di tempo di 10 minuti con 1 mm/h
+    (5 con 2 mm/h): con 2 mm/h in un quarto d'ora è vetrato al 95%.
+    Con la temperatura che decide da sola, sopra lo zero termico nevica, e la
+    neve non fa vetrato.
+
+  La quota del ghiaccio nasce allo zero termico (un velo sottile gela subito,
+  non scende dall'alto come la neve); se lo zero termico scende la segue in
+  ~10 minuti, se sale la quota risale di **600 m all'ora per ogni grado** sopra
+  zero alla sua quota, cioè lo raggiunge in un quarto d'ora. Senza acqua nuova
+  il ghiaccio resta: sublima in ore (6 h di costante di tempo).
 
 Il materiale del terreno e delle strade guarda questo stato (sezione 3.3).
+
+La grandine posata invece **non** è uno stato per il mondo: sezione 2.11.
 
 ### 2.7 Le particelle
 
@@ -306,6 +328,43 @@ la stessa nuvola 9 km più a nord.
 metro (dentro si vede a ~130 m); le nubi di pioggia fino a 2,5 volte tanto
 (più acqua: più scure). `geo.Weather.CloudDensity` la scala.
 
+### 2.11 La grandine posata
+
+Codice: `Plugins/GeoWorld/Source/GeoRender/Public/Weather/GroundHail.h` (puro,
+provato da `geoweather_tests`, sezione 17).
+
+La grandine cade **sotto i nuclei** dei temporali, larghi qualche chilometro,
+che viaggiano con il vento in quota. Al suolo lascia una **striscia** bianca
+lunga quanto il nucleo ha viaggiato, che poi fonde. Uno stato per il mondo
+come il bagnato farebbe il mondo tutto bianco perché un nucleo è passato
+sopra la camera: da un aereo si vedrebbe subito che è sbagliato.
+
+Quindi una **griglia al suolo**: 256 × 256 celle su 120 km attorno alla camera
+(470 m l'una), **ferma rispetto al terreno**. A ogni passo ogni cella aggiunge
+la grandine che le cade sopra adesso (la stessa mappa dei rovesci:
+`FPrecipitationField::HailRateMmH`, uguale per costruzione a quella di
+`Sample`) e toglie quella che fonde.
+
+| | |
+|---|---|
+| lo strato | 1 mm d'acqua di grandine fa **1,85 mm** di strato (ghiaccio a 0,9, in chicchi che lasciano vuoto il 40%) |
+| il bianco | il suolo è tutto bianco con **4 mm** di strato (chicchi da un centimetro, uno ogni due o tre centimetri) |
+| la fusione | **0,6 mm all'ora per ogni grado** sopra zero: a 20 °C uno strato di 8 mm resta una quarantina di minuti; sotto zero resta |
+
+Il test fa passare per venti minuti un temporale che viaggia verso nord a
+15 m/s: il bianco copre il 10% del suolo, e le celle bianche hanno il 40% in
+più di vicine bianche verso nord che verso est (le strisce sono allungate dove
+va il temporale). Con la stessa mappa ma senza grandine, niente.
+
+**Quando la camera si allontana** (15 km dal centro) la griglia si **ricentra
+spostandosi di celle intere**: la grandine resta esattamente dov'era (il test
+lo controlla al decimo di millimetro). Perché le celle intere funzionino
+anche verso est, l'est della griglia è misurato con il coseno della latitudine
+del **primo** centro; lontano da lì un metro vero vale un po' di più o di meno
+della griglia, e lo shader corregge con un fattore (300 km più a nord è il 5%:
+il test mostra che senza la correzione un disco di grandine a 50 km si
+mancherebbe).
+
 ---
 
 ## 3. In Unreal
@@ -324,6 +383,9 @@ metro (dentro si vede a ~130 m); le nubi di pioggia fino a 2,5 volte tanto
 7. i fulmini nati in questo frame (FGeoLightningRenderer)
 8. FGeoCloudRenderer: la mappa meteo (su un thread di lavoro), i parametri, la VolumetricCloud
 ```
+
+Dentro il punto 3 il suolo avanza anche il ghiaccio, e la griglia della
+grandine posata (`FGeoHailMap`) avanza ogni 4 secondi su un thread di lavoro.
 
 ### 3.2 Le particelle: una mesh, nessuna simulazione sulla CPU
 
@@ -359,10 +421,14 @@ La CPU scrive **dieci vettori** per frame nella collezione `MPC_GeoWeather`:
 | `PrecipBox` | la scatola (m) e la luminosità |
 | `PrecipMix` | la miscela dei tipi |
 
-### 3.3 Il suolo bagnato e la neve
+### 3.3 Il suolo: bagnato, ghiaccio, grandine, neve
 
 `geo.Imagery.CreateMaterial` mette un nodo "Meteo sul suolo" fra il colore e le
-uscite di `M_GeoTerrain` e `M_GeoRoad`:
+uscite di `M_GeoTerrain` e `M_GeoRoad`. Il suo testo sta in
+`Weather/GroundShader.inl`, scritto come quello delle nuvole in una sintassi
+che è **HLSL e C++ insieme** (sezione 3.8): i test lo compilano come C++
+(sezione 18) e provano neve, ghiaccio, grandine e il sereno che non cambia
+niente. Dal basso verso l'alto, cioè dall'ultimo che si vede al primo:
 
 - **la quota** del pixel sul mare, dalla sua posizione nel mondo:
   `Z + d²/2R − geoide all'origine` (all'origine Z = 0 è l'ellissoide; il
@@ -371,10 +437,33 @@ uscite di `M_GeoTerrain` e `M_GeoRoad`:
   pendii dolci e scivola via da quelli ripidi (normale); sulla foto i chiari
   (prati, campi) si imbiancano prima dei boschi scuri;
 - **il bagnato**: colore al 55% (l'acqua riempie i pori) e ruvidità fino a 0,18
-  (lucido).
+  (lucido); non dove è gelato;
+- **il ghiaccio**: sopra la sua quota, con 100 m di passaggio. Un velo
+  trasparente: scuro come il bagnato, appena azzurro, ruvidità **0,05**
+  (lucidissimo: il sole ci si specchia). Sotto la neve non si vede;
+- **la grandine**: bianca (0,88), ruvidità 0,35 (chicchi lucidi). Resta anche
+  sui pendii più ripidi di quelli dove resta la neve; scivola via solo dai
+  ripidissimi. **Da vicino si vedono i chicchi**: celle di 3 cm, ognuna
+  bianca se il suo numero a caso sta sotto la copertura. Oltre ~15 m dalla
+  camera (dove una cella è più piccola di un pixel e sfarfallerebbe) si vede
+  la copertura media; il test controlla che da vicino la media sia la stessa
+  di lontano, con i pixel quasi tutti o chicco o suolo.
 
-Senza `MPC_GeoWeather` i materiali si costruiscono lo stesso, asciutti (lo dice
-in giallo).
+**La grandine arriva al materiale come texture.** La griglia (2.11) diventa
+una texture di 256 × 256 (R = quanto è bianco), parametro `GroundHail` delle
+istanze di materiale delle tile e dell'istanza delle strade. La texture è
+**sempre la stessa**: ogni volta che la griglia avanza la si aggiorna sul posto
+(`UpdateTextureRegions`), così il provider del terreno la dà alle istanze una
+volta sola, quando nascono, e non a centinaia di istanze ogni 4 secondi. Dove
+sta nel mondo lo dice il vettore `GroundHailMap` di `MPC_GeoWeather`: il centro
+negli assi di Unreal (cambia con il rebase), il lato, la correzione dell'est.
+Il ghiaccio è un vettore solo, `GroundIce` (quanto, sopra che quota, il
+passaggio).
+
+Senza `MPC_GeoWeather` (o senza `T_GeoWeatherDefault`, la texture di riposo
+tutta zero) i materiali si costruiscono lo stesso, asciutti (lo dice in
+giallo). Senza ortofoto il terreno ha il materiale grigio del motore: niente
+meteo sul suolo.
 
 ### 3.4 La nebbia
 
@@ -406,13 +495,15 @@ pioggia la nebbia è quasi uniforme fino alle nuvole: la caduta con la quota va 
 
 - **Le stampe** a destra: `Meteo` (es. `pioggia 4,2 mm/h`), `Temperatura` (con
   lo zero termico), `Visibilita'` (solo se sotto i 50 km), `Suolo` (solo se
-  bagnato o innevato).
+  bagnato, innevato, ghiacciato o con la grandine sotto di te).
 - **L'overlay** (`geo.Weather.Debug 1`): sotto quello del vento, il tempo
   impostato, la temperatura (zero termico, quota neve, cima delle nuvole), il
   suolo, cosa cade qui e al suolo, le particelle, la visibilità e quale
   nebbia si usa; in giallo cosa manca.
 - **I Blueprint**: `GetPrecipitationAt(WorldLocation)` restituisce un
-  `FGeoPrecipitationInfo` (mm/h, frazioni, temperatura, visibilità).
+  `FGeoPrecipitationInfo` (mm/h, frazioni, temperatura, visibilità, e il suolo
+  lì: `GroundIce` e `GroundHail`, 0..1, per l'aderenza di un veicolo o il
+  suono dei passi).
 
 ### 3.6 I comandi
 
@@ -425,6 +516,8 @@ geo.Weather.Clear                              sereno (il suolo si asciuga da so
 geo.Weather.Temperature <°C al mare> [°C/km]   dove la pioggia diventa neve (default 15 e 6,5)
 geo.Weather.Wetness <0..1>                     il suolo bagnato, adesso
 geo.Weather.SnowCover <quota> | off            la neve sul suolo sopra una quota, adesso
+geo.Weather.Ice <0..1> [quota] | off           il ghiaccio sul suolo sopra una quota (default lo zero termico), adesso
+geo.Weather.HailGround [mm] [km] | off         grandine posata attorno a te (default 8 mm in 3 km), adesso
 geo.Weather.Fog <0|1>                          la nebbia della precipitazione
 ```
 
@@ -575,8 +668,14 @@ giallo cosa manca.
   160 km); i cumuli sì, dappertutto.
 - **Il suolo è uno per il mondo**: bagnato o no dappertutto, guidato da sotto
   la camera. Lontano, sotto un rovescio che non ti tocca, il suolo resta
-  asciutto (e viceversa). La neve invece segue la quota, che è la cosa che
-  conta di più.
+  asciutto (e viceversa). La neve e il ghiaccio invece seguono la quota, che è
+  la cosa che conta di più. Solo la grandine ha una mappa vera (2.11).
+- **La grandine posata fonde con l'aria al suolo sotto la camera**: la griglia
+  non conosce le quote, quindi in montagna fonde come in valle. Ed esiste
+  solo entro 60 km dalla camera: allontanandosi, quella che esce dalla griglia
+  si perde.
+- **Il ghiaccio non conosce l'ombra né il vento**: niente brina sui prati
+  sereni di notte, niente ghiaccio solo sui ponti (che gelano prima).
 - **Niente pozzanghere, cerchi sull'acqua, schizzi**, né neve accumulata in
   spessore (è un colore, non una geometria).
 - **Piove dappertutto attorno alla camera**: anche sotto un ponte o in una
@@ -639,7 +738,11 @@ giallo cosa manca.
 
 | File | Cosa |
 |---|---|
-| `GeoRender/Public/Weather/Precipitation.h` | il modello (puro): mappa, tipo, visibilità, caduta, suolo, particelle, la mesh |
+| `GeoRender/Public/Weather/Precipitation.h` | il modello (puro): mappa, tipo, visibilità, caduta, suolo (con il ghiaccio), particelle, la mesh |
+| `GeoRender/Public/Weather/GroundHail.h` | la grandine posata (puro): la griglia al suolo, accumulo, fusione, ricentratura |
+| `GeoRender/Public/Weather/GroundShader.inl` | il meteo sul suolo nel materiale, HLSL e C++ insieme |
+| `GeoRender/.../Weather/GeoHailMap.*` | in Unreal: la griglia su un thread di lavoro, la texture aggiornata sul posto |
+| `GeoRender/.../Terrain/DynamicMeshTerrainProvider.cpp` | `SetGroundHailTexture`: la texture della grandine alle istanze di materiale delle tile e delle strade |
 | `GeoRender/.../Weather/GeoPrecipitationRenderer.*` | in Unreal: l'attore delle particelle, `MPC_GeoWeather`, la nebbia |
 | `GeoRender/Public/Weather/Lightning.h` | i fulmini (puro): dove e quanti, i colpi di ritorno, il canale, il tuono |
 | `GeoRender/.../Weather/GeoLightningRenderer.*` | in Unreal: il canale, la luce, il tuono che suona |
@@ -649,7 +752,7 @@ giallo cosa manca.
 | `GeoRender/.../Weather/GeoWeatherSubsystem.*` | il giro di un frame, il rebase, l'overlay, `GetPrecipitationAt`, `OnLightningStrike` |
 | `GeoRender/Private/GeoPositionHudSubsystem.cpp` | le righe `Meteo`, `Temperatura`, `Visibilita'`, `Suolo`, `Nuvole`, `Fulmine` |
 | `GeoRender/Private/GeoRenderModule.cpp` | i comandi `geo.Weather.*` |
-| `GeoWorldEditor/Private/GeoTerrainMaterialFactory.cpp` | `MPC_GeoWeather`, `M_GeoPrecipitation`, `M_GeoLightning`, `M_GeoClouds` e `T_GeoCloudDefault`, il suolo in `M_GeoTerrain` e `M_GeoRoad` |
+| `GeoWorldEditor/Private/GeoTerrainMaterialFactory.cpp` | `MPC_GeoWeather`, `T_GeoWeatherDefault`, `M_GeoPrecipitation`, `M_GeoLightning`, `M_GeoClouds`, il suolo in `M_GeoTerrain` e `M_GeoRoad` |
 | `GeoCore/Public/Geo/GeoFormat.h` | "pioggia 4,2 mm/h", "1,2 km" |
-| `Tools/StandaloneTests/geoweather_main.cpp` | i test (sezioni 6–10; i fulmini 11–13; le nuvole 14–15) |
-| `Tools/StandaloneTests/HlslShim.h` | quel tanto di HLSL che serve a compilare lo shader delle nuvole come C++ |
+| `Tools/StandaloneTests/geoweather_main.cpp` | i test (sezioni 6–10; i fulmini 11–13; le nuvole 14–15; ghiaccio, grandine posata e materiale del suolo 16–18) |
+| `Tools/StandaloneTests/HlslShim.h` | quel tanto di HLSL che serve a compilare gli shader delle nuvole e del suolo come C++ |

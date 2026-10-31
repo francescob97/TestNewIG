@@ -24,6 +24,7 @@ Ultimo aggiornamento: 2026-10-03. Branch: `claude/charming-goodall-xd2r3g`.
 | — | **Fulmini e tuono**: nei nuclei dei temporali (Poisson diradato), nube-suolo e nella nube, colpi di ritorno che fanno sfarfallare il lampo, canale frattale con i rami, luce sul paesaggio, tuono sintetizzato (ritardo di 3 s per km, rombo, acuti che spariscono con la distanza) su un thread di lavoro; `geo.Weather.Storm`, `geo.Weather.Strike`, evento Blueprint `OnLightningStrike` | **da compilare e provare** (serve `geo.Imagery.CreateMaterial` per `M_GeoLightning`) — `docs/meteo-design.md` (2.8, 2.9, 3.7), `docs/meteo-verifica.md` (sezione 6) |
 | — | **Pioggia, neve, grandine**: rovesci che viaggiano con il vento in quota, tipo dalla quota (zero termico, quota neve, neve mista), grandine nei nuclei; particelle attorno alla camera (una mesh aperta dal materiale), suolo bagnato e innevato in `M_GeoTerrain` e `M_GeoRoad`, visibilità con la nebbia; stampe, overlay, `GetPrecipitationAt` per i Blueprint | **da compilare e provare** (serve `geo.Imagery.CreateMaterial`) — `docs/meteo-design.md`, `docs/meteo-verifica.md`, `docs/manuale/15-meteo.md` |
 | — | **Nuvole**: cumuli di bel tempo (copertura misurata sullo shader, base piatta, cima a cupola, bordi sfrangiati) e nubi di pioggia dalla stessa mappa dei rovesci (torri sui temporali, cielo coperto sui fronti), con la VolumetricCloud di Unreal; mappa meteo su un thread di lavoro, spostata dal vento; shader HLSL e C++ insieme, provato dai test; fulmini che partono dalla base e accendono la nuvola; `geo.Weather.Clouds`, `geo.Weather.CloudDensity` | **da compilare e provare** (serve `geo.Imagery.CreateMaterial` per `M_GeoClouds`) — `docs/meteo-design.md` (2.10, 3.8), `docs/meteo-verifica.md` (sezione 7) |
+| — | **Ghiaccio e grandine sul terreno**: il ghiaccio segue lo zero termico (bagnato che gela, gelicidio con la pioggia imposta, disgelo), velo lucidissimo nel materiale; la grandine si posa in strisce sotto i nuclei su una griglia al suolo di 120 km (thread di lavoro, texture aggiornata sul posto) e fonde con il caldo, a chicchi da vicino; il nodo "Meteo sul suolo" ora è HLSL e C++ insieme, provato dai test; `geo.Weather.Ice`, `geo.Weather.HailGround`, `GroundIce`/`GroundHail` per i Blueprint | **da compilare e provare** (serve `geo.Imagery.CreateMaterial`) — `docs/meteo-design.md` (2.6, 2.11, 3.3), `docs/meteo-verifica.md` (sezione 8) |
 | 10–12 | Edifici e monumenti; vegetazione; atmosfera, cielo e luce (allargando il meteo, che oggi ha il vento, la precipitazione, i fulmini e le nuvole) | **da fare** — programma in `docs/fase8-design.md`, sezione 0 |
 | dopo | **Residenza**: selezione indipendente dalla vista, precarico da posizione e velocità, mesh nascoste | **codice completo, mai compilato in UE** — `docs/residenza-design.md` |
 | dopo | **Terza prova**: niente flash grigi (tile mostrate solo vestite), isteresi sul LOD, nuvole tolte con la maschera SCL | **codice completo, da riprovare** — `docs/prova-torino-3.md` |
@@ -114,7 +115,7 @@ build\Debug\geomesh_tests.exe                       :: 41 test
 build\Debug\geoimagery_tests.exe                    :: 52 test
 build\Debug\georoads_tests.exe                      :: 80 test (dalla radice del repository)
 build\Debug\geowater_tests.exe Plugins\GeoWorld\Source\GeoTiles\TestData\water_fixture.gwa   :: 71 test (anche il Po vero e il mare aperto)
-build\Debug\geoweather_tests.exe                    :: 84 test (il vento, pioggia e neve, fulmini, nuvole)
+build\Debug\geoweather_tests.exe                    :: 97 test (il vento, pioggia e neve, fulmini, nuvole, ghiaccio e grandine al suolo)
 Plugins\GeoWorld\Tools\CheckSourceDiscipline.sh      :: serve bash (Git Bash)
 ```
 
@@ -210,6 +211,7 @@ geo.Weather.Rain [mm/h] [copertura] [km]   pioggia (Snow: neve, Hail: grandine, 
 geo.Weather.Temperature <gradi C al mare>  dove la pioggia diventa neve; geo.Weather.Clear: sereno
 geo.Weather.Storm              temporali con i fulmini; geo.Weather.Strike 1500: un fulmine davanti a te
 geo.Weather.Clouds <0..1> [base] [spessore]  i cumuli (off: niente nuvole); quelle di pioggia vengono da sole
+geo.Weather.Ice 1 [quota]      ghiaccio sul suolo; geo.Weather.HailGround 8 3: grandine posata attorno a te
 geo.Weather.Debug <0|1>        overlay del meteo: vento, precipitazione, nuvole
 ```
 
@@ -383,8 +385,9 @@ Plugins/GeoWorld/Source/
     Public/Roads/     strade: rasterizzatore e strade 3D (puri) + subsystem [Fase 8]
     Public/Water/     acqua: scavo, mesh, onde, texture (puri) + subsystem [Fase 9]
     Public/Weather/   vento, precipitazione, fulmini, nuvole: WindField.h, Precipitation.h, Lightning.h,
-                      Clouds.h (puri), CloudShader.inl (HLSL e C++), FGeoPrecipitationRenderer,
-                      FGeoLightningRenderer, FGeoCloudRenderer + UGeoWeatherSubsystem [meteo]
+                      Clouds.h, GroundHail.h (puri), CloudShader.inl e GroundShader.inl (HLSL e C++),
+                      FGeoPrecipitationRenderer, FGeoLightningRenderer, FGeoCloudRenderer,
+                      FGeoHailMap + UGeoWeatherSubsystem [meteo]
     GeoPositionHudSubsystem   le stampe della posizione                   [Fase 9]
   GeoWorldEditor/ i materiali costruiti da codice (geo.Imagery.CreateMaterial)
 

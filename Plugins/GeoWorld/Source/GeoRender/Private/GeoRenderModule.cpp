@@ -1877,8 +1877,15 @@ namespace GeoWeatherConsole
 				: Settings.Kind == GeoWorld::Weather::EPrecipitationKind::Snow ? TEXT("ovunque (solo neve)") : *Text(GeoWorld::Format::Metres(Precipitation.SnowLineM()))),
 			FColor::White);
 		const GeoWorld::Weather::FGroundWeather& GroundState = Weather->GetGround();
-		GeoTerrainConsole::Report(FString::Printf(TEXT("  suolo bagnato %.0f%%, %s"), 100.0 * GroundState.GetWetness(),   /* percentuale, non-unita */
-			GroundState.HasSnow() ? *(TEXT("neve sopra ") + Text(GeoWorld::Format::Metres(GroundState.GetSnowCoverM()))) : TEXT("niente neve")), FColor::White);
+		GeoTerrainConsole::Report(FString::Printf(TEXT("  suolo bagnato %.0f%%, %s, %s"), 100.0 * GroundState.GetWetness(),   /* percentuale, non-unita */
+			GroundState.HasSnow() ? *(TEXT("neve sopra ") + Text(GeoWorld::Format::Metres(GroundState.GetSnowCoverM()))) : TEXT("niente neve"),
+			GroundState.HasIce() ? *(TEXT("ghiaccio sopra ") + Text(GeoWorld::Format::Metres(GroundState.GetIceLineM()))) : TEXT("niente ghiaccio")),
+			FColor::White);
+		if (Weather->GetHailMaxDepth() > 0.0)
+		{
+			GeoTerrainConsole::Report(FString::Printf(TEXT("  grandine posata: fino a %s mm (fonde con il caldo; geo.Weather.HailGround off la toglie)"),
+				*Text(GeoWorld::Format::Number(Weather->GetHailMaxDepth(), 1))), FColor::White);
+		}
 		const FString Problem = Weather->GetRenderProblem();
 		if (!Problem.IsEmpty()) { GeoTerrainConsole::Report(Problem, FColor::Yellow); }
 		const double Activity = Weather->GetLightningSettings().Activity;
@@ -2237,6 +2244,49 @@ static FAutoConsoleCommandWithWorldAndArgs GeoWeatherSnowCoverCommand(
 		if (Args[0].Equals(TEXT("off"), ESearchCase::IgnoreCase)) { Weather->ClearSnowCover(); }
 		else { Weather->SetSnowCover(FCString::Atod(*Args[0])); }
 		GeoWeatherConsole::ReportPrecipitation(Weather);
+	}));
+
+static FAutoConsoleCommandWithWorldAndArgs GeoWeatherIceCommand(
+	TEXT("geo.Weather.Ice"),
+	TEXT("geo.Weather.Ice <0..1> [quota s.l.m. m] | off - il suolo ghiacciato adesso, sopra quella quota (default: lo zero termico); poi gela o sgela da solo."),
+	FConsoleCommandWithWorldAndArgsDelegate::CreateStatic(
+		[](const TArray<FString>& Args, UWorld* World)
+	{
+		UGeoWeatherSubsystem* Weather = GeoWeatherConsole::Get(World);
+		if (!Weather || Args.Num() < 1) { return; }
+		if (Args[0].Equals(TEXT("off"), ESearchCase::IgnoreCase)) { Weather->ClearIce(); }
+		else
+		{
+			const GeoWorld::Weather::FPrecipitationField& Field = Weather->GetPrecipitationField();
+			const double Freezing = Field.GetSettings().SeaLevelTemperatureC <= 0.0 ? -500.0 : Field.FreezingLevelM();
+			Weather->SetIce(FCString::Atod(*Args[0]), Args.Num() >= 2 ? FCString::Atod(*Args[1]) : Freezing);
+		}
+		GeoWeatherConsole::ReportPrecipitation(Weather);
+	}));
+
+static FAutoConsoleCommandWithWorldAndArgs GeoWeatherHailGroundCommand(
+	TEXT("geo.Weather.HailGround"),
+	TEXT("geo.Weather.HailGround [mm] [raggio km] | off - grandine posata adesso attorno a te (default 8 mm in 3 km); poi fonde da sola."),
+	FConsoleCommandWithWorldAndArgsDelegate::CreateStatic(
+		[](const TArray<FString>& Args, UWorld* World)
+	{
+		UGeoWeatherSubsystem* Weather = GeoWeatherConsole::Get(World);
+		if (!Weather) { return; }
+		if (Args.Num() >= 1 && Args[0].Equals(TEXT("off"), ESearchCase::IgnoreCase))
+		{
+			Weather->ClearHailOnGround();
+			GeoTerrainConsole::Report(TEXT("Grandine posata: tolta."));
+			return;
+		}
+		const double DepthMm = Args.Num() >= 1 ? FCString::Atod(*Args[0]) : 8.0;
+		const double RadiusKm = Args.Num() >= 2 ? FCString::Atod(*Args[1]) : 3.0;
+		if (!Weather->AddHailOnGround(RadiusKm * 1000.0, DepthMm))
+		{
+			GeoTerrainConsole::Report(TEXT("Nessuna camera: la grandine va posata attorno a qualcuno."), FColor::Yellow);
+			return;
+		}
+		GeoTerrainConsole::Report(FString::Printf(TEXT("Grandine posata: %.1f mm in %.1f km attorno a te. Fonde con il caldo (0,6 mm all'ora per grado)."),
+			DepthMm, RadiusKm));
 	}));
 
 static FAutoConsoleCommandWithWorldAndArgs GeoWeatherFogCommand(

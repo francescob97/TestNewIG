@@ -281,6 +281,14 @@ public:
 	/** Vuota se il materiale delle strade 3D (M_GeoRoad) c'e'. */
 	virtual FString GetRoadMaterialProblem() const { return FString(); }
 
+	/**
+	 * La grandine posata (Weather/GeoHailMap.h): una texture sola per tutto
+	 * il terreno e le strade, parametro "GroundHail" dei loro materiali. E'
+	 * sempre lo stesso oggetto (si aggiorna sul posto): lo si da' una volta,
+	 * e le istanze nate dopo lo ricevono quando nascono.
+	 */
+	virtual void SetGroundHailTexture(UTexture2D* Texture) {}
+
 	// --- Acqua (Fase 9) -----------------------------------------------------
 	//
 	// Un terzo componente per tile, come le strade 3D: la superficie

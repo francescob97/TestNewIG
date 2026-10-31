@@ -18,5 +18,9 @@ public class GeoRender : ModuleRules
 			// con un FPrimitiveSceneProxy custom senza toccare il resto.
 			"GeometryFramework", "GeometryCore",
 		});
+
+		// La grandine al suolo aggiorna una texture sul posto
+		// (UpdateTextureRegions): la regione da copiare e' un tipo dell'RHI.
+		PrivateDependencyModuleNames.AddRange(new string[] { "RHI" });
 	}
 }

@@ -165,10 +165,13 @@ void UGeoPositionHudSubsystem::Draw(UCanvas* Canvas, APlayerController* /*Contro
 		const double Visibility = WeatherSubsystem->GetObserverPrecipitation().VisibilityM;
 		if (Visibility < 50000.0) { Add(TEXT("Visibilita'"), Format::Distance(Visibility)); }
 		const Weather::FGroundWeather& Soil = WeatherSubsystem->GetGround();
-		if (Soil.GetWetness() > 0.01 || Soil.HasSnow())
+		const double HailHere = WeatherSubsystem->GetHailCoverAt(LatDeg, LonDeg);
+		if (Soil.GetWetness() > 0.01 || Soil.HasSnow() || Soil.HasIce() || HailHere > 0.01)
 		{
 			std::string Text = Soil.GetWetness() > 0.01 ? "bagnato " + Format::Number(100.0 * Soil.GetWetness(), 0) + "%" : "asciutto"; /* percentuale, non-unita */
 			if (Soil.HasSnow()) { Text += ", neve sopra " + Format::Metres(Soil.GetSnowCoverM()); }
+			if (Soil.HasIce()) { Text += ", ghiaccio sopra " + Format::Metres(Soil.GetIceLineM()); }
+			if (HailHere > 0.01) { Text += ", grandine " + Format::Number(100.0 * HailHere, 0) + "%"; } /* percentuale, non-unita */
 			Add(TEXT("Suolo"), Text);
 		}
 		// Le nuvole: i cumuli che ci sono, e la nube di pioggia sopra di te.

@@ -4,7 +4,7 @@
 > Non modificarlo a mano: i controlli statici (`CheckSourceDiscipline.sh`, regola 7)
 > dicono quando e' indietro. In Unreal lo stesso elenco lo da' `geo.Help`.
 
-**102 comandi** in 9 gruppi.
+**104 comandi** in 9 gruppi.
 
 ## Come si usano
 
@@ -47,7 +47,7 @@
 - [Le ortofoto](#le-ortofoto) — `geo.Imagery.*`, 8 comandi
 - [Strade, ferrovie, piste](#strade-ferrovie-piste) — `geo.Roads.*`, 11 comandi
 - [L'acqua](#lacqua) — `geo.Water.*`, 5 comandi
-- [Il meteo](#il-meteo) — `geo.Weather.*`, 22 comandi
+- [Il meteo](#il-meteo) — `geo.Weather.*`, 24 comandi
 - [La camera di volo](#la-camera-di-volo) — `geo.Fly.*`, 2 comandi
 
 ## Generale
@@ -204,6 +204,8 @@ Vento, pioggia, neve, grandine, fulmini e tuono.
 | `geo.Weather.Temperature <gradi C al livello del mare> [gradi C per km]` | decide dove la pioggia diventa neve (default 15 e 6,5). |
 | `geo.Weather.Wetness <0..1>` | quanto e' bagnato il suolo, adesso (poi segue la pioggia da solo). |
 | `geo.Weather.SnowCover <quota s.l.m. m> \| off` | neve sul suolo sopra quella quota, adesso (poi scende con le nevicate e risale con il caldo). |
+| `geo.Weather.Ice <0..1> [quota s.l.m. m] \| off` | il suolo ghiacciato adesso, sopra quella quota (default: lo zero termico); poi gela o sgela da solo. |
+| `geo.Weather.HailGround [mm] [raggio km] \| off` | grandine posata adesso attorno a te (default 8 mm in 3 km); poi fonde da sola. |
 | `geo.Weather.Fog <0\|1>` | la precipitazione toglie visibilita' con la nebbia del livello (default 1). |
 
 ## La camera di volo
@@ -234,6 +236,6 @@ Non sono di GeoWorld, ma la documentazione li usa spesso.
 | File | Comandi |
 |---|---|
 | `Plugins/GeoWorld/Source/GeoCore/Private/GeoCoreModule.cpp` | 10 |
-| `Plugins/GeoWorld/Source/GeoRender/Private/GeoRenderModule.cpp` | 81 |
+| `Plugins/GeoWorld/Source/GeoRender/Private/GeoRenderModule.cpp` | 83 |
 | `Plugins/GeoWorld/Source/GeoTiles/Private/GeoTilesModule.cpp` | 10 |
 | `Plugins/GeoWorld/Source/GeoWorldEditor/Private/GeoTerrainMaterialFactory.cpp` | 1 |

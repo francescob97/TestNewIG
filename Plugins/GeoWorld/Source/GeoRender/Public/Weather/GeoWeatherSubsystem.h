@@ -13,6 +13,9 @@
 //  rovesci che viaggiano con il vento in quota; cosa cade lo decide la
 //  temperatura con la quota. Il suolo si bagna e si imbianca, le particelle
 //  cadono attorno alla camera, la visibilita' cala (GeoPrecipitationRenderer).
+//  Il suolo gela (il ghiaccio, sopra lo zero termico: Precipitation.h,
+//  FGroundWeather) e la grandine si posa in strisce sotto i nuclei dei
+//  temporali, poi fonde (GroundHail.h, GeoHailMap).
 //
 //  I FULMINI (Weather/Lightning.h): nei nuclei dei temporali, nube-suolo o
 //  dentro la nube, con il lampo che sfarfalla, la luce sul paesaggio e il
@@ -33,6 +36,8 @@
 //  geo.Weather.Storm                temporali: rovesci con fulmini
 //  geo.Weather.Strike 1500          un fulmine a 1,5 km davanti alla camera
 //  geo.Weather.Clouds 0.5 1200      cumuli su meta' del cielo, base a 1200 m ("off": niente nuvole)
+//  geo.Weather.Ice 1                il suolo ghiacciato sopra lo zero termico, adesso
+//  geo.Weather.HailGround 8 3       8 mm di grandine posata in 3 km attorno a te
 //  geo.Weather.Clear                torna il sereno
 //  geo.Weather.Debug 1              overlay; geo.Weather.Arrows 50: frecce a 50 m dal suolo
 // =============================================================================
@@ -44,6 +49,7 @@
 #include "Georeference/GeoreferenceSnapshot.h"
 #include "Weather/Clouds.h"
 #include "Weather/GeoCloudRenderer.h"
+#include "Weather/GeoHailMap.h"
 #include "Weather/GeoLightningRenderer.h"
 #include "Weather/GeoPrecipitationRenderer.h"
 #include "Weather/Lightning.h"
@@ -77,6 +83,11 @@ struct FGeoPrecipitationInfo
 	/** Quanto lontano si vede per colpa della precipitazione, m (un numero enorme se non cade niente). */
 	UPROPERTY(BlueprintReadOnly, Category = "GeoWorld|Meteo")
 	float VisibilityM = 1.0e9f;
+	/** Il suolo li': quanto e' ghiacciato e quanto e' coperto di grandine, 0..1 (per l'aderenza di un veicolo, un suono di passi). */
+	UPROPERTY(BlueprintReadOnly, Category = "GeoWorld|Meteo")
+	float GroundIce = 0.0f;
+	UPROPERTY(BlueprintReadOnly, Category = "GeoWorld|Meteo")
+	float GroundHail = 0.0f;
 };
 
 UCLASS()
@@ -161,6 +172,19 @@ public:
 	void SetWetness(double Wetness) { GroundState.SetWetness(Wetness); }
 	void SetSnowCover(double AltitudeM) { GroundState.SetSnowCover(AltitudeM); }
 	void ClearSnowCover() { GroundState.ClearSnowCover(); }
+	/** Il ghiaccio adesso: quanto (0..1) e sopra che quota (m s.l.m.). Poi segue il tempo da solo. */
+	void SetIce(double Amount, double AltitudeM) { GroundState.SetIce(Amount, AltitudeM); }
+	void ClearIce() { GroundState.ClearIce(); }
+
+	/** Grandine posata a mano: un disco attorno alla camera (raggio m, strato mm). False senza camera. */
+	bool AddHailOnGround(double RadiusM, double DepthMm);
+	void ClearHailOnGround() { if (HailMap) { HailMap->Clear(); } }
+	/** Quanto e' bianco di grandine il suolo in un punto, 0..1. */
+	double GetHailCoverAt(double LatDeg, double LonDeg) const { return HailMap ? HailMap->CoverAt(LatDeg, LonDeg) : 0.0; }
+	/** Lo strato piu' spesso di grandine posata, mm (0: niente). */
+	double GetHailMaxDepth() const { return HailMap ? HailMap->MaxDepth() : 0.0; }
+	/** Il ghiaccio in un punto a una quota sul mare, 0..1. */
+	double GetIceAt(double AltitudeM) const;
 	const GeoWorld::Weather::FGroundWeather& GetGround() const { return GroundState; }
 
 	/** La precipitazione toglie visibilita' con la nebbia del livello (default si'). */
@@ -284,6 +308,8 @@ private:
 	double SmoothedExtinction = 0.0;
 	bool bDriveFog = true;
 	TUniquePtr<FGeoPrecipitationRenderer> Renderer;
+	/** La grandine posata: la griglia al suolo e la sua texture. */
+	TUniquePtr<FGeoHailMap> HailMap;
 	/** Il geoide all'origine del mondo: la quota sul mare nei materiali (suolo, nuvole). */
 	double GeoidAtOriginM = 0.0;
 

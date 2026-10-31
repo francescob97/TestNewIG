@@ -5,6 +5,7 @@
 #include "Georeference/GeoreferenceSubsystem.h"
 #include "Mesh/TileMesh.h"
 #include "Streaming/GeoTileStreamingSubsystem.h"
+#include "Terrain/GeoTerrainSubsystem.h"
 #include "Water/GeoWaterSubsystem.h"
 
 #include "DrawDebugHelpers.h"
@@ -86,6 +87,7 @@ void UGeoWeatherSubsystem::Initialize(FSubsystemCollectionBase& Collection)
 	Renderer = MakeUnique<FGeoPrecipitationRenderer>();
 	LightningRenderer = MakeUnique<FGeoLightningRenderer>();
 	CloudRenderer = MakeUnique<FGeoCloudRenderer>();
+	HailMap = MakeUnique<FGeoHailMap>();
 }
 
 void UGeoWeatherSubsystem::Deinitialize()
@@ -105,6 +107,8 @@ void UGeoWeatherSubsystem::Deinitialize()
 	// Via le nostre nuvole, e quelle del livello tornano com'erano.
 	if (CloudRenderer) { CloudRenderer->Shutdown(); }
 	CloudRenderer.Reset();
+	if (HailMap) { HailMap->Shutdown(); }
+	HailMap.Reset();
 	Super::Deinitialize();
 }
 
@@ -300,7 +304,24 @@ FGeoPrecipitationInfo UGeoWeatherSubsystem::GetPrecipitationAt(const FVector& Wo
 	Info.Hail = static_cast<float>(Sample.Hail);
 	Info.TemperatureC = static_cast<float>(Sample.TemperatureC);
 	Info.VisibilityM = static_cast<float>(FMath::Min(Sample.VisibilityM, 1.0e9));
+	Info.GroundIce = static_cast<float>(GetIceAt(Where.HeightM - GeoidAt(LonDeg, LatDeg)));
+	Info.GroundHail = static_cast<float>(GetHailCoverAt(LatDeg, LonDeg));
 	return Info;
+}
+
+double UGeoWeatherSubsystem::GetIceAt(double AltitudeM) const
+{
+	// Come il materiale (GroundShader.inl): sopra la quota del ghiaccio, con un passaggio.
+	if (!GroundState.HasIce()) { return 0.0; }
+	const double Transition = Weather::FGroundWeather::IceTransitionM;
+	return GroundState.GetIce() * FMath::Clamp((AltitudeM - GroundState.GetIceLineM()) / Transition + 0.5, 0.0, 1.0);
+}
+
+bool UGeoWeatherSubsystem::AddHailOnGround(double RadiusM, double DepthMm)
+{
+	if (!HailMap || !Observer.bValid) { return false; }
+	HailMap->AddDisc(Observer.LatDeg, Observer.LonDeg, FMath::Max(RadiusM, 1.0), FMath::Max(DepthMm, 0.0));
+	return true;
 }
 
 // ---------------------------------------------------------------------------
@@ -389,6 +410,12 @@ void UGeoWeatherSubsystem::UpdatePrecipitation(double DeltaSeconds)
 		Here.AtCamera = Here.AtGround = FPrecipitationSample{};
 	}
 	GroundState.Advance(DeltaSeconds, Here.AtGround, Precipitation);
+	// La grandine posata: si accumula sotto i nuclei e fonde con l'aria al suolo qui sotto.
+	if (HailMap)
+	{
+		HailMap->Update(Precipitation, Observer.bValid, Observer.LatDeg, Observer.LonDeg,
+			Observer.bValid ? Here.AtGround.TemperatureC : Precipitation.TemperatureAt(0.0));
+	}
 
 	// La visibilita' segue piano: si smussa l'ESTINZIONE (che si somma), non la distanza.
 	const double Extinction = std::isfinite(Here.AtCamera.VisibilityM) ? Koschmieder / FMath::Max(Here.AtCamera.VisibilityM, 1.0) : 0.0;
@@ -419,6 +446,9 @@ void UGeoWeatherSubsystem::UpdatePrecipitation(double DeltaSeconds)
 	Parameters.Wetness = GroundState.GetWetness();
 	Parameters.SnowCoverM = GroundState.GetSnowCoverM();
 	Parameters.SnowAmount = GroundState.HasSnow() ? 1.0 : 0.0;
+	Parameters.IceAmount = GroundState.HasIce() ? GroundState.GetIce() : 0.0;
+	Parameters.IceLineM = GroundState.GetIceLineM();
+	Parameters.IceTransitionM = Weather::FGroundWeather::IceTransitionM;
 	// Il materiale ricava la quota dalla Z: all'origine Z = 0 e' l'ellissoide,
 	// e per avere la quota sul mare toglie il geoide di li'.
 	if (bHaveSnapshot)
@@ -426,6 +456,17 @@ void UGeoWeatherSubsystem::UpdatePrecipitation(double DeltaSeconds)
 		const Core::FGeodetic Origin = LastSnapshot.Georeference.GetOriginGeodetic();
 		GeoidAtOriginM = GeoidAt(Origin.LonRad / Core::DegToRad, Origin.LatRad / Core::DegToRad);
 		Parameters.GeoidAtOriginM = GeoidAtOriginM;
+		if (HailMap) { Parameters.HailMap = HailMap->GetPlacement(LastSnapshot); }
+	}
+	// La texture della grandine ai materiali del terreno e delle strade: e'
+	// sempre la stessa, il provider la da' una volta sola.
+	if (HailMap && HailMap->GetTexture())
+	{
+		const UGeoTerrainSubsystem* Terrain = GetWorld() ? GetWorld()->GetSubsystem<UGeoTerrainSubsystem>() : nullptr;
+		if (IGeoTerrainMeshProvider* Provider = Terrain ? Terrain->GetProvider() : nullptr)
+		{
+			Provider->SetGroundHailTexture(HailMap->GetTexture());
+		}
 	}
 	const double GroundZ = (Observer.GroundHeightM - Observer.HeightM) * Units::MetersToUu + ViewLocation.Z;
 	Renderer->Update(GetWorld(), ViewLocation, Particles, Parameters, Here.VisibilityM, bDriveFog && Observer.bValid, GroundZ);
@@ -645,8 +686,17 @@ void UGeoWeatherSubsystem::DrawPrecipitationOverlay() const
 		Sky.Kind == Weather::EPrecipitationKind::Rain ? TEXT("mai") : Sky.Kind == Weather::EPrecipitationKind::Snow ? TEXT("ovunque")
 			: *Utf8(Format::Metres(Precipitation.SnowLineM())),
 		*Utf8(Format::Metres(Precipitation.CloudTopM()))));
-	Line(FColor::White, FString::Printf(TEXT("Suolo         : bagnato %.0f%%, %s"), 100.0 * GroundState.GetWetness(),   /* percentuale, non-unita */
-		GroundState.HasSnow() ? *FString::Printf(TEXT("neve sopra %s"), *Utf8(Format::Metres(GroundState.GetSnowCoverM()))) : TEXT("niente neve")));
+	Line(FColor::White, FString::Printf(TEXT("Suolo         : bagnato %.0f%%, %s, %s"), 100.0 * GroundState.GetWetness(),   /* percentuale, non-unita */
+		GroundState.HasSnow() ? *FString::Printf(TEXT("neve sopra %s"), *Utf8(Format::Metres(GroundState.GetSnowCoverM()))) : TEXT("niente neve"),
+		GroundState.HasIce() ? *FString::Printf(TEXT("ghiaccio %.0f%% sopra %s"), 100.0 * GroundState.GetIce(),   /* percentuale, non-unita */
+			*Utf8(Format::Metres(GroundState.GetIceLineM()))) : TEXT("niente ghiaccio")));
+	if (HailMap && !HailMap->IsEmpty())
+	{
+		Line(FColor::White, FString::Printf(TEXT("Grandine      : posata fino a %s mm; qui sotto %.0f%% bianco%s"),
+			*Utf8(Format::Number(HailMap->MaxDepth(), 1)),
+			Observer.bValid ? 100.0 * HailMap->CoverAt(Observer.LatDeg, Observer.LonDeg) : 0.0,   /* percentuale, non-unita */
+			HailMap->IsWorking() ? TEXT(" (in aggiornamento)") : TEXT("")));
+	}
 	if (Observer.bValid)
 	{
 		const FObserverPrecipitation& Here = ObserverPrecipitation;

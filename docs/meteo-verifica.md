@@ -55,12 +55,31 @@ stesso testo** dello shader che va nel materiale (`Weather/CloudShader.inl`):
   piatta (niente sotto), cima entro lo spessore;
 - il lampo accende la nuvola attorno, non quella a 12 km.
 
+**Il ghiaccio e la grandine al suolo** (sezioni 16–18, 13 test). La sezione 18
+compila come C++ il testo del nodo "Meteo sul suolo" (`Weather/GroundShader.inl`):
+
+- il ghiaccio: il suolo bagnato gela sopra lo zero termico (più di metà in 10
+  minuti); il gelicidio (pioggia imposta con il gelo) vetra tutto in un quarto
+  d'ora; senz'acqua, o quando nevica, niente ghiaccio; al disgelo la quota del
+  ghiaccio segue lo zero termico in un quarto d'ora, e sopra il ghiaccio resta;
+- la grandine posata: è quella che cade (la stessa mappa); venti minuti di
+  temporale che viaggia verso nord lasciano bianco il 10% del suolo, in strisce
+  allungate verso nord; la pioggia non lascia niente; a 20 °C fonde in meno di
+  un'ora e mezza, sotto zero resta; ricentrare la griglia non sposta la
+  grandine di un decimo di millimetro;
+- il materiale: con il sereno colore e ruvidità restano identici; la neve sopra
+  la copertura e non sui pendii ripidi; il ghiaccio lucidissimo (ruvidità
+  0,05) sopra la sua quota e invisibile sotto la neve; la grandine bianca dove
+  la mappa dice, da vicino a chicchi con la stessa copertura media, e al suo
+  posto anche 300 km più a nord del primo centro.
+
 Più i formati delle stampe (`geocore_tests`, sezione 10): "pioggia 4,2 mm/h",
 "neve e pioggia 1,0 mm/h", "350 m", "1,2 km".
 
 **Cosa non ho potuto provare:** la compilazione in Unreal, i materiali, le
-particelle, la nebbia, i fulmini a schermo, il suono del tuono e le nuvole a
-schermo (la VolumetricCloud, `M_GeoClouds`). I controlli statici (sezione 4 di
+particelle, la nebbia, i fulmini a schermo, il suono del tuono, le nuvole a
+schermo (la VolumetricCloud, `M_GeoClouds`), il ghiaccio e la grandine sul
+terreno (la texture aggiornata sul posto, il nodo "Meteo sul suolo"). I controlli statici (sezione 4 di
 `docs/consegna.md`) sono verdi.
 
 ---
@@ -73,8 +92,8 @@ schermo (la VolumetricCloud, `M_GeoClouds`). I controlli statici (sezione 4 di
 geo.Imagery.CreateMaterial
 ```
 
-Crea `MPC_GeoWeather`, `M_GeoPrecipitation`, `M_GeoLightning`, `M_GeoClouds` e
-`T_GeoCloudDefault` in `/GeoWorld/Materials`, e
+Crea `MPC_GeoWeather`, `T_GeoWeatherDefault`, `M_GeoPrecipitation`,
+`M_GeoLightning` e `M_GeoClouds` in `/GeoWorld/Materials`, e
 **rifà** `M_GeoTerrain` e `M_GeoRoad` con il nodo "Meteo sul suolo". Deve
 dire in verde tutti i materiali; un giallo "manca MPC_GeoWeather" vuol dire
 che la collezione non si è creata (mandami il log).
@@ -179,6 +198,9 @@ i rovesci passano.
 `geo.Weather.Hail 30 1` mette la grandine ovunque ci sia un nucleo, senza buchi
 fra i temporali.
 
+La grandine **si posa** (sezione 8): dopo una decina di minuti sotto un nucleo
+il suolo diventa bianco, in strisce dove i nuclei sono passati.
+
 ## 6. I fulmini
 
 Il modo più rapido per vederne uno, senza aspettare un temporale (in **Play**,
@@ -263,17 +285,68 @@ Poi:
 Nelle stampe a destra c'è la riga **Nuvole**: i cumuli e, se c'è, la nube di
 pioggia sopra di te, dalla base alla cima.
 
-## 8. Da Blueprint
+## 8. Il ghiaccio e la grandine sul terreno
+
+Servono le ortofoto (`geo.Imagery.Demo`): senza, il terreno ha il materiale
+grigio del motore e niente meteo sul suolo.
+
+**Il ghiaccio, subito:**
+
+```
+geo.Weather.Ice 1 0
+geo.Weather.Debug 1
+```
+
+Tutto il terreno sopra 0 m diventa un velo **lucidissimo**, un po' più scuro e
+appena azzurro: guarda contro il sole, che ci si specchia. Le stampe dicono
+`Suolo  asciutto, ghiaccio sopra 0 m`. `geo.Weather.Ice 1 800`: solo sopra
+800 m (in valle il terreno resta com'era, in montagna è vetrato).
+`geo.Weather.Ice off` lo toglie.
+
+**Il ghiaccio come viene davvero:**
+
+1. `geo.Weather.Rain 3` per qualche minuto: il suolo si bagna;
+2. `geo.Weather.Clear` e poi `geo.Weather.Temperature 3`: lo zero termico
+   scende a ~460 m; in una decina di minuti, sopra quella quota, il bagnato
+   diventa ghiaccio (l'overlay, riga Suolo, dice quanto e sopra che quota);
+3. `geo.Weather.Temperature 15`: lo zero termico torna a 2.300 m, e la quota
+   del ghiaccio lo segue in un quarto d'ora.
+
+Il **gelicidio**: `geo.Weather.Temperature -2` e poi `geo.Weather.Rain 2`
+(pioggia imposta: con il gelo, gela al contatto). In un quarto d'ora è tutto
+vetrato. Con `geo.Weather.Precipitation 2` invece nevica, e il suolo si
+imbianca senza ghiaccio.
+
+**La grandine posata, subito:**
+
+```
+geo.Weather.HailGround 8 3
+```
+
+Un disco bianco di 3 km attorno a te. **Scendi a pochi metri dal suolo**: da
+vicino si vedono i chicchi (celle di 3 cm), da lontano un bianco uniforme.
+`geo.Weather.HailGround 2 5`: un disco più largo e a metà bianco. Fonde da
+sola: a 15 °C 8 mm durano quasi un'ora; `geo.Weather.Temperature -1` la ferma,
+`geo.Weather.HailGround off` la toglie.
+
+**La grandine come viene davvero:** `geo.Weather.Hail`, poi sali a 2–3 km e
+aspetta 10–20 minuti: sotto i nuclei che passano compaiono **strisce bianche**,
+allungate dove va il temporale. Le stampe, riga Suolo, dicono quanto è bianco
+sotto di te; l'overlay (`geo.Weather.Debug 1`), riga Grandine, quanto è spessa
+al massimo.
+
+## 9. Da Blueprint
 
 Nel Level Blueprint: *Get GeoWeatherSubsystem* → *Get Precipitation At* con una
 posizione (es. quella del pawn) → *Break GeoPrecipitationInfo*: mm/h, le tre
-frazioni, la temperatura, la visibilità.
+frazioni, la temperatura, la visibilità, e il suolo lì: **Ground Ice** e
+**Ground Hail** (0..1), per l'aderenza di un veicolo o il suono dei passi.
 
 I fulmini: *Get GeoWeatherSubsystem* → *Bind Event to On Lightning Strike*: a
 ogni fulmine arrivano la posizione, se è arrivato al suolo e la distanza (m).
 Per un effetto in più, un suono tuo, una camera che trema da vicino.
 
-## 9. Se qualcosa non va
+## 10. Se qualcosa non va
 
 | Sintomo | Causa probabile | Cosa fare |
 |---|---|---|
@@ -301,4 +374,11 @@ Per un effetto in più, un suono tuo, una camera che trema da vicino.
 | Nuvole velate, quasi trasparenti, o blocchi compatti senza forma | l'estinzione per metro del motore diversa da quella che ho stimato | `geo.Weather.CloudDensity 2` o `0.5`, e dimmi quale va |
 | Il lampo nella nuvola non si vede, o la nuvola diventa bianca accecante | la forza del bagliore è una stima (`CloudGlowPerLux` in `GeoCloudRenderer.cpp`) | dimmi com'è, di giorno e di notte |
 | Le nubi di pioggia finiscono di colpo lontano | voluto: la mappa meteo copre 160 km attorno alla camera | oltre, i rovesci non hanno nuvole (sezione 4 del design) |
+| Errore di compilazione in `GeoHailMap.cpp` (`FUpdateTextureRegion2D`, `UpdateTextureRegions`) | codice mai compilato in Unreal; il tipo della regione sta nel modulo RHI (aggiunto alle dipendenze di GeoRender) | mandami le righe dell'Output Log |
+| In giallo "MPC_GeoWeather e' di prima del ghiaccio e della grandine" | la collezione non ha `GroundIce` e `GroundHailMap` | `geo.Imagery.CreateMaterial` |
+| `geo.Weather.Ice 1 0` ma il terreno non cambia | `M_GeoTerrain` vecchio (senza ghiaccio), o niente ortofoto (materiale grigio del motore) | `geo.Imagery.CreateMaterial`; accendi le ortofoto |
+| Il ghiaccio si vede ma "non sembra ghiaccio" | è un velo lucido: si nota solo dove il sole o il cielo ci si specchiano | guarda verso il sole, con il sole basso; dimmi com'è |
+| `geo.Weather.HailGround` ma niente bianco | il nodo "Meteo sul suolo" non riceve la texture (materiale vecchio), o sei su un pendio ripidissimo | `geo.Imagery.CreateMaterial`; guarda un pianoro. Se resta, mandami il log |
+| La grandine è spostata rispetto a dove l'hai messa | la posizione della mappa (`GroundHailMap`) non segue il rebase | dimmi di quanto e in che direzione |
+| La grandine da vicino sfarfalla | i chicchi (3 cm) diventano più piccoli di un pixel prima dei 15 m previsti (schermo piccolo, campo visivo largo) | dimmelo: si accorcia la distanza dei chicchi |
 | Il frame rate cala molto con le nuvole | la VolumetricCloud costa sulla scheda video, e il rumore è procedurale | `geo.Weather.Clouds off` per confrontare; dimmi quanti ms (`stat gpu`) |

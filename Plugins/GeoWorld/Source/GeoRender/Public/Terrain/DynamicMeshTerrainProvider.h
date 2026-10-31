@@ -87,6 +87,7 @@ public:
 	virtual void SetRoadAtlas(UTexture2D* Atlas) override;
 	virtual bool HasRoadAtlas() const override { return RoadMaterialInstance.IsValid() || !RoadMaterial.IsValid(); }
 	virtual FString GetRoadMaterialProblem() const override { return RoadMaterialProblem; }
+	virtual void SetGroundHailTexture(UTexture2D* Texture) override;
 
 	virtual bool CommitWaterMesh(const GeoWorld::Tiles::FTileKey& Key, FGeoPreparedTileMesh& Prepared,
 	                             UTexture2D* Raster, float MetresPerPixel, float CellMetres) override;
@@ -224,6 +225,11 @@ private:
 	TStrongObjectPtr<UMaterialInterface> RoadMaterial;
 	TStrongObjectPtr<UMaterialInstanceDynamic> RoadMaterialInstance;
 	FString RoadMaterialProblem;
+
+	/** La grandine posata: la tiene FGeoHailMap, qui basta ricordarla. */
+	TWeakObjectPtr<UTexture2D> GroundHail;
+	/** La da' a un'istanza di materiale, se c'e'. */
+	void ApplyGroundHail(UMaterialInstanceDynamic* Instance) const;
 
 	/** Durata delle transizioni (geo.Terrain.Morph). */
 	float TransitionSeconds = 0.6f;

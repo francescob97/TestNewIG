@@ -591,6 +591,7 @@ void FDynamicMeshTerrainProvider::SetTileDrape(const Tiles::FTileKey& Key,
 			{
 				Instance->ClearParameterValues();
 				ApplyOverlayParameters(*Entry, Instance);
+				ApplyGroundHail(Instance);
 			}
 			else
 			{
@@ -680,7 +681,22 @@ UMaterialInstanceDynamic* FDynamicMeshTerrainProvider::EnsureDrapeInstance(FTile
 
 	Entry.Material = Instance;
 	Component->SetMaterial(0, Instance);
+	ApplyGroundHail(Instance);
 	return Instance;
+}
+
+void FDynamicMeshTerrainProvider::ApplyGroundHail(UMaterialInstanceDynamic* Instance) const
+{
+	if (Instance && GroundHail.IsValid()) { Instance->SetTextureParameterValue(TEXT("GroundHail"), GroundHail.Get()); }
+}
+
+void FDynamicMeshTerrainProvider::SetGroundHailTexture(UTexture2D* Texture)
+{
+	if (GroundHail.Get() == Texture) { return; }
+	GroundHail = Texture;
+	// Una volta per tutte: le istanze che esistono gia', e quella delle strade.
+	for (TPair<uint64, FTileEntry>& Pair : Tiles) { ApplyGroundHail(Pair.Value.Material.Get()); }
+	ApplyGroundHail(RoadMaterialInstance.Get());
 }
 
 void FDynamicMeshTerrainProvider::ApplyOverlayParameters(const FTileEntry& Entry,
@@ -804,6 +820,7 @@ void FDynamicMeshTerrainProvider::SetRoadAtlas(UTexture2D* Atlas)
 	if (!RoadMaterialInstance.IsValid())
 	{
 		RoadMaterialInstance.Reset(UMaterialInstanceDynamic::Create(Parent, GetTransientPackage()));
+		ApplyGroundHail(RoadMaterialInstance.Get());
 	}
 	if (UMaterialInstanceDynamic* Instance = RoadMaterialInstance.Get())
 	{

@@ -1,11 +1,11 @@
 // =============================================================================
 //  HlslShim.h -- Quel tanto di HLSL che serve a compilare uno shader come C++.
 //
-//  Per i test di Weather/CloudShader.inl: lo stesso testo che la factory mette
-//  nel materiale, qui compilato come corpo di una funzione C++. Tipi
-//  (float2/3/4, uint), le funzioni intrinseche usate (floor, lerp, saturate,
-//  length) e la lettura di una texture (bilineare, bordi bloccati, come il
-//  campionatore della mappa meteo).
+//  Per i test di Weather/CloudShader.inl e Weather/GroundShader.inl: lo stesso
+//  testo che la factory mette nel materiale, qui compilato come corpo di una
+//  funzione C++. Tipi (float2/3/4, uint), le funzioni intrinseche usate
+//  (floor, lerp, saturate, min, max, length) e la lettura di una texture
+//  (bilineare, bordi bloccati, come il campionatore della mappa meteo).
 // =============================================================================
 #pragma once
 
@@ -46,10 +46,13 @@ namespace HlslShim
 	inline float3 operator*(const float3& A, float B) { return float3(A.x * B, A.y * B, A.z * B); }
 	inline float3 operator/(const float3& A, const float3& B) { return float3(A.x / B.x, A.y / B.y, A.z / B.z); }
 
+	inline float floor(float A) { return std::floor(A); }
 	inline float3 floor(const float3& A) { return float3(std::floor(A.x), std::floor(A.y), std::floor(A.z)); }
 	inline float lerp(float A, float B, float T) { return A + (B - A) * T; }
+	inline float3 lerp(const float3& A, const float3& B, float T) { return A + (B - A) * T; }
 	inline float saturate(float A) { return std::min(1.0f, std::max(0.0f, A)); }
 	inline float max(float A, float B) { return std::max(A, B); }
+	inline float min(float A, float B) { return std::min(A, B); }
 	inline float length(const float3& A) { return std::sqrt(A.x * A.x + A.y * A.y + A.z * A.z); }
 
 	/** Una texture BGRA8 quadrata, come la mappa meteo. */

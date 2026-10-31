@@ -3,7 +3,8 @@
 > Come si simula la precipitazione e come la si mette a schermo: dove cade,
 > cosa cade a ogni quota, quanto toglie la vista, il suolo che si bagna e
 > s'imbianca, e le particelle che cadono attorno alla camera. Poi i fulmini e
-> il tuono (sezione 15.7) e le nuvole (sezione 15.8). Il documento di
+> il tuono (sezione 15.7), le nuvole (sezione 15.8), il ghiaccio e la
+> grandine posata sul terreno (sezione 15.9). Il documento di
 > progetto con tutti i numeri è `docs/meteo-design.md`; come provarlo è in
 > `docs/meteo-verifica.md`.
 
@@ -250,6 +251,50 @@ girerà sulla scheda video.
 nube di pioggia; il lampo dentro la nube accende la nuvola attorno a sé, per
 qualche chilometro.
 
+## 15.9 Il ghiaccio e la grandine sul terreno
+
+Il suolo, finora, poteva essere bagnato o innevato. Adesso anche
+**ghiacciato** e **coperto di grandine**. Sono due fenomeni che sembrano
+simili e che invece chiedono due modelli diversi, ed è la parte interessante.
+
+**Il ghiaccio dipende dalla quota**, come la neve. Gela dove l'aria è sotto
+zero, cioè sopra lo zero termico; e gela solo dove c'è acqua. Quindi basta
+una **quota** (sopra cui c'è ghiaccio) e un **quanto**, uno stato per tutto il
+mondo. Nasce in due modi:
+
+- il suolo bagnato che gela: piove, poi arriva il freddo. Sopra lo zero
+  termico il velo d'acqua diventa ghiaccio in una decina di minuti;
+- il **gelicidio**: pioggia che arriva liquida su un suolo sotto zero e gela
+  al contatto, il vetrato che rende le strade piste di pattinaggio. Nel
+  modello succede con la pioggia imposta (`geo.Weather.Rain`) e il freddo;
+  quando è la temperatura a decidere, sopra lo zero termico nevica.
+
+**La grandine invece dipende dal posto.** Cade sotto i nuclei dei temporali,
+larghi pochi chilometri, che viaggiano: al suolo lascia una **striscia**
+bianca. Se fosse uno stato per il mondo come il bagnato, un nucleo passato
+sopra la camera imbiancherebbe tutto il pianeta. Serve una **mappa al suolo**:
+una griglia di celle da 470 m, ferma rispetto al terreno, dove ogni cella
+somma la grandine che le cade addosso e perde quella che fonde.
+
+> 💡 **Esempio: la striscia.** Un nucleo largo 3 km che viaggia a 15 m/s
+> resta sopra un punto per circa 200 secondi, e intanto ci lascia un paio di
+> millimetri di grandine. In venti minuti viaggia per 18 km: la striscia è
+> lunga 18 km e larga 3. Il test lo verifica contando le celle bianche vicine:
+> sono molte di più verso nord (dove va il temporale) che verso est.
+
+> ⚠️ **Trappola: la griglia che scivola.** Quando la camera si allontana la
+> griglia deve seguirla. Se la si ricentrasse esattamente sulla camera, a ogni
+> spostamento le celle cadrebbero in posti un po' diversi, e la grandine
+> "scivolerebbe" sul terreno, sfumandosi ogni volta. La griglia si sposta solo
+> di **celle intere**: ciò che resta dentro non si muove di un millimetro. Il
+> test lo controlla.
+
+**Da vicino, i chicchi.** Da un aereo la grandine è un bianco uniforme; a
+piedi sono chicchi su un prato. Il materiale divide il suolo in celle di 3 cm,
+e ognuna è bianca se il suo numero a caso sta sotto la copertura: con metà
+copertura, metà delle celle. Oltre ~15 m una cella è più piccola di un pixel e
+sfarfallerebbe: lì il materiale mostra la copertura media.
+
 ---
 
 ## Alternative considerate
@@ -369,6 +414,22 @@ funzioni dentro, dichiarata nel corpo, e un'istanza per chiamarle
 (`CloudNoise.Value(...)`). HLSL lo permette; il C++ anche, e per questo lo
 stesso testo compila nei test.
 
+### Una texture aggiornata sul posto: UpdateTextureRegions
+
+La mappa della grandine cambia ogni 4 secondi, e la leggono centinaia di
+istanze di materiale (una per tile). Creare una texture nuova ogni volta
+vorrebbe dire ridarla a tutte le istanze, centinaia di chiamate. Invece si
+crea **una volta** e poi si riscrivono i suoi pixel con
+`UTexture2D::UpdateTextureRegions`: l'oggetto resta lo stesso, e le istanze lo
+ricevono una volta sola, quando nascono.
+
+> ⚠️ **Trappola.** `UpdateTextureRegions` non copia subito: la copia sulla
+> scheda video la fa il render thread, più tardi. I pixel che gli si passano
+> devono vivere fino ad allora. Si copiano in memoria propria e la si libera
+> nella **funzione di pulizia** che il motore chiama a copia fatta. Passare i
+> dati di un vettore locale funzionerebbe quasi sempre, e ogni tanto
+> leggerebbe memoria già liberata: il peggior tipo di bug.
+
 ### Una texture nell'istanza, i numeri nella collezione
 
 Una Material Parameter Collection porta solo **numeri** (scalari e vettori).
@@ -382,7 +443,7 @@ nuvole invece stanno in `MPC_GeoWeather`, con quelli della pioggia.
 
 | File | Cosa |
 |---|---|
-| `GeoRender/Public/Weather/Precipitation.h` | il modello (puro): mappa, tipo, visibilità, caduta, suolo, particelle |
+| `GeoRender/Public/Weather/Precipitation.h` | il modello (puro): mappa, tipo, visibilità, caduta, suolo (con il ghiaccio), particelle |
 | `GeoRender/.../Weather/GeoPrecipitationRenderer.*` | l'attore delle particelle, `MPC_GeoWeather`, la nebbia |
 | `GeoRender/Public/Weather/Lightning.h` | i fulmini (puro): dove, il lampo, il canale, il tuono |
 | `GeoRender/.../Weather/GeoLightningRenderer.*` | il canale, la luce, il tuono che suona |
@@ -392,8 +453,11 @@ nuvole invece stanno in `MPC_GeoWeather`, con quelli della pioggia.
 | `GeoRender/Public/Weather/CloudShader.inl` | lo shader delle nuvole, HLSL e C++ insieme |
 | `GeoRender/.../Weather/GeoCloudRenderer.*` | la VolumetricCloud, la mappa su un thread di lavoro |
 | `GeoWorldEditor/Private/GeoTerrainMaterialFactory.cpp` | `M_GeoPrecipitation`, `M_GeoLightning`, `M_GeoClouds` e il suolo bagnato/innevato |
-| `Tools/StandaloneTests/geoweather_main.cpp` | i test (sezioni 6–15) |
-| `Tools/StandaloneTests/HlslShim.h` | i tipi finti di HLSL per compilare lo shader come C++ |
+| `GeoRender/Public/Weather/GroundHail.h` | la grandine posata (puro): la griglia al suolo |
+| `GeoRender/Public/Weather/GroundShader.inl` | il meteo sul suolo nel materiale (bagnato, ghiaccio, grandine, neve), HLSL e C++ insieme |
+| `GeoRender/.../Weather/GeoHailMap.*` | la griglia su un thread di lavoro, la texture aggiornata sul posto |
+| `Tools/StandaloneTests/geoweather_main.cpp` | i test (sezioni 6–18) |
+| `Tools/StandaloneTests/HlslShim.h` | i tipi finti di HLSL per compilare gli shader come C++ |
 
 ---
 
@@ -419,3 +483,7 @@ nuvole invece stanno in `MPC_GeoWeather`, con quelli della pioggia.
   soglia **misurata**. Li disegna la VolumetricCloud, con uno shader che i
   test compilano come C++; il rumore è **periodico** perché i numeri restino
   piccoli senza salti.
+- Il **ghiaccio** segue la quota come la neve (bagnato che gela, gelicidio);
+  la **grandine** segue il posto: una griglia al suolo, ferma rispetto al
+  terreno, che si sposta solo di celle intere, e arriva al materiale come una
+  texture aggiornata sul posto.

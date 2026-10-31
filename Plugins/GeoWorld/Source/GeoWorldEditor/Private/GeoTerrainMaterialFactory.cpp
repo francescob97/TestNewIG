@@ -475,6 +475,9 @@ namespace
 
 	const TCHAR* WeatherCollectionPackagePath = TEXT("/GeoWorld/Materials/MPC_GeoWeather");
 	const TCHAR* WeatherCollectionAssetName = TEXT("MPC_GeoWeather");
+	/** La texture di riposo delle mappe del meteo (la grandine al suolo, le nuvole): tutto zero, lineare. */
+	const TCHAR* WeatherDefaultTexturePackagePath = TEXT("/GeoWorld/Materials/T_GeoWeatherDefault");
+	const TCHAR* WeatherDefaultTextureAssetName = TEXT("T_GeoWeatherDefault");
 
 	/**
 	 * La collezione del meteo. La scrive UGeoWeatherSubsystem una volta per
@@ -483,6 +486,8 @@ namespace
 	 *
 	 *   GroundWeather = (bagnato 0..1, quota della neve m s.l.m., transizione m, neve 0..1)
 	 *   GroundFrame   = (geoide all'origine m, raggio terrestre m, 0, 0)
+	 *   GroundIce     = (ghiaccio 0..1, sopra che quota m s.l.m., transizione m, 0)
+	 *   GroundHailMap = (centro della mappa della grandine, nord ed est m negli assi di Unreal, lato m, correzione dell'est)
 	 *   PrecipRain/Snow/Hail       = (fase nord, est, su in m, densita' 0..1)
 	 *   PrecipRainVel/SnowVel/HailVel = (velocita' nord, est, su in m/s, dimensione m)
 	 *   PrecipBox     = (scatola nord, est, su in m, luminosita')
@@ -498,6 +503,8 @@ namespace
 		TArray<TPair<FName, FLinearColor>> Wanted;
 		Wanted.Emplace(FName(TEXT("GroundWeather")), FLinearColor(0.0f, 100000.0f, 150.0f, 0.0f));
 		Wanted.Emplace(FName(TEXT("GroundFrame")), FLinearColor(47.0f, 6371000.0f, 0.0f, 0.0f));
+		Wanted.Emplace(FName(TEXT("GroundIce")), FLinearColor(0.0f, 100000.0f, 100.0f, 0.0f));
+		Wanted.Emplace(FName(TEXT("GroundHailMap")), FLinearColor(0.0f, 0.0f, 1.0f, 1.0f));
 		for (const TCHAR* Name : { TEXT("PrecipRain"), TEXT("PrecipSnow"), TEXT("PrecipHail") })
 		{
 			Wanted.Emplace(FName(Name), FLinearColor(0.0f, 0.0f, 0.0f, 0.0f));
@@ -518,31 +525,16 @@ namespace
 
 	/**
 	 * Il suolo sotto il meteo: il colore e la ruvidita' di una superficie
-	 * (terreno o strada) diventano bagnati o innevati.
-	 *
-	 * La QUOTA del pixel: il mondo di Unreal ha l'origine sull'ellissoide (il
-	 * rebase la tiene a quota zero), Z verso l'alto. Allontanandosi la Terra
-	 * scende sotto il piano: h = Z + d^2 / 2R (a 30 km, 70 m). Meno il geoide
-	 * all'origine: la quota sul mare, come la quota neve.
+	 * (terreno o strada) diventano bagnati, ghiacciati, coperti di grandine o
+	 * innevati. Il testo e' Weather/GroundShader.inl, fatto stringa dal
+	 * preprocessore: lo stesso che i test compilano come C++
+	 * (geoweather_main.cpp, sezione 18). Li' c'e' anche il perche' di ogni riga.
 	 */
-	const TCHAR* GroundWeatherCode = TEXT(R"HLSL(
-float3 P = Pos / UuPerMetre;
-float altitude = P.z + dot(P.xy, P.xy) / (2.0 * Frame.y) - Frame.x;
-float transition = max(Ground.z, 1.0);
-// La neve resta sui pendii dolci, scivola via da quelli ripidi.
-float hold = saturate((Normal.z - 0.55) / 0.3);
-float snow = saturate((altitude - Ground.y) / transition + 0.5) * hold * Ground.w;
-// Sulla foto i chiari (prati, campi) si imbiancano prima dei boschi scuri.
-float lum = dot(Colour, float3(0.299, 0.587, 0.114));
-snow = saturate(snow * (0.8 + 0.6 * lum));
-// Bagnato: piu' scuro (l'acqua riempie i pori) e lucido.
-float wet = Ground.x * (1.0 - snow);
-float3 c = Colour * lerp(1.0, 0.55, wet);
-c = lerp(c, float3(0.90, 0.92, 0.95), snow);
-float r = lerp(Rough, min(Rough, 0.18), wet);
-r = lerp(r, 0.6, snow);
-return float4(c, r);
-)HLSL");
+#define GEO_GROUND_SHADER(...) #__VA_ARGS__
+	const char* GroundShaderCode =
+#include "Weather/GroundShader.inl"
+		;
+#undef GEO_GROUND_SHADER
 
 	/**
 	 * Mette il meteo fra un colore (e una ruvidita') e le uscite del
@@ -554,9 +546,12 @@ return float4(c, r);
 		UMaterialParameterCollection* Collection = LoadObject<UMaterialParameterCollection>(nullptr,
 			*FString::Printf(TEXT("%s.%s"), WeatherCollectionPackagePath, WeatherCollectionAssetName), nullptr,
 			LOAD_NoWarn | LOAD_Quiet);
-		if (!Collection)
+		UTexture2D* DefaultTexture = LoadObject<UTexture2D>(nullptr,
+			*FString::Printf(TEXT("%s.%s"), WeatherDefaultTexturePackagePath, WeatherDefaultTextureAssetName), nullptr,
+			LOAD_NoWarn | LOAD_Quiet);
+		if (!Collection || !DefaultTexture)
 		{
-			Report(FString::Printf(TEXT("%s: manca MPC_GeoWeather, niente suolo bagnato ne' neve."), *MaterialName(G)), FColor::Yellow);
+			Report(FString::Printf(TEXT("%s: mancano MPC_GeoWeather o T_GeoWeatherDefault, niente meteo sul suolo."), *MaterialName(G)), FColor::Yellow);
 			ConnectPinToProperty(G, Colour, MP_BaseColor);
 			if (Roughness.Node) { ConnectPinToProperty(G, Roughness, MP_Roughness); }
 			return;
@@ -570,8 +565,14 @@ return float4(c, r);
 		}
 		UMaterialExpressionConstant* UuPerMetre = G.Make<UMaterialExpressionConstant>(X - 300, Y + 300);
 		UMaterialExpressionVertexNormalWS* Normal = G.Make<UMaterialExpressionVertexNormalWS>(X - 300, Y + 400);
+		UMaterialExpressionPixelDepth* Depth = G.Make<UMaterialExpressionPixelDepth>(X - 300, Y + 1050);
+		UMaterialExpressionTextureObjectParameter* Hail = G.Make<UMaterialExpressionTextureObjectParameter>(X - 300, Y + 1150);
 		if (!G.bOk) { return; }
 		UuPerMetre->R = static_cast<float>(GeoWorld::Units::MetersToUu);
+		// La grandine posata (FGeoHailMap): dati, non colori. Lineare, e lineare il riposo.
+		Hail->ParameterName = TEXT("GroundHail");
+		Hail->Texture = DefaultTexture;
+		Hail->SamplerType = SAMPLERTYPE_LinearColor;
 
 		TArray<FNamedPin> Inputs;
 		Inputs.Add(FNamedPin{ TEXT("Colour"), Colour });
@@ -580,8 +581,14 @@ return float4(c, r);
 		Inputs.Add(FNamedPin{ TEXT("Pos"), TruncatedWorldPosition(G, false, X - 300, Y + 500) });
 		Inputs.Add(FNamedPin{ TEXT("Ground"), CollectionParameter(G, Collection, TEXT("GroundWeather"), X - 300, Y + 650) });
 		Inputs.Add(FNamedPin{ TEXT("Frame"), CollectionParameter(G, Collection, TEXT("GroundFrame"), X - 300, Y + 750) });
+		Inputs.Add(FNamedPin{ TEXT("IceState"), CollectionParameter(G, Collection, TEXT("GroundIce"), X - 300, Y + 850) });
+		Inputs.Add(FNamedPin{ TEXT("HailMap"), CollectionParameter(G, Collection, TEXT("GroundHailMap"), X - 300, Y + 950) });
+		// Nel nodo Custom una texture si chiama come l'ingresso ("Hail") e il suo campionatore "HailSampler".
+		Inputs.Add(FNamedPin{ TEXT("Hail"), FPin{ Hail, 0 } });
 		Inputs.Add(FNamedPin{ TEXT("UuPerMetre"), FPin{ UuPerMetre, 0 } });
-		UMaterialExpressionCustom* Weather = MakeCustom(G, TEXT("Meteo sul suolo: bagnato e neve"), GroundWeatherCode,
+		Inputs.Add(FNamedPin{ TEXT("Depth"), FPin{ Depth, 0 } });
+		const FString Code(ANSI_TO_TCHAR(GroundShaderCode));
+		UMaterialExpressionCustom* Weather = MakeCustom(G, TEXT("Meteo sul suolo: bagnato, ghiaccio, grandine, neve"), *Code,
 			CMOT_Float4, Inputs, X, Y);
 		UMaterialExpressionComponentMask* ColourMask = G.Make<UMaterialExpressionComponentMask>(X + 300, Y);
 		UMaterialExpressionComponentMask* RoughMask = G.Make<UMaterialExpressionComponentMask>(X + 300, Y + 150);
@@ -1534,15 +1541,13 @@ return colour * (core * 80.0 + halo * 4.0) * Weight.x * Flash;
 }
 
 // ============================================================================
-//  LE NUVOLE: T_GeoCloudDefault e M_GeoClouds
+//  LE NUVOLE: T_GeoWeatherDefault e M_GeoClouds
 // ============================================================================
 
 namespace
 {
 	const TCHAR* CloudMaterialPackagePath = TEXT("/GeoWorld/Materials/M_GeoClouds");
 	const TCHAR* CloudMaterialAssetName = TEXT("M_GeoClouds");
-	const TCHAR* CloudDefaultTexturePackagePath = TEXT("/GeoWorld/Materials/T_GeoCloudDefault");
-	const TCHAR* CloudDefaultTextureAssetName = TEXT("T_GeoCloudDefault");
 
 	/**
 	 * Il corpo del nodo Custom: il testo di Weather/CloudShader.inl, che il
@@ -1557,10 +1562,14 @@ namespace
 		;
 #undef GEO_CLOUD_SHADER
 
-	/** La mappa meteo di riposo: nessuna nube di pioggia (tutto zero, alfa pieno). */
-	UTexture2D* CreateOrLoadCloudDefaultTexture()
+	/**
+	 * La texture di riposo delle mappe del meteo: tutto zero, alfa pieno. Per
+	 * le nuvole vuol dire nessuna nube di pioggia, per il suolo nessuna
+	 * grandine. Si crea prima di tutti i materiali che la usano.
+	 */
+	UTexture2D* CreateOrLoadWeatherDefaultTexture()
 	{
-		return CreateOrLoadFlatDataTexture(CloudDefaultTexturePackagePath, CloudDefaultTextureAssetName, 0, 0, 0, 255);
+		return CreateOrLoadFlatDataTexture(WeatherDefaultTexturePackagePath, WeatherDefaultTextureAssetName, 0, 0, 0, 255);
 	}
 
 	/**
@@ -1584,11 +1593,11 @@ namespace
 			*FString::Printf(TEXT("%s.%s"), WeatherCollectionPackagePath, WeatherCollectionAssetName), nullptr,
 			LOAD_NoWarn | LOAD_Quiet);
 		UTexture2D* DefaultTexture = LoadObject<UTexture2D>(nullptr,
-			*FString::Printf(TEXT("%s.%s"), CloudDefaultTexturePackagePath, CloudDefaultTextureAssetName), nullptr,
+			*FString::Printf(TEXT("%s.%s"), WeatherDefaultTexturePackagePath, WeatherDefaultTextureAssetName), nullptr,
 			LOAD_NoWarn | LOAD_Quiet);
 		if (!Collection || !DefaultTexture)
 		{
-			Report(TEXT("M_GeoClouds: mancano MPC_GeoWeather o T_GeoCloudDefault."), FColor::Red);
+			Report(TEXT("M_GeoClouds: mancano MPC_GeoWeather o T_GeoWeatherDefault."), FColor::Red);
 			return false;
 		}
 
@@ -1666,6 +1675,7 @@ static FAutoConsoleCommand GeoImageryCreateMaterialCommand(
 		// Il meteo per primo: terreno e strade leggono MPC_GeoWeather (suolo
 		// bagnato, neve). Senza, si costruiscono lo stesso, asciutti.
 		const bool bWeatherCollection = CreateOrUpdateWeatherCollection() != nullptr;
+		const bool bWeatherDefault = CreateOrLoadWeatherDefaultTexture() != nullptr;
 
 		const bool bTerrain = CreateOrRebuildMaterial(MaterialPackagePath, MaterialAssetName, &BuildDrapeGraph);
 		const bool bRoad = CreateOrRebuildMaterial(RoadMaterialPackagePath, RoadMaterialAssetName, &BuildRoadGraph);
@@ -1679,7 +1689,7 @@ static FAutoConsoleCommand GeoImageryCreateMaterialCommand(
 		const bool bPrecipitation = bWeatherCollection
 			&& CreateOrRebuildMaterial(PrecipitationMaterialPackagePath, PrecipitationMaterialAssetName, &BuildPrecipitationGraph);
 		const bool bLightning = CreateOrRebuildMaterial(LightningMaterialPackagePath, LightningMaterialAssetName, &BuildLightningGraph);
-		const bool bClouds = bWeatherCollection && CreateOrLoadCloudDefaultTexture() != nullptr
+		const bool bClouds = bWeatherCollection && bWeatherDefault
 			&& CreateOrRebuildMaterial(CloudMaterialPackagePath, CloudMaterialAssetName, &BuildCloudGraph);
 
 		if (bTerrain && bRoad && bWater && bPrecipitation && bLightning && bClouds)

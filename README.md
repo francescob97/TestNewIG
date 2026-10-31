@@ -48,7 +48,9 @@ Il progetto `TestNewIG` e' un guscio vuoto: tutto il codice vive in
       pioggia in valle e neve in montagna (zero termico e quota neve), grandine
       nei nuclei dei temporali; particelle attorno alla camera, suolo bagnato e
       innevato, visibilità con la nebbia; fulmini con il tuono sintetizzato;
-      nuvole volumetriche (cumuli e nubi di pioggia sopra i rovesci)
+      nuvole volumetriche (cumuli e nubi di pioggia sopra i rovesci);
+      ghiaccio sul suolo (bagnato che gela, gelicidio) e grandine posata in
+      strisce sotto i temporali
       *(`docs/meteo-design.md`, prova:
       `docs/meteo-verifica.md`, per chi impara: `docs/manuale/15-meteo.md`)*
 - [ ] Fase 10 — edifici e monumenti
@@ -96,7 +98,7 @@ cmake --build build
 ./build/georoads_tests       # 80 test  -- strade: formato .gvt, larghezze misurate, ritagli, strade 3D, marciapiedi e incroci
 ./build/geowater_tests Plugins/GeoWorld/Source/GeoTiles/TestData/water_fixture.gwa
                              # 71 test  -- acqua: formato .gwa, scavo, mesh, onde dal vento, texture, il Po vero, mare aperto
-./build/geoweather_tests     # 84 test  -- vento (strato limite, rugosita', rilievi, raffiche), precipitazione (quota neve, rovesci, visibilita', suolo, particelle), fulmini e tuono, nuvole (lo shader compilato come C++)
+./build/geoweather_tests     # 97 test  -- vento (strato limite, rugosita', rilievi, raffiche), precipitazione (quota neve, rovesci, visibilita', suolo, particelle), fulmini e tuono, nuvole e suolo (gli shader compilati come C++), ghiaccio, grandine posata
 
 ./Plugins/GeoWorld/Tools/CheckSourceDiscipline.sh
 python3 Plugins/GeoWorld/Tools/CheckShadowedParameters.py
@@ -110,7 +112,7 @@ le classi di errore di compilazione gia' incontrate su Windows -- shadowing,
 simboli non esportati fra moduli, tipi di comando console inesistenti,
 collisioni da build unity, metodi inesistenti chiamati sulle nostre classi.
 
-487 test C++ in totale, piu' 192 test Python della pipeline.
+500 test C++ in totale, piu' 192 test Python della pipeline.
 
 **Dopo la prima prova su Torino** (materiale, scene Sentinel, prestazioni): `docs/prova-torino.md`.
 **Dopo la seconda** (troppi triangoli, RAM): `docs/prova-torino-2.md`.
