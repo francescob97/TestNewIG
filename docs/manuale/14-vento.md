@@ -129,6 +129,47 @@ sempre lo stesso. Chiunque lo chiede ottiene la stessa raffica:
 - chiunque chiami `GetWindNorthEastUp` (anche da Blueprint): domani gli aerei
   della Fase 7, le nuvole e gli alberi.
 
+## 14.6 Le brezze: i venti che fa il sole
+
+Con il sole (capitolo 18) il vento sa che ora è. Di giorno la terra si scalda
+più dell'acqua, e i pendii al sole più delle valli; di notte la terra si
+raffredda prima. L'aria calda sale, quella fredda scende: nascono le
+**brezze**, che si sommano al vento del tempo che fa.
+
+- **Di mare e di terra.** Sulla costa, nel pomeriggio, il vento viene dal mare
+  (3-6 m/s); di notte, più debole, va verso il mare. La brezza di mare è
+  spessa qualche centinaio di metri e sopra **torna indietro**: un giro
+  chiuso, come una ruota.
+- **Di pendio.** Di giorno l'aria risale i versanti al sole (anabatica); di
+  notte l'aria fredda, più pesante, scivola giù per i pendii in uno strato di
+  pochi metri (catabatica): è il freddo che si raccoglie in fondo alle valli
+  prima dell'alba.
+- **Di valle.** Le stesse cose in grande: di giorno il vento risale la valle
+  verso i monti, di notte scende verso la pianura.
+
+> 💡 **Esempio.** Un giorno d'estate sereno sulla riva ligure: all'alba la
+> brezza di terra; verso le 9 gira; alle 15 la brezza di mare a 10 m fa 3,4
+> m/s, a 300 m 4,4, a 1.100 m torna indietro a 1,6 m/s; a 2.500 m non c'è
+> più. A 40 km nell'entroterra nessuna brezza.
+
+**Il ritardo.** La terra ci mette ore a scaldarsi: la brezza di mare ha il
+massimo verso le 16, non a mezzogiorno. Il modello non segue il sole istante
+per istante: uno **stato** (quanto la terra è più calda dell'acqua) insegue
+la spinta del sole con un tempo proprio, due ore e mezza per il mare. È lo
+stesso schema dell'esposizione dell'occhio: un valore che rincorre un
+obiettivo, e non ci salta sopra.
+
+> ⚠️ **Trappola.** Il tempo del cielo può saltare (`geo.Sky.Time 15:00`). Uno
+> stato che insegue partirebbe dalla mezzanotte di prima, e alle 15 la
+> brezza sarebbe quella di chi si è appena svegliato. Quando il tempo salta,
+> lo stato si ricalcola dalle 36 ore prima: alle 15 la brezza è quella delle
+> 15, come se si fosse passata la giornata lì (il test lo confronta).
+
+**Dove è il mare.** Una mappa di ~100 km attorno alla camera, terra o acqua,
+lisciata su 10 km. Il suo gradiente punta verso l'acqua e la sua grandezza
+dice quanto si è sulla costa: per una costa diritta vale al massimo
+1 / (σ √2π), e diviso per quello dà 1 sulla riva e quasi zero a 30 km.
+
 ---
 
 ## Alternative considerate
@@ -176,6 +217,7 @@ segue il passo della griglia: si vedono da qualunque quota.
 | File | Cosa |
 |---|---|
 | `GeoRender/Public/Weather/WindField.h` | il campo (puro): profilo, rotazione, rilievi, raffiche |
+| `GeoRender/Public/Weather/Breeze.h` | le brezze: lo stato termico, la mappa dell'acqua, mare e terra, pendii, valli |
 | `GeoRender/Public/Weather/Wind.h` | `FWind`: velocità e direzione |
 | `GeoRender/.../Weather/GeoWeatherSubsystem.*` | il campo in Unreal: suolo, acqua, stampe, frecce |
 | `GeoRender/Private/GeoRenderModule.cpp` | i comandi `geo.Weather.*` |
@@ -196,3 +238,7 @@ segue il passo della griglia: si vedono da qualunque quota.
   coerenti nello spazio, con la forza e la scala della norma europea.
 - Il trasporto **si somma** frame per frame: niente salti, come per le onde.
 - Un **seme**, un campo, lo stesso vento per tutti.
+- Le **brezze** (di mare e di terra, di pendio, di valle) vengono dal sole:
+  uno stato termico insegue la sua spinta con il suo ritardo, e ogni brezza
+  si somma al vento con il suo profilo (e la sua corrente di ritorno in alto);
+  il vento forte le spegne.

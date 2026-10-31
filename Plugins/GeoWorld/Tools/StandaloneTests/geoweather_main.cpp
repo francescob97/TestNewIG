@@ -6,10 +6,12 @@
 //  turbolenza (intensita', coerenza, trasporto, continuita'), variabilita',
 //  determinismo. E Weather/Precipitation.h: zero termico e fase per quota,
 //  copertura e trasporto dei rovesci, grandine nei nuclei, visibilita',
-//  velocita' di caduta, suolo bagnato e neve, particelle, mesh.
+//  velocita' di caduta, suolo bagnato e neve, particelle, mesh. E
+//  Weather/Breeze.h: le brezze di mare e di terra, di pendio, di valle.
 // =============================================================================
 
 #include "HlslShim.h"
+#include "Weather/Breeze.h"
 #include "Weather/Clouds.h"
 #include "Weather/GroundHail.h"
 #include "Weather/Lightning.h"
@@ -1353,6 +1355,154 @@ static void TestGroundShader()
 		Fmt("fattore %.3f; senza la correzione il disco si mancherebbe", Travelled.GetEastScale()));
 }
 
+
+// --- Le brezze ------------------------------------------------------------------
+
+/** Un istante UT dall'ora locale italiana d'estate (UT+2) o d'inverno (UT+1). */
+static double LocalTime(int Year, int Month, int Day, double Hours, double OffsetHours)
+{
+	return GeoWorld::Sky::JulianDay(Year, Month, Day + (Hours - OffsetHours) / 24.0);
+}
+
+/** La costa ligure finta: mare a ovest di 7 gradi est, a 44 gradi nord. */
+static constexpr double CoastLat = 44.0, CoastLon = 7.0;
+static double EastOfCoast(double Metres) { return CoastLon + Metres / (111320.0 * std::cos(CoastLat * WindDegToRad)); }
+
+static FBreezeTerrain CoastTerrain(const FWaterMap& Map, double MetresInland)
+{
+	FBreezeTerrain Terrain;
+	Terrain.bOverWater = MetresInland < 0.0;
+	Terrain.bHaveWater = Map.Sample(CoastLat, EastOfCoast(MetresInland), Terrain.WaterFraction, Terrain.WaterGradNorth, Terrain.WaterGradEast);
+	return Terrain;
+}
+
+static void TestBreezes()
+{
+	Section("19. Le brezze: di mare e di terra, di pendio, di valle");
+
+	// Un giorno d'estate sereno sulla costa: lo stato del mare ora per ora.
+	FBreezeClimate Summer;
+	double States[25] = {};
+	for (int Hour = 0; Hour <= 24; ++Hour)
+	{
+		Summer.Advance(LocalTime(2026, 7, 15, Hour, 2.0), CoastLat, CoastLon, 0.0, false);
+		States[Hour] = Summer.Coast();
+	}
+	int PeakHour = 0;
+	for (int Hour = 0; Hour <= 24; ++Hour) { if (States[Hour] > States[PeakHour]) { PeakHour = Hour; } }
+	int Onset = -1;
+	for (int Hour = 5; Hour <= 14; ++Hour) { if (Onset < 0 && States[Hour] > 0.0) { Onset = Hour; } }
+	Check(States[5] < -0.1 && Onset >= 9 && Onset <= 12 && PeakHour >= 15 && PeakHour <= 18 && States[PeakHour] > 0.8 && States[23] < 0.0,
+		"un giorno d'estate: brezza di terra all'alba, quella di mare parte a meta' mattina, massima nel pomeriggio, di terra di notte",
+		Fmt("alle 5 %.2f; parte alle %.0f, massima alle %.0f (%.2f); alle 23 %.2f", States[5], Onset, PeakHour, States[PeakHour]) );
+
+	FBreezeClimate Cloudy, Winter, Jumped;
+	double CloudyPeak = 0.0, WinterPeak = 0.0;
+	for (int Hour = 0; Hour <= 24; ++Hour)
+	{
+		Cloudy.Advance(LocalTime(2026, 7, 15, Hour, 2.0), CoastLat, CoastLon, 0.9, false);
+		Winter.Advance(LocalTime(2026, 1, 15, Hour, 1.0), CoastLat, CoastLon, 0.0, false);
+		CloudyPeak = std::max(CloudyPeak, Cloudy.Coast());
+		WinterPeak = std::max(WinterPeak, Winter.Coast());
+	}
+	Check(CloudyPeak < 0.45 * States[PeakHour] && WinterPeak < 0.85 * States[PeakHour] && WinterPeak > 0.2,
+		"col cielo coperto il sole scalda poco; d'inverno la brezza di mare e' piu' debole che d'estate",
+		Fmt("coperto %.2f, inverno %.2f, estate %.2f", CloudyPeak, WinterPeak, States[PeakHour]));
+	Jumped.Advance(LocalTime(2026, 7, 15, 15.0, 2.0), CoastLat, CoastLon, 0.0, false);
+	Check(std::fabs(Jumped.Coast() - States[15]) < 0.02,
+		"saltare alle 15 (geo.Sky.Time) da' la stessa brezza di averci passato la giornata",
+		Fmt("%.3f contro %.3f", Jumped.Coast(), States[15]));
+
+	// La mappa dell'acqua: mare a ovest.
+	FWaterMap Map;
+	Map.Build(CoastLat, CoastLon, [](double LonDeg, double) { return LonDeg < CoastLon; });
+	const FBreezeTerrain Shore = CoastTerrain(Map, 0.0);
+	const FBreezeTerrain Inland20 = CoastTerrain(Map, 20000.0);
+	const FBreezeTerrain Inland40 = CoastTerrain(Map, 40000.0);
+	Check(Shore.bHaveWater && std::fabs(Shore.WaterFraction - 0.5) < 0.06 && Shore.WaterGradEast < 0.0
+		&& std::fabs(Shore.WaterGradNorth) < 0.05 * std::fabs(Shore.WaterGradEast)
+		&& CoastalShare(Shore) > 0.9 && CoastalShare(Inland20) > 0.05 && CoastalShare(Inland20) < 0.25 && CoastalShare(Inland40) < 0.03,
+		"la mappa dell'acqua: sulla riva meta' acqua, il gradiente punta al mare; la costa si sente fino a 20-30 km",
+		Fmt("riva %.2f (costa %.2f), a 20 km %.2f, a 40 km %.3f", Shore.WaterFraction, CoastalShare(Shore), CoastalShare(Inland20), CoastalShare(Inland40)));
+	FWaterMap Pond;
+	Pond.Build(CoastLat, CoastLon, [](double LonDeg, double LatDeg)
+	{
+		const double North = (LatDeg - CoastLat) * 111132.0, East = (LonDeg - CoastLon) * 111320.0 * std::cos(CoastLat * WindDegToRad);
+		return North * North + East * East < 1500.0 * 1500.0;
+	});
+	FBreezeTerrain PondShore;
+	PondShore.bHaveWater = Pond.Sample(CoastLat, EastOfCoast(1500.0), PondShore.WaterFraction, PondShore.WaterGradNorth, PondShore.WaterGradEast);
+	Check(CoastalShare(PondShore) < 0.2, "un laghetto di 3 km fa poca brezza", Fmt("costa %.2f", CoastalShare(PondShore)));
+
+	// Le brezze nel vento: giornata calma, alle 15 e alle 3.
+	const FBreezeSettings On;
+	const FWindField Calm = MakeField(0.0, 270.0);
+	auto WindAt = [&](const FBreezeClimate& Climate, const FBreezeTerrain& Terrain, double Height, double Reference = 0.0)
+	{
+		FSurfaceInfluence Surface = Flat(Terrain.bOverWater ? RoughnessWater : RoughnessLand);
+		ComputeBreezes(Climate, Terrain, Reference, On, Surface.Breezes);
+		const FWindField Field = MakeField(Reference, 270.0);
+		return Field.Sample(CoastLat, CoastLon, Height, Height, Surface);
+	};
+	FBreezeClimate Afternoon, Night;
+	Afternoon.Advance(LocalTime(2026, 7, 15, 15.0, 2.0), CoastLat, CoastLon, 0.0, false);
+	Night.Advance(LocalTime(2026, 7, 16, 3.0, 2.0), CoastLat, CoastLon, 0.0, false);
+	const FWindSample Low = WindAt(Afternoon, Shore, 10.0), Mid = WindAt(Afternoon, Shore, 300.0);
+	const FWindSample High = WindAt(Afternoon, Shore, 1100.0), Top = WindAt(Afternoon, Shore, 2500.0);
+	Check(std::fabs(AngleDifference(Low.MeanFromDegrees(), 270.0)) < 5.0 && Low.MeanSpeed() > 2.5 && Low.MeanSpeed() < 5.0
+		&& Mid.MeanSpeed() > Low.MeanSpeed() && std::fabs(AngleDifference(High.MeanFromDegrees(), 90.0)) < 5.0
+		&& High.MeanSpeed() < 0.5 * Mid.MeanSpeed() && Top.MeanSpeed() < 0.05,
+		"alle 15 sulla riva: brezza di mare da ovest, piu' forte a 300 m, il ritorno da est a 1100 m, niente a 2500 m",
+		Fmt("%.1f m/s a 10 m, %.1f a 300 m, %.1f (da %.0f) a 1100 m", Low.MeanSpeed(), Mid.MeanSpeed(), High.MeanSpeed(), High.MeanFromDegrees()));
+	const FWindSample LandBreeze = WindAt(Night, Shore, 10.0), Above = WindAt(Night, Shore, 400.0);
+	Check(std::fabs(AngleDifference(LandBreeze.MeanFromDegrees(), 90.0)) < 5.0 && LandBreeze.MeanSpeed() > 0.7
+		&& LandBreeze.MeanSpeed() < 2.5 && Above.MeanSpeed() < 0.05,
+		"alle 3: brezza di terra da est, debole e sottile",
+		Fmt("%.1f m/s a 10 m, %.2f a 400 m", LandBreeze.MeanSpeed(), Above.MeanSpeed()));
+	const FWindSample Far = WindAt(Afternoon, Inland40, 10.0), Offshore = WindAt(Afternoon, CoastTerrain(Map, -6000.0), 10.0);
+	const FWindSample Windy = WindAt(Afternoon, Shore, 10.0, 12.0);
+	const FWindSample Plain = MakeField(12.0, 270.0).Sample(CoastLat, CoastLon, 10.0, 10.0, Flat(RoughnessLand));
+	Check(Far.MeanSpeed() < 0.15 && Offshore.MeanSpeed() > 1.0
+		&& std::fabs(Windy.MeanNorth - Plain.MeanNorth) < 0.01 && std::fabs(Windy.MeanEast - Plain.MeanEast) < 0.01,
+		"a 40 km dentro terra nessuna brezza; al largo si', piu' debole; con 12 m/s di vento le brezze spariscono",
+		Fmt("dentro terra %.2f, a 6 km al largo %.1f m/s", Far.MeanSpeed(), Offshore.MeanSpeed()));
+
+	// I pendii di 30 gradi: uno al sole (sale verso nord, guarda a sud) e uno
+	// a nord, a mezzogiorno vero (13:30 con l'ora legale).
+	FBreezeClimate Morning;
+	Morning.Advance(LocalTime(2026, 7, 15, 13.5, 2.0), CoastLat, CoastLon, 0.0, false);
+	FBreezeTerrain SouthFacing, NorthFacing;
+	SouthFacing.SlopeNorth = 0.6;
+	NorthFacing.SlopeNorth = -0.6;
+	const FWindSample Sunny = WindAt(Morning, SouthFacing, 25.0), Shady = WindAt(Morning, NorthFacing, 25.0);
+	Check(Sunny.MeanNorth > 1.5 && Sunny.MeanSpeed() < 3.5 && Sunny.MeanUp > 0.5 && Shady.MeanSpeed() < 0.7 * Sunny.MeanSpeed(),
+		"a mezzogiorno l'aria risale il versante al sole (e sale con lui); su quello a nord meno",
+		Fmt("al sole %.1f m/s verso nord (%.2f su), in ombra %.1f", Sunny.MeanNorth, Sunny.MeanUp, Shady.MeanSpeed()));
+	FBreezeTerrain Gentle;
+	Gentle.SlopeNorth = 0.25;
+	const FWindSample Drain = WindAt(Night, Gentle, 4.0), DrainHigh = WindAt(Night, Gentle, 100.0);
+	FBreezeTerrain Lake = Gentle;
+	Lake.bOverWater = true;
+	Check(Drain.MeanNorth < -0.8 && Drain.MeanUp < 0.0 && DrainHigh.MeanSpeed() < 0.05 && WindAt(Morning, Lake, 25.0).MeanSpeed() < 0.01,
+		"di notte l'aria fredda scende lungo il pendio, in uno strato di pochi metri; sull'acqua niente pendii",
+		Fmt("%.1f m/s verso sud a 4 m, %.2f a 100 m", -Drain.MeanNorth, DrainHigh.MeanSpeed()));
+
+	// La valle: sale verso est del 5%.
+	FBreezeTerrain Valley;
+	Valley.ValleyEast = 0.05;
+	FBreezeClimate Noon;
+	Noon.Advance(LocalTime(2026, 7, 15, 14.0, 2.0), CoastLat, CoastLon, 0.0, false);
+	const FWindSample UpValley = WindAt(Noon, Valley, 100.0), DownValley = WindAt(Night, Valley, 50.0);
+	Check(UpValley.MeanEast > 1.5 && DownValley.MeanEast < -0.5,
+		"la brezza di valle: di giorno risale verso i monti, di notte scende verso la pianura",
+		Fmt("%.1f m/s su, %.1f m/s giu'", UpValley.MeanEast, -DownValley.MeanEast));
+	FBreezeSettings Off;
+	Off.bEnabled = false;
+	FSurfaceInfluence Quiet = Flat(RoughnessLand);
+	ComputeBreezes(Afternoon, Shore, 0.0, Off, Quiet.Breezes);
+	Check(Calm.Sample(CoastLat, CoastLon, 10.0, 10.0, Quiet).MeanSpeed() == 0.0, "spente: nessuna brezza");
+}
+
 int main()
 {
 	std::printf("=====================================================\n");
@@ -1376,6 +1526,7 @@ int main()
 	TestIce();
 	TestHailGround();
 	TestGroundShader();
+	TestBreezes();
 	std::printf("\n=====================================================\n");
 	std::printf(" RISULTATO: %d passati, %d falliti\n", GPassed, GFailed);
 	std::printf("=====================================================\n");

@@ -23,6 +23,9 @@
 //      pendio ripido c'e' il ridosso (meno vento, piu' turbolenza); dove il
 //      vento sale su un pendio, sale anche lui (vento verticale). Effetti che
 //      si spengono salendo.
+//   3b. LE BREZZE (Weather/Breeze.h): i venti locali che fa il sole (di mare e
+//      di terra, di pendio, di valle), sommati al vento medio, ognuna col
+//      suo profilo in quota.
 //   4. LA TURBOLENZA. Raffiche COERENTI nello spazio: un campo di rumore con
 //      la lunghezza di scala dell'atmosfera vera (decine o centinaia di metri),
 //      TRASPORTATO dal vento medio ("turbolenza congelata", Taylor): la stessa
@@ -87,6 +90,46 @@ namespace GeoWorld::Weather
 	};
 
 	/**
+	 * Una BREZZA: un vento locale fatto dal sole (Weather/Breeze.h), con il
+	 * suo profilo in quota. Il vettore e' quello del massimo; sotto cresce dal
+	 * suolo come un profilo logaritmico, sopra cala fino a DepthM; oltre, se
+	 * Return > 0, torna indietro (il flusso di ritorno della brezza di mare).
+	 */
+	struct FBreezeLayer
+	{
+		double North = 0.0, East = 0.0;
+		/** Quota del massimo sul suolo, m. */
+		double PeakM = 100.0;
+		/** Spessore: a questa quota la brezza e' finita, m. */
+		double DepthM = 500.0;
+		/** Il ritorno in quota, frazione del massimo (fra DepthM e 2,2 DepthM). */
+		double Return = 0.0;
+		/** Pendenza del suolo lungo la brezza (> 0 se sale): vicino al suolo l'aria segue il pendio. */
+		double SlopeUp = 0.0;
+	};
+
+	/** Mare/terra, pendio, valle. */
+	inline constexpr int32_t BreezeLayerCount = 3;
+
+	/** La frazione del massimo della brezza alla quota z sul suolo (negativa nel ritorno). */
+	inline double BreezeProfile(double HeightM, const FBreezeLayer& Layer)
+	{
+		const double Z = HeightM, Depth = std::max(1.0, Layer.DepthM);
+		if (Z <= 0.0) { return 0.0; }
+		if (Z <= Depth)
+		{
+			const double Near = std::min(1.0, std::log(1.0 + Z / 0.1) / std::log(1.0 + std::max(Layer.PeakM, 0.2) / 0.1));
+			const double Ratio = Z / Depth;
+			return Near * (1.0 - Ratio * Ratio);
+		}
+		if (Z < 2.2 * Depth && Layer.Return > 0.0)
+		{
+			return -Layer.Return * std::sin(WindPi * (Z - Depth) / (1.2 * Depth));
+		}
+		return 0.0;
+	}
+
+	/**
 	 * Quello che il suolo fa al vento in un punto: rugosita' e rilievi. Lo
 	 * prepara chi conosce il terreno (ComputeOrography + chi sa dov'e' l'acqua).
 	 */
@@ -101,7 +144,22 @@ namespace GeoWorld::Weather
 		double SlopeAlongWind = 0.0;
 		/** Quota (sul suolo) a cui gli effetti dei rilievi sono scesi a 1/e. */
 		double DecayHeightM = 400.0;
+		/** Le brezze qui (Weather/Breeze.h ComputeBreezes); zero = nessuna. */
+		FBreezeLayer Breezes[BreezeLayerCount];
 	};
+
+	/** La somma delle brezze alla quota z sul suolo (nord, est), m/s. */
+	inline void BreezeAt(const FSurfaceInfluence& Surface, double HeightM, double& OutNorth, double& OutEast)
+	{
+		OutNorth = 0.0;
+		OutEast = 0.0;
+		for (const FBreezeLayer& Layer : Surface.Breezes)
+		{
+			const double Share = BreezeProfile(HeightM, Layer);
+			OutNorth += Layer.North * Share;
+			OutEast += Layer.East * Share;
+		}
+	}
 
 	/** Il vento in un punto. */
 	struct FWindSample
@@ -418,10 +476,23 @@ namespace GeoWorld::Weather
 			const double Factor = 1.0 + (Ground - 1.0) * Decay;
 			MeanNorth *= Factor;
 			MeanEast *= Factor;
+			const double Synoptic = std::sqrt(MeanNorth * MeanNorth + MeanEast * MeanEast);
+			Out.MeanUp = Synoptic * Clamp(Surface.SlopeAlongWind, -0.6, 0.6) * Decay;
+
+			// --- 3b. Le brezze: venti locali del sole, ognuna col suo profilo --------
+			for (const FBreezeLayer& Layer : Surface.Breezes)
+			{
+				const double Share = BreezeProfile(Z, Layer);
+				if (Share == 0.0) { continue; }
+				MeanNorth += Layer.North * Share;
+				MeanEast += Layer.East * Share;
+				// Vicino al suolo la brezza di pendio segue il pendio: sale o scende con lui.
+				Out.MeanUp += std::sqrt(Layer.North * Layer.North + Layer.East * Layer.East) * std::max(Share, 0.0)
+				            * Clamp(Layer.SlopeUp, -0.6, 0.6);
+			}
 			const double Horizontal = std::sqrt(MeanNorth * MeanNorth + MeanEast * MeanEast);
 			Out.MeanNorth = MeanNorth;
 			Out.MeanEast = MeanEast;
-			Out.MeanUp = Horizontal * Clamp(Surface.SlopeAlongWind, -0.6, 0.6) * Decay;
 			Out.North = Out.MeanNorth;
 			Out.East = Out.MeanEast;
 			Out.Up = Out.MeanUp;

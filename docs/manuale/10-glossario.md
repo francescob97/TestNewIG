@@ -16,6 +16,8 @@ Termini in ordine alfabetico. Tra parentesi, il capitolo dove sono spiegati.
 copertura. Le medie fra pixel (mipmap, filtro bilineare) vengono giuste; in alfa normale i
 bordi si scurirebbero. Le strade sono così. (12)
 
+**Anabatica** — la brezza che di giorno sale sui pendii scaldati dal sole: sottile (un centinaio di metri), più forte sui versanti girati verso il sole, con una piccola parte che sale davvero. Di notte il contrario è la catabatica. (14)
+
 **Antenato** — la tile di un livello più grossolano che contiene una tile data.
 L'antenato di livello `La` di `(L, X, Y)` è `(La, X >> d, Y >> d)` con `d = L − La`. (7)
 
@@ -46,11 +48,17 @@ se è visibile. (1, 6)
 **Bowring** — formula approssimata (1976) per passare da ECEF a latitudine,
 longitudine, quota in un passo solo. Qui con una raffinazione. (2)
 
+**Brezza di mare e di terra** — il vento che fa la differenza di temperatura fra la terra e l'acqua: il pomeriggio dal mare verso terra (fino a 6 m/s, alta qualche centinaio di metri, con la corrente di ritorno sopra), la notte più debole dalla terra verso il mare. Solo vicino alla riva: si spegne a una ventina di km. (14)
+
+**Brezza di valle e di monte** — il vento lungo l'asse di una valle: di giorno risale verso le montagne, di notte scende verso la pianura. Più lenta delle brezze di pendio a girare. (14)
+
 **Buffer (di una tile vettoriale)** — quanto le linee escono dalla tile: un ottavo del
 lato. Serve perché una strada larga lungo il bordo compaia anche nella tile accanto. (12)
 
 **Build unity** — Unreal compila più `.cpp` dello stesso modulo come un file solo,
 per fare prima. Fa scontrare le funzioni omonime nei namespace anonimi. (1)
+
+**Catabatica** — l'aria fredda che la notte scivola giù per i pendii: pochi metri di spessore, un paio di m/s, si raccoglie nei fondovalle. (14)
 
 **CDO** (*Class Default Object*) — l'oggetto "prototipo" che Unreal crea per ogni
 classe `UCLASS`, con i valori di default. I file `.ini` vengono applicati a lui. (1)
@@ -344,6 +352,8 @@ toccare il subsystem. (2)
 
 **Stampe della posizione** — il riquadro a destra con latitudine, longitudine, quota (ellissoide, livello del mare, dal suolo) e rotta. Disegnato con `UDebugDrawService`, anche nell'editor. (13)
 
+**Stato termico** — un numero per ogni brezza (fra −1 e 1) che dice quanto la terra è più calda (positivo) o più fredda (negativo) di quello che ha attorno. Insegue la spinta del sole con il suo ritardo: per questo la brezza di mare arriva a metà mattina e cala dopo il tramonto. (14)
+
 **Stop** — un raddoppio (o un dimezzamento) di luce. Fra il sole e la luna piena ci sono 18 stop; l'esposizione automatica ne recupera una decina. (18)
 
 **Strato limite** — i primi ~600 m d'aria, dove il vento sente l'attrito del suolo: cresce con il logaritmo della quota e gira con lei. Sopra c'è il vento di gradiente. (14)
@@ -501,6 +511,7 @@ il primo comando da provare quando non si vede niente. (6)
 | `Public/Water/WaterMesh.h`, `WaveSpectrum.h`, `WaterTextures.h` | acqua: scavo, mesh, onde, texture (puri) |
 | `Public/Water/GeoWaterSubsystem.h` | il subsystem dell'acqua |
 | `Public/Weather/Wind.h`, `WindField.h`, `GeoWeatherSubsystem.h` | il vento (il campo e' puro) |
+| `Public/Weather/Breeze.h` | le brezze (puro): lo stato termico che insegue il sole, la mappa dell'acqua, gli strati da sommare al vento |
 | `Public/Weather/Precipitation.h`, `GeoPrecipitationRenderer.h` | pioggia, neve, grandine: il modello (puro) e il disegno (particelle, suolo, nebbia) |
 | `Public/Weather/Lightning.h`, `GeoLightningRenderer.h` | fulmini e tuono: il modello (puro) e il disegno (canale, luce, suono) |
 | `Public/Weather/Clouds.h`, `CloudShader.inl`, `GeoCloudRenderer.h` | le nuvole: il modello (puro), lo shader (HLSL e C++ insieme) e il disegno (VolumetricCloud, mappa meteo) |

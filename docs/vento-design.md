@@ -133,6 +133,53 @@ un'ora di gioco un metro al secondo in più sposterebbe tutte le raffiche di
 3,6 km in un colpo. Il test lo misura dopo un'ora, a 60 fps: salto massimo
 0,07 m/s fra un frame e l'altro.
 
+### 2.6 Le brezze: i venti del sole
+
+`Weather/Breeze.h`. Il sole scalda la terra più dell'acqua e i pendii al sole
+più delle valli in ombra; di notte la terra si raffredda prima. L'aria calda
+sale, quella fredda scende, e nasce un vento locale che si **somma** a quello
+del tempo che fa, con il suo profilo in quota (`FBreezeLayer` nel campo):
+
+| Brezza | Quando | Quanto | Spessore |
+|---|---|---|---|
+| **di mare** | di giorno, dal mare verso terra | fino a 6 m/s (3,5 a 10 m sulla riva) | ~700 m, poi il **ritorno** in quota (30%) fino a 1,5 km |
+| **di terra** | di notte, da terra verso il mare | fino a 2,5 m/s | ~250 m |
+| **anabatica** (di pendio) | di giorno, su per i versanti al sole | fino a 2,5 m/s, più forte dove il sole batte | ~120 m, massimo a 25 m |
+| **catabatica** (di pendio) | di notte, giù per tutti i pendii | fino a 2,5 m/s | ~40 m, massimo a 4 m |
+| **di valle** | di giorno su per la valle, di notte giù | fino a 3 m/s | ~500 m di giorno, ~250 di notte |
+
+**Il ritardo: lo stato termico.** Le brezze non seguono il sole istante per
+istante. Lo stato (`FBreezeClimate`) insegue la **spinta del sole**
+(l'altezza del sole, meno quanto la tolgono le nuvole e la pioggia, meno il
+raffreddamento della notte) con un tempo proprio: 2,5 ore per il mare, 40
+minuti per i pendii, un'ora e mezza per le valli. In un giorno d'estate
+sereno sulla costa ligure (test): brezza di terra all'alba, quella di mare
+parte verso le 9, è massima verso le 16 (ora legale), di terra di nuovo
+dopo il tramonto. D'inverno la brezza di mare è un quarto di quella
+d'estate; con il cielo coperto un terzo.
+
+**L'orologio è quello del cielo** (`docs/cielo-design.md`): con `geo.Sky.Time
+15:00` la brezza è quella delle 15. Lo stato si integra a passi di 10
+minuti; se il tempo salta (più di tre ore avanti, o indietro) si riparte da
+36 ore prima, e il risultato è lo stesso di averci passato la giornata (il
+test lo controlla).
+
+**Dove è l'acqua.** Una mappa di 96 × 96 km attorno alla camera (48 × 48
+celle da 2 km, rifatta ogni 5 secondi o dopo 8 km), lisciata con una
+gaussiana di 10 km. Il suo **gradiente** punta verso l'acqua; la sua
+grandezza, normalizzata, dice **quanto si è sulla costa**: 1 sulla riva di
+un mare, 0,14 a 20 km, quasi niente a 40 km. Un laghetto di 3 km non fa
+quasi brezza; un lago grande sì (il Garda ha la sua "Ora").
+
+**I pendii e le valli** vengono dalle quote: la pendenza su ±150 m (i
+versanti) e su ±2,5 km (le valli). L'anabatica è più forte sui versanti che
+**guardano il sole** (la normale del pendio contro la direzione del sole: a
+mezzogiorno un versante a sud di 30° ha il 70% di brezza in più di quello a
+nord); vicino al suolo l'aria segue il pendio, cioè sale (o scende).
+
+**Il tempo che fa le spegne**: con 9 m/s di vento di riferimento le brezze
+non ci sono più (a metà, a 4,5 m/s).
+
 ---
 
 ## 3. In Unreal
@@ -146,6 +193,7 @@ il campo, lo fa avanzare a ogni frame e gli dà il suolo:
 | Rilievi attorno | le tile di livello 11 in memoria (o le più vicine) |
 | Acqua o terra | le tile d'acqua in memoria (la riva dell'SDF) e il mare aperto |
 | Quota s.l.m. (per i venti in quota) | il geoide del dataset d'acqua |
+| Le brezze | lo stato termico con l'ora del cielo (`UGeoSkySubsystem`), la mappa dell'acqua (`UGeoWaterSubsystem::IsWaterAt`), le pendenze dalle quote |
 
 Le quote si leggono **senza toccare la cache** (`PeekLoadedTile`): il vento ne
 chiede centinaia per frame e non deve falsare le statistiche né l'ordine LRU.
@@ -155,10 +203,12 @@ Chi lo usa:
 
 - **Le onde**: crescono con il vento **medio sul mare aperto** sotto la camera
   (prima era il vento impostato: ora, con 10 m/s alla stazione, il mare ne ha
-  12,4, come in natura). L'increspatura e la schiuma seguono la **raffica che
+  12,4, come in natura), **più la brezza di mare o di terra** vicino alla
+  costa. L'increspatura e la schiuma seguono la **raffica che
   sta passando** in quel punto.
 - **Le stampe a destra**: `Vento` (alla quota della vista), `Raffiche` (di
-  picco, di adesso, verticale), `A 10 m` (sotto di te, come una stazione).
+  picco, di adesso, verticale), `A 10 m` (sotto di te, come una stazione),
+  `Brezza` (quando se ne sente una: "di mare 3,4 m/s da 270°").
 - **`GetWindNorthEastUp(Posizione)`**, `BlueprintCallable`: (nord, est, su) in
   m/s in qualunque punto del mondo. È l'aggancio per la Fase 7 e per gli attori.
 - **Il debug**: `geo.Weather.Debug 1` (overlay) e `geo.Weather.Arrows <quota>`
@@ -172,6 +222,8 @@ Chi lo usa:
 | `geo.Weather.Variability <0..1>` | il tempo cambia da solo (default 0) |
 | `geo.Weather.WindAloft <quota> <m/s> <gradi>` / `clear` | un vento in quota, s.l.m. |
 | `geo.Weather.Seed <n>` | il seme delle raffiche |
+| `geo.Weather.Breezes 0\|1` | le brezze (default accese) |
+| `geo.Weather.BreezeStrength <0..3>` | quanto sono forti (1 come in natura) |
 | `geo.Weather.Debug 0\|1` | overlay |
 | `geo.Weather.Arrows <quota sul suolo>` | frecce; 0 le spegne |
 
@@ -182,15 +234,18 @@ Chi lo usa:
 
 ## 4. Cosa non fa (ancora)
 
-- **Brezze e venti locali**: brezza di mare e di terra, di monte e di valle,
-  foehn, bora. Sono il prossimo passo naturale: dipendono dall'ora e dalla
-  temperatura, cioè dalla Fase 12 (sole, atmosfera).
+- **Gli altri venti locali**: foehn, bora, i venti di caduta. Le brezze (di
+  mare e di terra, di pendio, di valle) invece ci sono (sezione 2.6).
+- **Le brezze in dettaglio**: niente fronte della brezza di mare (la linea di
+  cumuli dove converge, nell'entroterra), niente rotazione nel pomeriggio (la
+  forza di Coriolis la gira di qualche decina di gradi), e la temperatura
+  vera del mare non c'è (la stagione la dà solo l'altezza del sole).
 - **L'incanalamento nelle valli**: la direzione al suolo non si piega lungo una
   valle stretta. Qui la valle rallenta il vento, non lo gira.
 - **Lo strato limite interno**: sulla riva il vento passa da "mare" a "terra" di
   colpo; in natura si adatta in qualche centinaio di metri.
-- **Le termiche**: niente correnti ascensionali da riscaldamento (serve il
-  sole).
+- **Le termiche**: niente correnti ascensionali da riscaldamento (il sole
+  ora c'è: sono il passo dopo le brezze di pendio).
 - **Dati veri**: il vento si imposta a mano. Il passo successivo naturale è
   leggerlo da un METAR o da un modello (ICON, GFS): il campo ha già il suo
   ingresso, il vento di riferimento più gli strati in quota.
@@ -225,10 +280,11 @@ Chi lo usa:
 | File | Cosa contiene |
 |---|---|
 | `GeoRender/Public/Weather/WindField.h` | il campo: profilo, rotazione, venti in quota, rilievi, turbolenza, variabilità (C++ puro) |
+| `GeoRender/Public/Weather/Breeze.h` | le brezze: lo stato termico, la mappa dell'acqua, mare e terra, pendii, valli (C++ puro) |
 | `GeoRender/Public/Weather/Wind.h` | `FWind`: velocità e direzione, il tipo che si scambiano meteo, onde e stampe |
 | `GeoRender/Public/Weather/GeoWeatherSubsystem.h` / `.cpp` | il campo in Unreal: suolo, acqua, osservatore, overlay, frecce, Blueprint |
 | `GeoRender/Private/GeoRenderModule.cpp` | i comandi `geo.Weather.*` |
 | `GeoRender/Private/GeoPositionHudSubsystem.cpp` | le righe del vento nelle stampe a destra |
 | `GeoRender/Private/Water/GeoWaterSubsystem.cpp` | le onde dal vento sul mare, l'increspatura dalla raffica |
 | `GeoCore/Public/Geo/GeoFormat.h` | `Format::Wind`: "7,2 m/s (14 kt) da 245°" |
-| `Tools/StandaloneTests/geoweather_main.cpp` | 26 test |
+| `Tools/StandaloneTests/geoweather_main.cpp` | i test del vento (sezioni 1-5) e delle brezze (sezione 19), insieme al resto del meteo |

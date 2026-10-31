@@ -1979,6 +1979,41 @@ static FAutoConsoleCommandWithWorldAndArgs GeoWeatherTurbulenceCommand(
 		GeoWeatherConsole::Report(Weather);
 	}));
 
+static FAutoConsoleCommandWithWorldAndArgs GeoWeatherBreezesCommand(
+	TEXT("geo.Weather.Breezes"),
+	TEXT("geo.Weather.Breezes <0|1> - le brezze che fa il sole: di mare (di giorno) e di terra (di notte) sulla costa, di pendio e di valle in montagna. Seguono l'ora del cielo (geo.Sky.Time)."),
+	FConsoleCommandWithWorldAndArgsDelegate::CreateStatic(
+		[](const TArray<FString>& Args, UWorld* World)
+	{
+		UGeoWeatherSubsystem* Weather = GeoWeatherConsole::Get(World);
+		if (!Weather) { return; }
+		const bool bValue = (Args.Num() >= 1) ? (FCString::Atoi(*Args[0]) != 0) : !Weather->AreBreezesEnabled();
+		Weather->SetBreezesEnabled(bValue);
+		GeoTerrainConsole::Report(bValue ? TEXT("Brezze: ON") : TEXT("Brezze: OFF"));
+		const FString Here = Weather->DescribeBreezes(0.2);
+		if (bValue)
+		{
+			GeoTerrainConsole::Report(Here.IsEmpty() ? FString(TEXT("  qui adesso nessuna brezza (troppo vento, cielo coperto, o pianura lontana dall'acqua)"))
+				: FString::Printf(TEXT("  qui a 10 m: %s"), *Here), FColor::White);
+			if (!Weather->HasWaterMap())
+			{
+				GeoTerrainConsole::Report(TEXT("  la brezza di mare vuole il dataset dell'acqua (geo.Water.Open)"), FColor::Yellow);
+			}
+		}
+	}));
+
+static FAutoConsoleCommandWithWorldAndArgs GeoWeatherBreezeStrengthCommand(
+	TEXT("geo.Weather.BreezeStrength"),
+	TEXT("geo.Weather.BreezeStrength <0..3> - quanto sono forti le brezze (1 = come in natura: 3-6 m/s quella di mare, 1-3 quelle di pendio)."),
+	FConsoleCommandWithWorldAndArgsDelegate::CreateStatic(
+		[](const TArray<FString>& Args, UWorld* World)
+	{
+		UGeoWeatherSubsystem* Weather = GeoWeatherConsole::Get(World);
+		if (!Weather) { return; }
+		if (Args.Num() >= 1) { Weather->SetBreezeStrength(FCString::Atod(*Args[0])); }
+		GeoTerrainConsole::Report(FString::Printf(TEXT("Brezze: forza x%.1f"), Weather->GetBreezeStrength()));
+	}));
+
 static FAutoConsoleCommandWithWorldAndArgs GeoWeatherVariabilityCommand(
 	TEXT("geo.Weather.Variability"),
 	TEXT("geo.Weather.Variability <0..1> - il tempo che cambia da solo: velocita' e direzione derivano in decine di minuti."),

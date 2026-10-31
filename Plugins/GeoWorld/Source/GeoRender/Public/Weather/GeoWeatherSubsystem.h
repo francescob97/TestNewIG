@@ -47,6 +47,7 @@
 #include "Subsystems/WorldSubsystem.h"
 
 #include "Georeference/GeoreferenceSnapshot.h"
+#include "Weather/Breeze.h"
 #include "Weather/Clouds.h"
 #include "Weather/GeoCloudRenderer.h"
 #include "Weather/GeoHailMap.h"
@@ -116,6 +117,20 @@ public:
 	void SetWindAloft(double AltitudeM, double SpeedMs, double FromDegrees);
 	void ClearWindAloft();
 	const GeoWorld::Weather::FWindSettings& GetSettings() const { return Field.GetSettings(); }
+
+	// --- Le brezze (Weather/Breeze.h) ----------------------------------------
+
+	/** Le brezze di mare, di pendio e di valle (default si'). Seguono l'orologio del cielo. */
+	void SetBreezesEnabled(bool bInEnabled) { BreezeSettings.bEnabled = bInEnabled; }
+	bool AreBreezesEnabled() const { return BreezeSettings.bEnabled; }
+	/** 1 come in natura, 0 nessuna, fino a 3. */
+	void SetBreezeStrength(double Strength) { BreezeSettings.Strength = FMath::Clamp(Strength, 0.0, 3.0); }
+	double GetBreezeStrength() const { return BreezeSettings.Strength; }
+	const GeoWorld::Weather::FBreezeClimate& GetBreezeClimate() const { return BreezeClimate; }
+	/** La mappa dell'acqua attorno alla camera c'e' (serve il dataset dell'acqua per la brezza di mare). */
+	bool HasWaterMap() const { return WaterMap.IsBuilt(); }
+	/** Le brezze qui sotto a 10 m, in parole ("di mare 3,4 m/s da 270"); vuota se non ce ne sono. */
+	FString DescribeBreezes(double MinSpeedMs = 0.5) const;
 
 	// --- Il vento -----------------------------------------------------------
 
@@ -271,8 +286,10 @@ private:
 	 * suolo e' il mare: il geoide.
 	 */
 	bool TerrainHeightAt(double LonDeg, double LatDeg, bool bFinest, double& OutHeight) const;
-	/** Rugosita' (acqua o terra) e rilievi sotto un punto. */
+	/** Rugosita' (acqua o terra), rilievi e brezze sotto un punto. */
 	GeoWorld::Weather::FSurfaceInfluence SurfaceAt(double LatDeg, double LonDeg, bool& bOutOverWater) const;
+	/** Lo stato termico con l'orologio del cielo, e la mappa dell'acqua attorno alla camera. */
+	void UpdateBreezes();
 	/** N del geoide, se il dataset d'acqua lo porta; 0 altrimenti. */
 	double GeoidAt(double LonDeg, double LatDeg) const;
 	void UpdateObserver();
@@ -291,6 +308,10 @@ private:
 
 	GeoWorld::Weather::FWindField Field;
 	FObserverWind Observer;
+	GeoWorld::Weather::FBreezeSettings BreezeSettings;
+	GeoWorld::Weather::FBreezeClimate BreezeClimate;
+	GeoWorld::Weather::FWaterMap WaterMap;
+	double LastWaterMapClock = -100.0;
 	GeoWorld::Weather::FWind SeaWind{ 5.0, 240.0 };
 	GeoWorld::Weather::FWind SeaGust{ 5.0, 240.0 };
 	bool bShowDebugOverlay = false;

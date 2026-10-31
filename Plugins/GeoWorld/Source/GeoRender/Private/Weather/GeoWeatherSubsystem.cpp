@@ -4,6 +4,7 @@
 #include "Geo/GeoUnits.h"
 #include "Georeference/GeoreferenceSubsystem.h"
 #include "Mesh/TileMesh.h"
+#include "Sky/GeoSkySubsystem.h"
 #include "Streaming/GeoTileStreamingSubsystem.h"
 #include "Terrain/GeoTerrainSubsystem.h"
 #include "Water/GeoWaterSubsystem.h"
@@ -11,6 +12,8 @@
 #include "DrawDebugHelpers.h"
 #include "Engine/Engine.h"
 #include "Engine/World.h"
+#include "HAL/PlatformTime.h"
+#include "Misc/DateTime.h"
 
 using namespace GeoWorld;
 using GeoWorld::Weather::FWind;
@@ -31,6 +34,12 @@ namespace
 	constexpr double VisibilitySeconds = 3.0;
 	/** Koschmieder: visibilita' = 3,912 / estinzione (dove resta il 2% di contrasto). */
 	constexpr double Koschmieder = 3.912;
+	/** La mappa dell'acqua per le brezze: rifatta ogni tanto, o se la camera si allontana dal centro. */
+	constexpr double WaterMapPeriodS = 5.0;
+	constexpr double WaterMapRecentreM = 8000.0;
+	/** I pendii (+-150 m) e le valli (+-2,5 km) per le brezze. */
+	constexpr double BreezeSlopeBaseM = 150.0;
+	constexpr double BreezeValleyBaseM = 2500.0;
 
 	FWind WindOf(double North, double East)
 	{
@@ -268,7 +277,75 @@ FSurfaceInfluence UGeoWeatherSubsystem::SurfaceAt(double LatDeg, double LonDeg, 
 	// L'acqua e' piana: niente vento verticale di pendio (il ridosso di una
 	// scogliera sopravvento invece resta).
 	if (bOutOverWater) { Surface.SlopeAlongWind = 0.0; }
+
+	// Le brezze: la costa dalla mappa dell'acqua, i pendii e le valli dalle quote.
+	if (BreezeSettings.bEnabled && BreezeClimate.IsValid())
+	{
+		Weather::FBreezeTerrain Terrain;
+		Terrain.bOverWater = bOutOverWater;
+		Terrain.bHaveWater = WaterMap.Sample(LatDeg, LonDeg, Terrain.WaterFraction, Terrain.WaterGradNorth, Terrain.WaterGradEast);
+		const double MetresNorth = 111132.0, MetresEast = 111320.0 * FMath::Cos(FMath::DegreesToRadians(LatDeg));
+		auto Rise = [&](double BaseM, double& OutNorth, double& OutEast)
+		{
+			double N1 = 0.0, N0 = 0.0, E1 = 0.0, E0 = 0.0;
+			const bool bKnown = HeightAt(LonDeg, LatDeg + BaseM / MetresNorth, N1) && HeightAt(LonDeg, LatDeg - BaseM / MetresNorth, N0)
+				&& HeightAt(LonDeg + BaseM / MetresEast, LatDeg, E1) && HeightAt(LonDeg - BaseM / MetresEast, LatDeg, E0);
+			OutNorth = bKnown ? (N1 - N0) / (2.0 * BaseM) : 0.0;
+			OutEast = bKnown ? (E1 - E0) / (2.0 * BaseM) : 0.0;
+		};
+		if (!bOutOverWater)
+		{
+			Rise(BreezeSlopeBaseM, Terrain.SlopeNorth, Terrain.SlopeEast);
+			Rise(BreezeValleyBaseM, Terrain.ValleyNorth, Terrain.ValleyEast);
+		}
+		Weather::ComputeBreezes(BreezeClimate, Terrain, Field.ReferenceWind().SpeedMs, BreezeSettings, Surface.Breezes);
+	}
 	return Surface;
+}
+
+void UGeoWeatherSubsystem::UpdateBreezes()
+{
+	if (!BreezeSettings.bEnabled) { return; }
+	UWorld* World = GetWorld();
+	if (!World) { return; }
+	// L'ora: quella del cielo (corre, salta, si ferma con lui); senza, l'orologio.
+	const UGeoSkySubsystem* SkySubsystem = World->GetSubsystem<UGeoSkySubsystem>();
+	const double JdUt = SkySubsystem ? SkySubsystem->GetTimeUt() : FDateTime::UtcNow().GetJulianDay();
+	const double Cover = bCloudsEnabled ? CloudSettings.Cover : 0.0;
+	const bool bRaining = ObserverPrecipitation.AtGround.IsFalling();
+	BreezeClimate.Advance(JdUt, Observer.LatDeg, Observer.LonDeg, Cover, bRaining);
+
+	// La mappa dell'acqua: solo con il dataset dell'acqua (senza, niente brezza di mare).
+	const UGeoWaterSubsystem* Water = World->GetSubsystem<UGeoWaterSubsystem>();
+	if (!Water || !Observer.bValid) { return; }
+	const double Now = FPlatformTime::Seconds();
+	const double MovedM = WaterMap.IsBuilt()
+		? FMath::Sqrt(FMath::Square((Observer.LatDeg - WaterMap.GetCentreLat()) * 111132.0)
+			+ FMath::Square((Observer.LonDeg - WaterMap.GetCentreLon()) * 111320.0 * FMath::Cos(FMath::DegreesToRadians(Observer.LatDeg))))
+		: 0.0;
+	if (Now - LastWaterMapClock < WaterMapPeriodS && MovedM < WaterMapRecentreM) { return; }
+	LastWaterMapClock = Now;
+	WaterMap.Build(Observer.LatDeg, Observer.LonDeg, [Water](double LonDeg, double LatDeg) { return Water->IsWaterAt(LonDeg, LatDeg); });
+}
+
+FString UGeoWeatherSubsystem::DescribeBreezes(double MinSpeedMs) const
+{
+	if (!BreezeSettings.bEnabled || !Observer.bValid) { return FString(); }
+	static const TCHAR* Names[Weather::BreezeLayerCount][2] = {
+		{ TEXT("di mare"), TEXT("di terra") }, { TEXT("di pendio, su"), TEXT("di pendio, giu'") }, { TEXT("di valle, su"), TEXT("di valle, giu'") } };
+	FString Text;
+	for (int32 Index = 0; Index < Weather::BreezeLayerCount; ++Index)
+	{
+		const Weather::FBreezeLayer& Layer = Observer.Surface.Breezes[Index];
+		const double Share = Weather::BreezeProfile(Weather::ReferenceHeightM, Layer);
+		const FWind Breeze = WindOf(Layer.North * Share, Layer.East * Share);
+		if (Breeze.SpeedMs < MinSpeedMs) { continue; }
+		// Quale delle due: la brezza di mare e' quella del giorno, come l'anabatica e quella che risale la valle.
+		const bool bDay = Index == 0 ? BreezeClimate.Coast() > 0.0 : (Index == 1 ? Layer.SlopeUp > 0.0 : BreezeClimate.Valley() > 0.0);
+		if (!Text.IsEmpty()) { Text += TEXT("; "); }
+		Text += FString::Printf(TEXT("%s %s"), Names[Index][bDay ? 0 : 1], *Utf8(Format::Wind(Breeze.SpeedMs, Breeze.FromDegrees)));
+	}
+	return Text;
 }
 
 FWindSample UGeoWeatherSubsystem::SampleWind(double LatDeg, double LonDeg, double HeightM) const
@@ -335,6 +412,7 @@ void UGeoWeatherSubsystem::Tick(float DeltaTime)
 	// le raffiche di chilometri: si avanza al massimo di un secondo.
 	const double Step = FMath::Min(static_cast<double>(DeltaTime), 1.0);
 	Field.Advance(Step, Observer.LatDeg);
+	UpdateBreezes();
 	UpdateObserver();
 	UpdatePrecipitation(Step);
 	UpdateLightning(Step);
@@ -380,6 +458,13 @@ void UGeoWeatherSubsystem::UpdateObserver()
 	SeaWind = Field.SurfaceWind(Observer.LatDeg, Weather::RoughnessWater);
 	FSurfaceInfluence Sea;
 	Sea.RoughnessM = Weather::RoughnessWater;
+	// La brezza di mare (o di terra) soffia anche sull'acqua vicino alla costa: le onde la sentono.
+	Sea.Breezes[0] = Observer.Surface.Breezes[0];
+	const Weather::FBreezeLayer& Coastal = Sea.Breezes[0];
+	const double CoastalShare = Weather::BreezeProfile(Weather::ReferenceHeightM, Coastal);
+	double SeaNorth = 0.0, SeaEast = 0.0;
+	SeaWind.Toward(SeaNorth, SeaEast);
+	SeaWind = WindOf(SeaNorth * SeaWind.SpeedMs + Coastal.North * CoastalShare, SeaEast * SeaWind.SpeedMs + Coastal.East * CoastalShare);
 	const FWindSample Gust = Field.Sample(Observer.LatDeg, Observer.LonDeg, Weather::ReferenceHeightM, Weather::ReferenceHeightM, Sea);
 	SeaGust = WindOf(Gust.North, Gust.East);
 }
@@ -637,6 +722,17 @@ void UGeoWeatherSubsystem::DrawDebugOverlay() const
 	}
 	Line(FColor::White, FString::Printf(TEXT("Sul mare     : %s  (le onde)   raffica adesso %s"),
 		*Utf8(Format::Wind(SeaWind.SpeedMs, SeaWind.FromDegrees)), *Utf8(Format::Wind(SeaGust.SpeedMs, SeaGust.FromDegrees))));
+	if (!BreezeSettings.bEnabled)
+	{
+		Line(FColor::White, TEXT("Brezze       : spente (geo.Weather.Breezes 1)"));
+	}
+	else
+	{
+		Line(FColor::White, FString::Printf(TEXT("Brezze       : mare %+.2f, pendii %+.2f, valli %+.2f (+ di giorno, - di notte); sole a %.0f gradi; forza x%.1f%s"),
+			BreezeClimate.Coast(), BreezeClimate.Slope(), BreezeClimate.Valley(), BreezeClimate.SunAltitudeDeg(), BreezeSettings.Strength,
+			WaterMap.IsBuilt() ? (WaterMap.HasWater() ? TEXT("") : TEXT("; niente acqua entro 50 km"))
+			                   : TEXT("; senza il dataset dell'acqua niente brezza di mare")));
+	}
 
 	if (!Observer.bValid)
 	{
@@ -652,6 +748,8 @@ void UGeoWeatherSubsystem::DrawDebugOverlay() const
 	Line(FColor::Green, FString::Printf(TEXT("A 10 m       : %s, raffiche fino a %s m/s (sigma %.1f, scala %.0f m)"),
 		*Utf8(Format::Wind(Ten.MeanSpeed(), Ten.MeanFromDegrees())), *Utf8(Format::Number(Ten.GustSpeed(), 1)),
 		Ten.SigmaU, Ten.TurbulenceLengthM));
+	const FString Breezes = DescribeBreezes(0.2);
+	if (!Breezes.IsEmpty()) { Line(FColor::Green, FString::Printf(TEXT("Brezze a 10 m: %s"), *Breezes)); }
 	Line(FColor::Green, FString::Printf(TEXT("Qui (%s m)   : %s, adesso %s m/s, verticale %+.2f m/s"),
 		*Utf8(Format::Number(Observer.HeightAboveGroundM, 0)),
 		*Utf8(Format::Wind(AtCamera.MeanSpeed(), AtCamera.MeanFromDegrees())), *Utf8(Format::Number(AtCamera.Speed(), 1)), AtCamera.Up));

@@ -211,8 +211,9 @@ livello si muove. Se si salva il livello, si salva la rotazione del momento
 - Niente pianeti, niente eclissi a schermo (la geometria c'è: i test la
   provano).
 - Le luci delle strade e delle auto non ci sono: solo le finestre.
-- Le brezze (di mare, di valle) che dovevano arrivare "con il sole" restano
-  da fare: il vento non sa ancora che ora è.
+- Le brezze (di mare e di terra, di pendio, di valle) sono arrivate "con il
+  sole": il vento legge l'orologio di questo cielo (`docs/vento-design.md`,
+  sezione 2.6).
 
 ## 8. Alternative considerate
 

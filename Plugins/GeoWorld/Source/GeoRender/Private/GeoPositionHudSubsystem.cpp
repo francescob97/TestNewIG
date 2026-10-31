@@ -157,6 +157,9 @@ void UGeoPositionHudSubsystem::Draw(UCanvas* Canvas, APlayerController* /*Contro
 		const Weather::FWindSample Surface = WeatherSubsystem->SampleWind(LatDeg, LonDeg,
 			(GroundHeightAt(LonDeg, LatDeg, Ground) ? Ground : Here.HeightM) + Weather::ReferenceHeightM);
 		Add(TEXT("A 10 m"), Format::Wind(Surface.MeanSpeed(), Surface.MeanFromDegrees()));
+		// Le brezze qui sotto, se si sentono: di mare, di pendio, di valle.
+		const FString Breezes = WeatherSubsystem->DescribeBreezes();
+		if (!Breezes.IsEmpty()) { Add(TEXT("Brezza"), std::string(TCHAR_TO_UTF8(*Breezes))); }
 
 		// Il tempo che fa qui: cosa cade (alla quota della vista), la
 		// temperatura e lo zero termico, quanto si vede, il suolo.

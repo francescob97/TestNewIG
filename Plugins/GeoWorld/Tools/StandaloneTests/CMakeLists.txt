@@ -121,7 +121,7 @@ else()
 endif()
 
 add_executable(geoweather_tests geoweather_main.cpp)
-target_include_directories(geoweather_tests PRIVATE ${GEORENDER_DIR}/Public)
+target_include_directories(geoweather_tests PRIVATE ${GEORENDER_DIR}/Public ${GEOCORE_DIR}/Public)
 
 if (MSVC)
 	target_compile_options(geoweather_tests PRIVATE /W4)

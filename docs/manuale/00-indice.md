@@ -50,7 +50,7 @@ Due convenzioni tipografiche:
 | 11 | `11-residenza.md` | Dopo le sei fasi — Cosa tenere pronto: posizione, velocità, mesh nascoste |
 | 12 | `12-strade.md` | Fase 8 — Strade, ferrovie e piste: i dati vettoriali |
 | 13 | `13-acqua.md` | Fase 9 — L'acqua, il vento, e le stampe della posizione; mari e oceani |
-| 14 | `14-vento.md` | Il vento: da un numero a un campo (strato limite, rilievi, raffiche) |
+| 14 | `14-vento.md` | Il vento: da un numero a un campo (strato limite, rilievi, raffiche, le brezze dal sole) |
 | 15 | `15-meteo.md` | Il meteo: pioggia, neve, grandine (quota neve, visibilità, suolo, particelle), fulmini e tuono, nuvole, ghiaccio e grandine sul terreno |
 | 16 | `16-vegetazione.md` | Fase 11 — La vegetazione: alberi e arbusti dalla copertura del suolo, una griglia fissa nel mondo, forme fatte da codice, celle e bande attorno alla camera |
 | 17 | `17-edifici.md` | Fase 10 — Gli edifici: sagome e altezze da OpenStreetMap, dalla sagoma al solido (cortili, tetti), finestre disegnate dal materiale, i monumenti da una libreria |

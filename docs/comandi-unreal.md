@@ -4,7 +4,7 @@
 > Non modificarlo a mano: i controlli statici (`CheckSourceDiscipline.sh`, regola 7)
 > dicono quando e' indietro. In Unreal lo stesso elenco lo da' `geo.Help`.
 
-**139 comandi** in 12 gruppi.
+**141 comandi** in 12 gruppi.
 
 ## Come si usano
 
@@ -50,7 +50,7 @@
 - [Le ortofoto](#le-ortofoto) — `geo.Imagery.*`, 8 comandi
 - [Strade, ferrovie, piste](#strade-ferrovie-piste) — `geo.Roads.*`, 11 comandi
 - [L'acqua](#lacqua) — `geo.Water.*`, 5 comandi
-- [Il meteo](#il-meteo) — `geo.Weather.*`, 24 comandi
+- [Il meteo](#il-meteo) — `geo.Weather.*`, 26 comandi
 - [La vegetazione](#la-vegetazione) — `geo.Vegetation.*`, 12 comandi
 - [Gli edifici](#gli-edifici) — `geo.Buildings.*`, 9 comandi
 - [Il cielo](#il-cielo) — `geo.Sky.*`, 14 comandi
@@ -191,6 +191,8 @@ Vento, pioggia, neve, grandine, fulmini e tuono.
 |---|---|
 | `geo.Weather.Wind <m/s> [gradi da cui soffia] [turbolenza 0..2]` | il vento di riferimento: 10 m su un prato, come un METAR. Senza argomenti dice quello attuale. |
 | `geo.Weather.Turbulence <0..2>` | le raffiche: 0 aria liscia, 1 l'atmosfera vera, 2 il doppio. |
+| `geo.Weather.Breezes <0\|1>` | le brezze che fa il sole: di mare (di giorno) e di terra (di notte) sulla costa, di pendio e di valle in montagna. Seguono l'ora del cielo (geo.Sky.Time). |
+| `geo.Weather.BreezeStrength <0..3>` | quanto sono forti le brezze (1 = come in natura: 3-6 m/s quella di mare, 1-3 quelle di pendio). |
 | `geo.Weather.Variability <0..1>` | il tempo che cambia da solo: velocita' e direzione derivano in decine di minuti. |
 | `geo.Weather.WindAloft <quota s.l.m. m> <m/s> <gradi> \| clear` | un vento in quota (sopra lo strato limite il vento lo segue). |
 | `geo.Weather.Seed <n>` | il seme delle raffiche: stesso seme, stesse raffiche negli stessi punti. |
@@ -298,7 +300,7 @@ Non sono di GeoWorld, ma la documentazione li usa spesso.
 | File | Comandi |
 |---|---|
 | `Plugins/GeoWorld/Source/GeoCore/Private/GeoCoreModule.cpp` | 10 |
-| `Plugins/GeoWorld/Source/GeoRender/Private/GeoRenderModule.cpp` | 117 |
+| `Plugins/GeoWorld/Source/GeoRender/Private/GeoRenderModule.cpp` | 119 |
 | `Plugins/GeoWorld/Source/GeoTiles/Private/GeoTilesModule.cpp` | 10 |
 | `Plugins/GeoWorld/Source/GeoWorldEditor/Private/GeoTerrainMaterialFactory.cpp` | 1 |
 | `Plugins/GeoWorld/Source/GeoWorldEditor/Private/GeoVegetationModelFactory.cpp` | 1 |

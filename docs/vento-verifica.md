@@ -3,7 +3,8 @@
 > Le decisioni sono in `docs/vento-design.md`; il racconto per chi impara in
 > `docs/manuale/14-vento.md`.
 
-**Cosa è già provato qui, senza Unreal** (`geoweather_tests`, 26 test):
+**Cosa è già provato qui, senza Unreal** (`geoweather_tests`, i test del
+vento e, nella sezione 19, quelli delle brezze):
 
 - profilo e rugosità: a 10 m sul prato esattamente il vento impostato; sul mare
   12,4 m/s, in campagna 9,0, in città 6,4 (con 10 m/s alla stazione); cresce
@@ -19,7 +20,15 @@
   nessun salto fra un frame e l'altro dopo un'ora con la variabilità accesa;
 - la variabilità (in un giorno da 4,7 a 15,3 m/s, ±40°, mai più di 0,9 m/s al
   minuto), il determinismo (stesso seme, stesso vento), le impostazioni fuori
-  scala riportate dentro.
+  scala riportate dentro;
+- le brezze: un giorno d'estate sulla costa (di terra all'alba, di mare dalle
+  9, massima verso le 16, di terra dopo il tramonto), coperto e inverno più
+  deboli, il salto d'ora uguale alla giornata intera; la mappa dell'acqua (la
+  costa si sente fino a 20-30 km, un laghetto quasi niente); alle 15 sulla riva
+  3,4 m/s a 10 m, 4,4 a 300 m, il ritorno a 1100 m, niente a 2500 m; di notte
+  1,6 m/s da terra, sottile; al largo sì, a 40 km dentro terra no, con 12 m/s
+  di vento sparite; l'anabatica sul versante al sole (e su quello a nord meno),
+  la catabatica di notte in pochi metri, la brezza di valle su e giù.
 
 **Cosa non ho potuto provare:** la compilazione in Unreal, le frecce e le
 stampe a schermo. I controlli statici (sezione 4 di `docs/consegna.md`) sono
@@ -101,6 +110,25 @@ geo.Weather.WindAloft 6000 40 300
   va verso 25 m/s da 290° a 3000 m s.l.m., poi verso 40 m/s a 6000 m.
   `geo.Weather.WindAloft clear` li toglie.
 
+## 5b. Le brezze
+
+Le brezze seguono l'**ora del cielo** (`docs/cielo-verifica.md`). Con il vento
+calmo (`geo.Weather.Wind 1`) e il cielo sereno (`geo.Weather.Clear`, niente
+nuvole: `geo.Weather.Clouds 0`):
+
+| # | Prova | Atteso | Se no |
+|---|---|---|---|
+| a | Sulla costa ligure (terreno e acqua aperti), `geo.Sky.Time 15:00 2026-07-15`, `geo.Weather.Debug 1` | riga "Brezze": mare vicino a +0,9; "Brezze a 10 m: di mare 3-4 m/s" dal mare verso terra; nelle stampe a destra la riga "Brezza" | "senza il dataset dell'acqua": `geo.Water.Open`; mare a 0: guarda l'ora (il cielo è acceso?) |
+| b | `geo.Weather.Arrows 300` | le frecce corrono dal mare verso l'entroterra, più forti sulla costa, deboli a 30 km | |
+| c | `geo.Weather.Arrows 1100` | il ritorno: frecce deboli verso il mare | |
+| d | `geo.Sky.Time 03:00` | "di terra 1-2 m/s", da terra verso il mare | |
+| e | `geo.Sky.Time 09:00`, poi `geo.Sky.Speed 600` | la brezza di terra cala, poi gira e cresce verso il pomeriggio | |
+| f | Su un versante al sole in montagna, `geo.Sky.Time 13:00`, `geo.Weather.Arrows 20` | frecce su per il pendio, più forti sui versanti a sud | |
+| g | Stesso posto, `geo.Sky.Time 02:00`, `geo.Weather.Arrows 5` | frecce giù per tutti i pendii; a 100 m niente | |
+| h | `geo.Weather.Wind 12` | le brezze spariscono: le frecce sono il vento del tempo | |
+| i | Sul mare vicino alla costa, alle 15 | il mare un po' più mosso che a mezzanotte (le onde sentono la brezza) | |
+| j | `geo.Weather.Breezes 0` | tutto come prima delle brezze | |
+
 ## 6. Se qualcosa non va
 
 | Sintomo | Causa probabile | Cosa fare |
@@ -112,3 +140,5 @@ geo.Weather.WindAloft 6000 40 300
 | Le frecce non si vedono | sono a 50 m dal suolo e tu sei a 10 km | `geo.Weather.Arrows 1000` |
 | Il mare ha onde più grandi di prima con lo stesso comando | voluto: le onde seguono il vento **sul mare**, più forte di quello della stazione | `geo.Weather.Wind 8` per avere il mare di prima con 10 |
 | Il terzo argomento di `geo.Weather.Wind` fa "troppo" | ora è la turbolenza (1 = normale), prima erano le raffiche 0..1 | `geo.Weather.Turbulence 1` |
+| Con il vento a 0 c'è comunque un vento di qualche m/s | sono le brezze (lo dice la riga "Brezza") | `geo.Weather.Breezes 0` per la calma piatta |
+| La brezza di mare non c'è mai | manca il dataset dell'acqua, o l'acqua è a più di 40 km | l'overlay lo dice ("senza il dataset dell'acqua", "niente acqua entro 50 km") |
