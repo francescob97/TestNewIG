@@ -130,9 +130,37 @@ versione vecchia di `TileSelector.h` trova `PriorityFromError`.
 
 ### `CheckUnityCollisions.py`
 
-Cerca funzioni con lo stesso nome in namespace anonimi di `.cpp` diversi dello
-stesso modulo: la build unity le farebbe scontrare (capitolo 1.11). Nato da
-`C2084: PackKey already has a body`.
+La build unity (capitolo 1.11) incolla più `.cpp` dello stesso modulo in uno
+solo. Il controllo cerca le quattro trappole che ne vengono, tutte già
+successe:
+
+1. **funzioni, costanti e tipi** con lo stesso nome in namespace anonimi di
+   `.cpp` diversi: si scontrano (`C2084: PackKey already has a body`);
+2. un **parametro o una variabile** che ha il nome di una cosa di file di un
+   altro `.cpp`: la nasconde (`C4459`, `MinSpeedMs` di `GeoFlyPawn.cpp`). Per
+   non urlare al lupo distingue gli scope: un membro di classe o una costante
+   di namespace con lo stesso nome non nascondono niente;
+3. un **namespace nostro** usato con `::` senza un include che lo dichiari
+   (anche indirettamente): compila solo finché un altro `.cpp` dello stesso
+   blocco lo include prima (`C2653: 'SharedMemory'`);
+4. lo stesso per i **tipi del plugin** fuori dai namespace (le classi Unreal,
+   `FGeoLoadedModel`...): basta una dichiarazione in avanti.
+
+Legge il codice con un piccolo scanner che toglie commenti e stringhe in una
+passata sola (anche le stringhe grezze `R"(...)"` con l'HLSL dei materiali):
+la prima versione toglieva prima i `/* */` e poi i `//`, e un commento come
+`// (Models/*.h)` apriva un blocco finto che inghiottiva il codice. Provato
+rimettendo i tre errori veri: li trova alla stessa riga di MSVC.
+
+### `CheckEngineMacroNames.py`
+
+Unreal definisce `PI`, `DELTA`, `SMALL_NUMBER`, `check`, `TEXT`... come macro;
+`windows.h` `near`, `far`, `small`, `IN`, `OUT`, `ERROR`, e i nomi delle sue
+funzioni A/W (`CreateFile`, `DrawText`...). Qui sono nomi qualsiasi; nel
+motore il preprocessore li sostituisce prima del compilatore (`size_t PI = 0`
+diventa `size_t (3.14f) = 0`: `C2106`). Nello strato puro non devono comparire
+affatto; nel codice Unreal si possono usare, non dichiarare. È la regola 8 di
+`CheckSourceDiscipline.sh` (la 9 lancia `CheckUnityCollisions.py`).
 
 ### `CheckOwnApiCalls.py`
 
@@ -241,7 +269,8 @@ trovato.** Il capitolo 9 li racconta tutti.
 | `Tools/CheckSourceDiscipline.sh` | le cinque regole |
 | `Tools/CheckShadowedParameters.py` | regola 2 |
 | `Tools/CheckModuleExports.py` | regola 3 |
-| `Tools/CheckUnityCollisions.py` | collisioni da build unity |
+| `Tools/CheckUnityCollisions.py` | la build unity: collisioni, globali nascosti, include mancanti |
+| `Tools/CheckEngineMacroNames.py` | nomi che sono macro di Unreal o di windows.h |
 | `Tools/CheckOwnApiCalls.py` | metodi inesistenti |
 | `GeoCore/Private/Tests/GeoCoreTests.cpp` | test di GeoCore come *Automation Test* di Unreal |
 | `Pipeline/tests/` | i test Python |
@@ -260,6 +289,7 @@ opzioni di compilazione.
 Plugins\GeoWorld\Tools\CheckSourceDiscipline.sh
 python Plugins\GeoWorld\Tools\CheckUnityCollisions.py
 python Plugins\GeoWorld\Tools\CheckOwnApiCalls.py
+python Plugins\GeoWorld\Tools\CheckEngineMacroNames.py
 ```
 
 (Lo script `.sh` serve bash: su Windows, Git Bash.)

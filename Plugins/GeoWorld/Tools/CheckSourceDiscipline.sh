@@ -174,6 +174,26 @@ if ! python3 "$(dirname "${BASH_SOURCE[0]}")/ListConsoleCommands.py" --check; th
 fi
 
 echo
+echo "== Regola 8: nessun nome che in Unreal o in windows.h e' una macro =="
+# PI, DELTA, check, TEXT, near, far...: qui sono nomi, nel motore il
+# preprocessore li sostituisce (GltfReader.h: "size_t PI = 0" diventava
+# "size_t (3.14f) = 0", C2106).
+if ! python3 "$(dirname "${BASH_SOURCE[0]}")/CheckEngineMacroNames.py"; then
+	FAILURES=$((FAILURES + 1))
+fi
+
+echo
+echo "== Regola 9: la build unity (collisioni, nomi globali nascosti, include mancanti) =="
+UNITY_LOG="$(mktemp)"
+if ! python3 "$(dirname "${BASH_SOURCE[0]}")/CheckUnityCollisions.py" > "$UNITY_LOG" 2>&1; then
+	sed 's/^/  /' "$UNITY_LOG"
+	FAILURES=$((FAILURES + 1))
+else
+	echo "  ok - $(tail -1 "$UNITY_LOG" | tr 'A-Z' 'a-z')"
+fi
+rm -f "$UNITY_LOG"
+
+echo
 if [ "$FAILURES" -eq 0 ]; then
 	echo "TUTTI I CONTROLLI SUPERATI"
 	exit 0

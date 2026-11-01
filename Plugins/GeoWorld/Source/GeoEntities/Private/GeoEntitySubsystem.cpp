@@ -7,6 +7,7 @@
 #include "Geo/GeoUnits.h"
 #include "Georeference/GeoPlaces.h"
 #include "Georeference/GeoreferenceSubsystem.h"
+#include "Entities/SharedMemoryFormat.h"
 #include "ModelLibrary/GeoModelLibrary.h"
 #include "Models/ModelLoader.h"
 #include "Sources/GeoSharedMemorySource.h"
@@ -177,7 +178,7 @@ TStatId UGeoEntitySubsystem::GetStatId() const
 
 bool UGeoEntitySubsystem::ListenSharedMemory(const FString& MemoryName, FString& OutError)
 {
-	const FString Name = MemoryName.IsEmpty() ? FString(UTF8_TO_TCHAR(SharedMemory::Name)) : MemoryName;
+	const FString Name = MemoryName.IsEmpty() ? FString(UTF8_TO_TCHAR(GeoWorld::Entities::SharedMemory::Name)) : MemoryName;
 	for (const TUniquePtr<IGeoEntitySource>& Source : Sources)
 	{
 		if (Source->GetAddress() == Name) { return true; }

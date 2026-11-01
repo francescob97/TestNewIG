@@ -64,6 +64,9 @@ gia' incontrati e corretti, per riconoscerli se tornano:
 | `ModuleNotFoundError: No module named 'PIL'` lanciando un comando Python | manca Pillow, che serve solo alle ortofoto. Con `geoworld` non succede (c'e' in `environment.yml`); con un ambiente conda fatto a mano: `conda install -c conda-forge pillow` |
 | `C2084: function 'X' already has a body` su una funzione in un namespace anonimo | **build unity**: Unreal incolla piu' .cpp dello stesso modulo in una sola unita' di traduzione, e due namespace anonimi diventano lo stesso namespace. Non rinominare: metti la funzione in un header condiviso. Lo intercetta `Tools/CheckUnityCollisions.py` |
 | `C2039: 'X' is not a member of Y` su una classe nostra | nome di metodo sbagliato. Lo intercetta `Tools/CheckOwnApiCalls.py`, che suggerisce anche il nome giusto |
+| `C2106: '=': left operand must be l-value`, `C2105: '++' needs l-value` su una riga che sembra giusta | un nome che in Unreal e' una **macro**: `size_t PI = 0` diventa `size_t (3.14f) = 0` (successo in `GltfReader.h`). Anche `DELTA`, `SMALL_NUMBER`, `check`, `TEXT`, e da `windows.h` `near`, `far`, `small`, `IN`, `OUT`... Lo intercetta `Tools/CheckEngineMacroNames.py` (regola 8 di `CheckSourceDiscipline.sh`) |
+| `C4459: declaration of 'X' hides global declaration` | **build unity**: un nome di file (namespace anonimo) di un altro `.cpp` dello stesso blocco diventa globale, e un parametro con lo stesso nome lo nasconde (successo con `MinSpeedMs` di `GeoFlyPawn.cpp`). Rinomina il parametro. Lo intercetta `Tools/CheckUnityCollisions.py` |
+| `C2653: 'X': is not a class or namespace name` in un file che nessuno ha toccato | **build unity**: il file usava un namespace (o un tipo) senza includerne l'header, e compilava solo perche' un altro `.cpp` dello stesso blocco lo includeva prima; un file nuovo nel modulo ha cambiato i blocchi (successo con `SharedMemory::Name`). Includi l'header nel file che lo usa. Lo intercetta `Tools/CheckUnityCollisions.py` |
 | `missing type specifier` su una riga `static FAutoConsoleCommand...` | il tipo non esiste. **`FAutoConsoleCommandWithArgs` NON esiste**: i validi sono `FAutoConsoleCommand` (che accetta anche un delegato con argomenti), `...WithWorld`, `...WithWorldAndArgs`, `...WithOutputDevice`, `...WithArgsAndOutputDevice`, `...WithWorldArgsAndOutputDevice`. Lo intercetta la regola 5 di `CheckSourceDiscipline.sh` |
 | `unresolved external symbol` su una funzione dello strato puro | in Unreal ogni modulo e' una DLL: un simbolo definito in un `.cpp` non e' visibile fuori se non esportato. **Lo strato puro e' header-only**, appunto per non doverlo esportare. Lo intercetta `Tools/CheckModuleExports.py` |
 | `C2664: ... cannot convert argument 1 from 'const wchar_t *' to '...TCheckedFormatStringPrivate...'` su un `FString::Printf` | da UE 5.5 il formato di `Printf` si controlla in compilazione e deve essere un letterale `TEXT("...")`: niente `bCond ? TEXT("a") : TEXT("b")` come formato. Successo con `M_GeoRoad`. Lo intercetta la regola 6 di `CheckSourceDiscipline.sh` |
@@ -472,7 +475,8 @@ Plugins/GeoWorld/Source/
   Tools/CheckSourceDiscipline.sh     7 regole di disciplina
   Tools/CheckShadowedParameters.py   parametri che nascondono membri
   Tools/CheckModuleExports.py        simboli invisibili fra moduli (DLL)
-  Tools/CheckUnityCollisions.py      nomi che la build unity farebbe scontrare
+  Tools/CheckUnityCollisions.py      la build unity: nomi che si scontrano, globali nascosti, include mancanti
+  Tools/CheckEngineMacroNames.py     nomi che in Unreal o in windows.h sono macro (PI, check, near...)
   Tools/CheckOwnApiCalls.py          metodi inesistenti sulle nostre classi
   Tools/ListConsoleCommands.py       docs/comandi-unreal.md dai comandi nel codice
 

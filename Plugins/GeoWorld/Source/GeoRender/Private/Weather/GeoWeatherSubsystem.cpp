@@ -328,7 +328,7 @@ void UGeoWeatherSubsystem::UpdateBreezes()
 	WaterMap.Build(Observer.LatDeg, Observer.LonDeg, [Water](double LonDeg, double LatDeg) { return Water->IsWaterAt(LonDeg, LatDeg); });
 }
 
-FString UGeoWeatherSubsystem::DescribeBreezes(double MinSpeedMs) const
+FString UGeoWeatherSubsystem::DescribeBreezes(double MinimumSpeedMs) const
 {
 	if (!BreezeSettings.bEnabled || !Observer.bValid) { return FString(); }
 	static const TCHAR* Names[Weather::BreezeLayerCount][2] = {
@@ -339,7 +339,7 @@ FString UGeoWeatherSubsystem::DescribeBreezes(double MinSpeedMs) const
 		const Weather::FBreezeLayer& Layer = Observer.Surface.Breezes[Index];
 		const double Share = Weather::BreezeProfile(Weather::ReferenceHeightM, Layer);
 		const FWind Breeze = WindOf(Layer.North * Share, Layer.East * Share);
-		if (Breeze.SpeedMs < MinSpeedMs) { continue; }
+		if (Breeze.SpeedMs < MinimumSpeedMs) { continue; }
 		// Quale delle due: la brezza di mare e' quella del giorno, come l'anabatica e quella che risale la valle.
 		const bool bDay = Index == 0 ? BreezeClimate.Coast() > 0.0 : (Index == 1 ? Layer.SlopeUp > 0.0 : BreezeClimate.Valley() > 0.0);
 		if (!Text.IsEmpty()) { Text += TEXT("; "); }

@@ -118,6 +118,9 @@ e organizza il codice.
 | `Detail::PriorityFromError` definita in un header senza `inline` | mai esploso, ma due `.cpp` fuori dallo stesso blocco unity avrebbero dato `LNK2005`: ora lo sorveglia la regola 3 di `CheckModuleExports.py` |
 | parametro `bEnabled` che nasconde il campo `bEnabled` | lo **shadowing** in Unreal è un errore, non un avviso |
 | `cannot open source file` su file appena aggiunti | bisogna **rigenerare i file di progetto** |
+| `C2106` su `for (size_t PI = 0; ...)` in un header puro | `PI` è una **macro** di Unreal: il preprocessore la sostituisce prima del compilatore. Lo strato puro si compila anche qui, dove `PI` è un nome qualsiasi: ora lo sorveglia `CheckEngineMacroNames.py` |
+| `C4459: 'MinSpeedMs' hides global declaration` | nella **build unity** la costante di file di un altro `.cpp` diventa globale per tutto il blocco |
+| `C2653: 'SharedMemory' is not a class or namespace name` in un file non toccato | il file contava su un include fatto da un **altro** `.cpp` dello stesso blocco unity; un file nuovo ha rimescolato i blocchi. Ogni file include quello che usa: lo sorveglia `CheckUnityCollisions.py` |
 | `C4458` su una `double Ground` locale, dopo aver aggiunto un membro `Ground` | anche una **variabile locale** non può avere il nome di un membro: ora `CheckShadowedParameters.py` guarda anche i `.cpp`, e i test standalone compilano con `-Werror=shadow` |
 | due "Teletrasporto riconosciuto" di fila, lag e terreno che lampeggia, in Play | la camera del `PlayerCameraManager` è una **cache aggiornata a fine frame**: subito dopo un rebase era nelle coordinate vecchie (`docs/residenza-design.md`, "Il teletrasporto") |
 

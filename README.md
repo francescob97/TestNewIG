@@ -186,13 +186,16 @@ cmake --build build
 python3 Plugins/GeoWorld/Tools/CheckShadowedParameters.py
 python3 Plugins/GeoWorld/Tools/CheckModuleExports.py
 python3 Plugins/GeoWorld/Tools/CheckUnityCollisions.py
+python3 Plugins/GeoWorld/Tools/CheckEngineMacroNames.py
 python3 Plugins/GeoWorld/Tools/CheckOwnApiCalls.py
 ```
 
 I controlli statici esistono perche' qui non c'e' Unreal: intercettano in locale
 le classi di errore di compilazione gia' incontrate su Windows -- shadowing,
 simboli non esportati fra moduli, tipi di comando console inesistenti,
-collisioni da build unity, metodi inesistenti chiamati sulle nostre classi.
+la build unity (nomi che si scontrano, globali nascosti, include che arrivano
+da un altro file), metodi inesistenti chiamati sulle nostre classi, nomi che in
+Unreal sono macro (`PI`).
 
 882 test C++ in totale, piu' 269 test Python della pipeline.
 

@@ -593,9 +593,9 @@ namespace GeoWorld::Models
 			MeshDone[MeshIndex] = true;
 			const Json::FValue& Prims = MeshList[MeshIndex]["primitives"];
 			const std::string MeshName = MeshList[MeshIndex]["name"].StringOr("mesh " + std::to_string(MeshIndex));
-			for (size_t PI = 0; PI < Prims.Size(); ++PI)
+			for (size_t PrimIndex = 0; PrimIndex < Prims.Size(); ++PrimIndex)
 			{
-				const Json::FValue& P = Prims[PI];
+				const Json::FValue& P = Prims[PrimIndex];
 				const int64_t Mode = P["mode"].IndexOr(4);
 				if (Mode < 4 || Mode > 6) { Out.Warn(MeshName + ": punti o linee (modo " + std::to_string(Mode) + "), non disegnati"); continue; }
 				if (P["targets"].Size() > 0) { Out.Warn(MeshName + ": morph target ignorati"); }

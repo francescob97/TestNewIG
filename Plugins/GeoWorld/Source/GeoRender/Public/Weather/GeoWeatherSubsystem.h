@@ -130,7 +130,7 @@ public:
 	/** La mappa dell'acqua attorno alla camera c'e' (serve il dataset dell'acqua per la brezza di mare). */
 	bool HasWaterMap() const { return WaterMap.IsBuilt(); }
 	/** Le brezze qui sotto a 10 m, in parole ("di mare 3,4 m/s da 270"); vuota se non ce ne sono. */
-	FString DescribeBreezes(double MinSpeedMs = 0.5) const;
+	FString DescribeBreezes(double MinimumSpeedMs = 0.5) const;
 
 	// --- Il vento -----------------------------------------------------------
 

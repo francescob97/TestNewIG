@@ -685,10 +685,11 @@ il primo comando da provare quando non si vede niente. (6)
 | `Tools/StandaloneTests/make_blender_tank.py` | il carro della fixture `blender_tank.glb`, fatto con Blender |
 | `Tools/StandaloneTests/geomodel_info.cpp` | `geomodel_info`: cosa c'è dentro un modello (`.flt`, `.obj`, `.gltf`, `.glb`), senza Unreal |
 | `Tools/StandaloneTests/HlslShim.h` | quel tanto di HLSL che serve a compilare come C++ gli shader di nuvole, suolo, alberi, edifici e cielo |
-| `Tools/CheckSourceDiscipline.sh` | sette regole di disciplina |
+| `Tools/CheckSourceDiscipline.sh` | nove regole di disciplina |
 | `Tools/CheckShadowedParameters.py` | parametri che nascondono campi |
 | `Tools/CheckModuleExports.py` | simboli invisibili fra moduli |
-| `Tools/CheckUnityCollisions.py` | collisioni da build unity |
+| `Tools/CheckUnityCollisions.py` | la build unity: collisioni, globali nascosti, include mancanti |
+| `Tools/CheckEngineMacroNames.py` | nomi che sono macro di Unreal o di windows.h |
 | `Tools/CheckOwnApiCalls.py` | metodi inesistenti |
 
 ### Pipeline
