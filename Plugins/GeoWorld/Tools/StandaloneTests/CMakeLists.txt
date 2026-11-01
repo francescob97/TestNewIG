@@ -198,3 +198,21 @@ endif()
 
 add_test(NAME geoentities COMMAND geoentities_tests
 	${CMAKE_CURRENT_SOURCE_DIR}/../../Source/GeoTiles/TestData/entities_fixture.bin)
+
+# --- Modelli (docs/modelli-design.md, M1): OBJ, OpenFlight, SGI, il rig ------
+add_executable(geomodels_tests geomodels_main.cpp)
+target_include_directories(geomodels_tests PRIVATE ${GEOENTITIES_DIR}/Public ${GEOCORE_DIR}/Public)
+
+# geomodel_info: guardare dentro i propri .flt e .obj senza Unreal.
+add_executable(geomodel_info geomodel_info.cpp)
+target_include_directories(geomodel_info PRIVATE ${GEOENTITIES_DIR}/Public ${GEOCORE_DIR}/Public)
+
+if (MSVC)
+	target_compile_options(geomodels_tests PRIVATE /W4)
+	target_compile_options(geomodel_info PRIVATE /W4)
+else()
+	target_compile_options(geomodels_tests PRIVATE -Wall -Wextra -Werror=shadow -O2)
+	target_compile_options(geomodel_info PRIVATE -Wall -Wextra -Werror=shadow -O2)
+endif()
+
+add_test(NAME geomodels COMMAND geomodels_tests)

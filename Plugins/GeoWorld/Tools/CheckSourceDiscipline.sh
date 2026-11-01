@@ -50,6 +50,7 @@ PURE_DIRS=(
 	"$SRC/GeoRender/Public/Mesh"
 	"$SRC/GeoRender/Public/Imagery/ImageryMapping.h"
 	"$SRC/GeoEntities/Public/Entities"
+	"$SRC/GeoEntities/Public/Models"
 )
 PURE_VIOLATIONS=$(grep -rn -E '#include[[:space:]]*"(CoreMinimal|Engine/|UObject/|Components/|GameFramework/|Misc/|HAL/|Containers/|Math/|Modules/|Subsystems/)' \
 	"${PURE_DIRS[@]}" 2>/dev/null || true)
@@ -59,7 +60,7 @@ if [ -n "$PURE_VIOLATIONS" ]; then
 	echo "$PURE_VIOLATIONS" | sed 's/^/    /'
 	FAILURES=$((FAILURES + 1))
 else
-	echo "  ok - nessun include di Unreal negli strati puri (GeoCore, GeoTiles, Quadtree, Mesh, ImageryMapping, Entities)"
+	echo "  ok - nessun include di Unreal negli strati puri (GeoCore, GeoTiles, Quadtree, Mesh, ImageryMapping, Entities, Models)"
 fi
 
 echo

@@ -14,6 +14,8 @@
 //      1.2.*.20.*.*.*                     heli 12 11 3.5
 //      1.1.*.*.*.*.*                      /Game/Veicoli/SM_Camion.SM_Camion
 //      cigi 12                            box 4.5 1.8 1.5
+//      1.2.105.1                          F16/f16.flt yaw 90
+//      1.1.105.81                         "auto rossa/auto.obj" scale 0.01 up z forward x
 //
 //  - i campi mancanti in fondo valgono *: "1.2" e' "1.2.*.*.*.*.*";
 //  - vince la regola PIU' SPECIFICA (piu' campi scritti); a parita', l'ULTIMA
@@ -28,6 +30,16 @@
 //                      (deriva compresa), centrato sull'origine;
 //        heli L R H    un elicottero: corpo lungo L, rotore di diametro R,
 //                      alto H, centrato.
+//
+//  - oppure un FILE di modello (docs/modelli-design.md): .flt, .obj (e gli
+//    altri formati, che il caricatore dice come convertire), relativo alla
+//    cartella dei modelli (geo.Entities.ModelFolder) o assoluto; con le
+//    virgolette se ha degli spazi. Dopo, le correzioni:
+//        scale S          moltiplica le misure (un modello in centimetri: 0.01)
+//        yaw G            gira il modello di G gradi, positivo a destra
+//        offset A D H     sposta l'origine: avanti, destra, alto (metri)
+//        up X, forward X  gli assi del file (x, -x, y, -y, z, -z) quando non
+//                         sono quelli del formato (OBJ: up y, forward -z)
 //
 //  La REGOLA DI RIPIEGO: se nessuna regola del file vale, si usa la tabella
 //  di serie (una forma per dominio) e lo si DICE (bFallback): un'entita'
@@ -47,6 +59,8 @@
 #include <vector>
 
 #include "Entities/EntityState.h"
+#include "Models/ModelData.h"
+#include "Models/ModelRig.h"
 
 namespace GeoWorld::Entities
 {
@@ -59,13 +73,17 @@ namespace GeoWorld::Entities
 
 	struct FModelSpec
 	{
-		/** Vuoto: una forma (Parts). Altrimenti il percorso dell'asset. */
+		/** Vuoto: una forma (Parts) o un file. Altrimenti il percorso dell'asset. */
 		std::string Asset;
+		/** Un file di modello (.flt, .obj...), come scritto nella regola; le sue correzioni. */
+		std::string File;
+		Models::FRigOptions FileOptions;
 		std::vector<FBoxPart> Parts;
 		/** Il testo della regola, per la diagnostica (geo.Entities.Models). */
 		std::string Text;
 
 		bool IsAsset() const { return !Asset.empty(); }
+		bool IsFile() const { return !File.empty(); }
 
 		/** La lunghezza massima, metri: serve a chi decide quanto e' grande a schermo. */
 		double Extent() const
@@ -288,6 +306,11 @@ namespace GeoWorld::Entities
 					: Shapes::Heli(Size[0], Size[1], Size[2]);
 				return true;
 			}
+			if (IsModelFileName(Words[0]))
+			{
+				Out.File = Words[0];
+				return ParseFileOptions(Words, Out.FileOptions, Error);
+			}
 			if (Words[0].front() == '/')
 			{
 				// /Game/..., /Engine/..., /<Plugin>/...: il percorso di un asset.
@@ -295,8 +318,79 @@ namespace GeoWorld::Entities
 				Out.Asset = Words[0];
 				return true;
 			}
-			Error = "modello sconosciuto '" + Words[0] + "': box, plane, heli o un percorso /Game/...";
+			Error = "modello sconosciuto '" + Words[0] + "': box, plane, heli, un file (.flt, .obj) o un percorso /Game/...";
 			return false;
+		}
+
+		/** Un nome di file di modello: l'estensione lo dice (.flt, .obj, .gltf, .fbx, .ive...). */
+		static bool IsModelFileName(const std::string& Word)
+		{
+			const size_t Dot = Word.find_last_of('.');
+			const size_t Slash = Word.find_last_of("/\\");
+			if (Dot == std::string::npos || (Slash != std::string::npos && Dot < Slash)) { return false; }
+			std::string Extension = Word.substr(Dot + 1);
+			for (char& C : Extension) { C = static_cast<char>(std::tolower(static_cast<unsigned char>(C))); }
+			static const char* Known[] = { "flt", "obj", "gltf", "glb", "fbx", "ive", "osg", "osgb", "osgt", "3ds", "dae", "lwo", "stl", "ply", "blend" };
+			for (const char* K : Known) { if (Extension == K) { return true; } }
+			return false;
+		}
+
+		/** Le correzioni dopo il nome del file: scale, yaw, offset, up, forward. */
+		static bool ParseFileOptions(const std::vector<std::string>& Words, Models::FRigOptions& Out, std::string& Error)
+		{
+			Out = Models::FRigOptions{};
+			bool bUp = false, bForward = false;
+			const auto Number = [&](size_t At, double& Value)
+			{
+				if (At >= Words.size()) { return false; }
+				char* EndPtr = nullptr;
+				Value = std::strtod(Words[At].c_str(), &EndPtr);
+				return EndPtr != Words[At].c_str() && *EndPtr == '\0' && std::isfinite(Value);
+			};
+			for (size_t I = 1; I < Words.size();)
+			{
+				const std::string& Key = Words[I];
+				if (Key == "scale")
+				{
+					if (!Number(I + 1, Out.Scale) || !(Out.Scale > 0.0)) { Error = "'scale' vuole un numero maggiore di zero"; return false; }
+					I += 2;
+				}
+				else if (Key == "yaw")
+				{
+					if (!Number(I + 1, Out.YawDeg)) { Error = "'yaw' vuole i gradi"; return false; }
+					I += 2;
+				}
+				else if (Key == "offset")
+				{
+					if (!Number(I + 1, Out.Offset[0]) || !Number(I + 2, Out.Offset[1]) || !Number(I + 3, Out.Offset[2]))
+					{
+						Error = "'offset' vuole tre numeri: avanti, destra, alto (metri)";
+						return false;
+					}
+					I += 4;
+				}
+				else if (Key == "up" || Key == "forward")
+				{
+					Models::EAxis Axis;
+					if (I + 1 >= Words.size() || !Models::ParseAxis(Words[I + 1], Axis))
+					{
+						Error = "'" + Key + "' vuole un asse: x, -x, y, -y, z, -z";
+						return false;
+					}
+					(Key == "up" ? Out.Axes.Up : Out.Axes.Forward) = Axis;
+					(Key == "up" ? bUp : bForward) = true;
+					I += 2;
+				}
+				else
+				{
+					Error = "dopo il file: scale, yaw, offset, up, forward (non '" + Key + "')";
+					return false;
+				}
+			}
+			if (bUp != bForward) { Error = "'up' e 'forward' vanno insieme"; return false; }
+			if (bUp && !Out.Axes.IsValid()) { Error = "'up' e 'forward' sullo stesso asse"; return false; }
+			Out.bOverrideAxes = bUp;
+			return true;
 		}
 
 	private:
@@ -328,14 +422,20 @@ namespace GeoWorld::Entities
 
 		static std::vector<std::string> SplitWords(const std::string& Line)
 		{
+			// Le parole; fra virgolette anche con gli spazi (i percorsi).
 			std::vector<std::string> Words;
 			std::string Word;
+			bool bQuoted = false, bHad = false;
 			for (char C : Line)
 			{
-				if (std::isspace(static_cast<unsigned char>(C))) { if (!Word.empty()) { Words.push_back(Word); Word.clear(); } }
+				if (C == '"') { bQuoted = !bQuoted; bHad = true; continue; }
+				if (!bQuoted && std::isspace(static_cast<unsigned char>(C)))
+				{
+					if (!Word.empty() || bHad) { Words.push_back(Word); Word.clear(); bHad = false; }
+				}
 				else { Word += C; }
 			}
-			if (!Word.empty()) { Words.push_back(Word); }
+			if (!Word.empty() || bHad) { Words.push_back(Word); }
 			return Words;
 		}
 
