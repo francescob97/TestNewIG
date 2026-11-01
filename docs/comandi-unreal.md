@@ -4,7 +4,7 @@
 > Non modificarlo a mano: i controlli statici (`CheckSourceDiscipline.sh`, regola 7)
 > dicono quando e' indietro. In Unreal lo stesso elenco lo da' `geo.Help`.
 
-**156 comandi** in 13 gruppi.
+**166 comandi** in 14 gruppi.
 
 ## Come si usano
 
@@ -55,6 +55,7 @@
 - [Gli edifici](#gli-edifici) — `geo.Buildings.*`, 9 comandi
 - [Il cielo](#il-cielo) — `geo.Sky.*`, 18 comandi
 - [La camera di volo](#la-camera-di-volo) — `geo.Fly.*`, 2 comandi
+- [Entities](#entities) — `geo.Entities.*`, 10 comandi
 - [Lights](#lights) — `geo.Lights.*`, 11 comandi
 
 ## Generale
@@ -286,6 +287,21 @@ Solo in Play: velocita' proporzionale alla quota.
 | `geo.Fly` | Sostituisce la camera del Play con una che vola a velocita' proporzionale alla quota. |
 | `geo.Fly.Speed <moltiplicatore>` | scala la velocita' calcolata dalla quota. |
 
+## Entities
+
+| Comando | Cosa fa |
+|---|---|
+| `geo.Entities.Listen [nome]` | in ascolto della memoria condivisa (default GeoWorldEntities): aerei, veicoli, navi da un simulatore, o da 'geoworld demo-entities'. |
+| `geo.Entities.Stop` | Ferma tutte le sorgenti di entita' e le toglie dalla scena. |
+| `geo.Entities.List [quante]` | le sorgenti e le entita' piu' vicine: tipo, modello, posizione, velocita', estrapolazione (default 20). |
+| `geo.Entities.Blend <s>` | quanto dura il rientro morbido quando un aggiornamento non coincide con l'estrapolazione (0: salta subito; default 0,4). |
+| `geo.Entities.Timeout <s>` | un'entita' che tace da tanto se ne va (default 5). |
+| `geo.Entities.Radius <m> [max]` | fin dove un'entita' ha un attore, e quanti attori al massimo (i piu' vicini). Le altre restano nel registro. |
+| `geo.Entities.Models [file\|default]` | la tabella dei modelli (tipo DIS o indice CIGI -&gt; forma o asset), ricaricata a caldo; senza argomenti la elenca. |
+| `geo.Entities.Follow <nome\|numero\|off>` | la camera del Play segue un'entita', da dietro e da sopra (es. geo.Entities.Follow AEREO-1). |
+| `geo.Entities.Labels [0\|1]` | il nome sopra ogni entita' (magenta, con il tipo, se la forma e' di ripiego). |
+| `geo.Entities.Debug [0\|1]` | la velocita' (verde: dove sara' fra un secondo; rossa: notizie ferme), l'errore che il rientro sta smaltendo (giallo), la distanza nei nomi. |
+
 ## Lights
 
 | Comando | Cosa fa |
@@ -321,6 +337,7 @@ Non sono di GeoWorld, ma la documentazione li usa spesso.
 | File | Comandi |
 |---|---|
 | `Plugins/GeoWorld/Source/GeoCore/Private/GeoCoreModule.cpp` | 10 |
+| `Plugins/GeoWorld/Source/GeoEntities/Private/GeoEntitiesModule.cpp` | 10 |
 | `Plugins/GeoWorld/Source/GeoRender/Private/GeoRenderModule.cpp` | 134 |
 | `Plugins/GeoWorld/Source/GeoTiles/Private/GeoTilesModule.cpp` | 10 |
 | `Plugins/GeoWorld/Source/GeoWorldEditor/Private/GeoTerrainMaterialFactory.cpp` | 1 |

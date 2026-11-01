@@ -14,6 +14,7 @@ Il progetto `TestNewIG` e' un guscio vuoto: tutto il codice vive in
 | `GeoCore` | Runtime | Geodesia, georeferenziazione, origin rebasing |
 | `GeoTiles` | Runtime | Formato tile, loader asincrono, cache LRU, ortofoto *(Fasi 2/3/6)* |
 | `GeoRender` | Runtime | Quadtree, LOD, mesh, terreno, drappeggio, strade, acqua, vento, pioggia e neve, fulmini, nuvole *(Fasi 4/5/6/8/9)* |
+| `GeoEntities` | Runtime | Entità da fuori: stato canonico, frame, estrapolazione, registro, memoria condivisa, attori *(Fase 7)* |
 | `GeoWorldEditor` | Editor | I materiali costruiti da codice (`geo.Imagery.CreateMaterial`) |
 
 `GeoCore` e' diviso in due strati fisicamente separati:
@@ -32,8 +33,16 @@ Il progetto `TestNewIG` e' un guscio vuoto: tutto il codice vive in
 - [x] **Fase 4** — quadtree, selezione LOD, culling *(mai compilata in UE)*
 - [x] **Fase 5** — generazione mesh, gonne, terreno a schermo *(mai compilata in UE)*
 - [x] **Fase 6** — ortofoto drappeggiate *(mai compilata in UE)*
-- [ ] Fase 7 — entità e interoperabilità (CIGI, DIS, HLA, memoria condivisa)
-      *(solo design: `docs/fase7-design.md`)*
+- [~] **Fase 7, primo pezzo: le entità dalla memoria condivisa** — lo stato
+      canonico (ECEF, quaternione dal corpo), le tre trappole delle convenzioni
+      (NED/NEU, angoli CIGI e DIS, assi del corpo) in un file solo, l'estrapolazione
+      dei nove algoritmi di DIS con il rientro morbido, l'ora di DIS e l'orologio
+      della simulazione, il registro separato dagli attori, la tabella dei modelli;
+      la memoria condivisa con un seqlock e un generatore finto in Python
+      (`geoworld demo-entities`: aerei, elicottero, auto sopra Torino), il modulo
+      `GeoEntities` (`geo.Entities.*`) *(`docs/fase7-design.md`, sezione 13; prova:
+      `docs/fase7-verifica.md`, per chi impara: `docs/manuale/20-entita.md`)*.
+      Poi CIGI, DIS, HLA
 - [x] **Fase 8** — strade, ferrovie e piste da OpenStreetMap, dipinte da lontano e
       **3D da vicino** *(`docs/fase8-design.md`, prova: `docs/fase8-verifica.md`,
       strade 3D, transizioni morbide del terreno e flash: `docs/strade-3d.md`)*
@@ -151,6 +160,8 @@ cmake --build build
 ./build/geobuildings_tests Plugins/GeoWorld/Source/GeoTiles/TestData/buildings_fixture.gbd
                              # 26 test  -- edifici: formato .gbd, triangolazione con i cortili, muri e tetti, una tile intera, monumenti (anche a parti), materiale (finestre, neve, bagnato, finestre accese di notte)
 ./build/geosky_tests         # 60 test  -- cielo: giorni giuliani, tempo siderale, ora legale, sole e luna (gli esempi di Meeus, l'eclisse del 2024), levate e tramonti, luce del giorno e della notte, stelle e luna (lo shader compilato come C++), le stelle vere (catalogo, precessione), i pianeti, lo shader delle stelle
+./build/geoentities_tests Plugins/GeoWorld/Source/GeoTiles/TestData/entities_fixture.bin
+                             # 97 test  -- entita': quaternione, NED/NEU, angoli CIGI e DIS, assi del corpo e dell'attore, estrapolazione e rientro, l'ora di DIS, il registro, i modelli, la memoria condivisa (due thread veri), la fixture di Python estrapolata
 
 ./Plugins/GeoWorld/Tools/CheckSourceDiscipline.sh
 python3 Plugins/GeoWorld/Tools/CheckShadowedParameters.py
@@ -164,7 +175,7 @@ le classi di errore di compilazione gia' incontrate su Windows -- shadowing,
 simboli non esportati fra moduli, tipi di comando console inesistenti,
 collisioni da build unity, metodi inesistenti chiamati sulle nostre classi.
 
-687 test C++ in totale, piu' 243 test Python della pipeline.
+784 test C++ in totale, piu' 258 test Python della pipeline.
 
 **Dopo la prima prova su Torino** (materiale, scene Sentinel, prestazioni): `docs/prova-torino.md`.
 **Dopo la seconda** (troppi triangoli, RAM): `docs/prova-torino-2.md`.
@@ -211,7 +222,7 @@ geoworld verify-buildings -o dataset/edifici
 :: le stelle vere (Fase 12): il catalogo di Yale, dalla rete, una volta sola
 geoworld build-stars -o dataset/stars.gst          :: in Unreal: geo.Sky.Catalog <il file>
 
-geoworld test                                      :: 243 test, sorgente sintetico
+geoworld test                                      :: 258 test, sorgente sintetico
 ```
 
 Installazione, opzioni e conda a mano (se lo preferisci): `Pipeline/README.md`.

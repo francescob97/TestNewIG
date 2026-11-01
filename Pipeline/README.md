@@ -232,6 +232,23 @@ magnitudine 6,5, dominio pubblico), scaricato una volta dal CDS di Strasburgo
 di 109 KB: posizione J2000, magnitudine e indice di colore, dalla stella piu'
 luminosa (`geoworld/starbuild.py`). In Unreal: `geo.Sky.Catalog <il file>`.
 
+### Entita' finte in memoria condivisa (Fase 7)
+
+```bat
+geoworld demo-entities                          :: Torino, 10 volte al secondo, Ctrl+C per fermare
+geoworld demo-entities --lat 41.9 --lon 12.5    :: Roma
+geoworld demo-entities --rate 1                 :: un aggiornamento al secondo: si vede il rientro
+geoworld demo-entities --crowd 1000             :: piu' mille auto entro 20 km, per il carico
+```
+
+Due aerei in virata coordinata (uno a destra con l'estrapolazione negli assi
+del corpo, uno a sinistra con quella del mondo), un elicottero, quattro auto
+appoggiate al terreno, scritti nella memoria condivisa `GeoWorldEntities`
+(`multiprocessing.shared_memory`, il formato e' in
+`Source/GeoEntities/Public/Entities/SharedMemoryFormat.h`). In Unreal:
+`geo.Entities.Listen`. Solo la libreria standard di Python, niente GDAL
+(`geoworld/entitygen.py`). `--fixture <file>` riscrive la fixture dei test C++.
+
 ## Stadi
 
 | # | Stadio | Produce |

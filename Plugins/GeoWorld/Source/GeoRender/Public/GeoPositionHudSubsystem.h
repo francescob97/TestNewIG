@@ -35,6 +35,18 @@
 class APlayerController;
 class UCanvas;
 
+/**
+ * Le righe del riquadro che arrivano da moduli che GeoRender non conosce
+ * (GeoEntities dipende da GeoRender, non il contrario): si aggiungono qui.
+ * Ogni funzione riceve il mondo e il punto della vista, e aggiunge le sue
+ * coppie (etichetta, valore).
+ */
+using FGeoHudLines = TArray<TPair<FString, FString>>;
+// NOTA: il tipo con la virgola (TPair<FString, FString>) passa da un alias:
+// dentro la macro la virgola spezzerebbe gli argomenti.
+DECLARE_MULTICAST_DELEGATE_ThreeParams(FGeoHudExtraLines, const UWorld* /*World*/, const FVector& /*ViewLocation*/,
+	FGeoHudLines& /*Lines*/);
+
 UCLASS()
 class GEORENDER_API UGeoPositionHudSubsystem : public UWorldSubsystem
 {
@@ -48,12 +60,19 @@ public:
 	void SetEnabled(bool bInEnabled) { bEnabled = bInEnabled; }
 	bool IsEnabled() const { return bEnabled; }
 
+	/**
+	 * Quota (ellissoidica) del terreno DISEGNATO sotto il punto, se le quote
+	 * sono in memoria; al largo, il mare (il geoide). Pubblica: la usano anche
+	 * le entita' (GeoEntities) per appoggiare i veicoli al suolo che si vede.
+	 */
+	static bool GroundHeightAt(const UWorld* World, double LonDeg, double LatDeg, double& OutHeight);
+
+	/** Le righe degli altri moduli (vedi FGeoHudExtraLines). */
+	static FGeoHudExtraLines& ExtraLines();
+
 private:
 	/** Chiamata dal motore per ogni viewport, a ogni frame. */
 	void Draw(UCanvas* Canvas, APlayerController* Controller);
-
-	/** Quota del terreno DISEGNATO sotto il punto, se le quote sono in memoria. */
-	bool GroundHeightAt(double LonDeg, double LatDeg, double& OutHeight) const;
 
 	FDelegateHandle GameDrawHandle;
 	FDelegateHandle EditorDrawHandle;

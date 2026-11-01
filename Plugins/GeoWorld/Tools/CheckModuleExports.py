@@ -43,6 +43,7 @@ PURE_DIRECTORIES = [
     ("GeoTiles", "Tiles"),
     ("GeoRender", "Quadtree"),
     ("GeoRender", "Mesh"),
+    ("GeoEntities", "Entities"),
 ]
 
 # Header puri che vivono in una cartella condivisa con codice Unreal: si

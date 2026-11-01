@@ -180,3 +180,21 @@ add_test(NAME geobuildings COMMAND geobuildings_tests
 	${CMAKE_CURRENT_SOURCE_DIR}/../../Source/GeoTiles/TestData/buildings_fixture.gbd)
 add_test(NAME geosky COMMAND geosky_tests
 	${CMAKE_CURRENT_SOURCE_DIR}/../../Source/GeoTiles/TestData/stars_fixture.gst)
+
+# --- Entita' (Fase 7): stato, frame, estrapolazione, registro, modelli,
+#     memoria condivisa. Due thread nel test del seqlock: serve Threads.
+set(GEOENTITIES_DIR ${CMAKE_CURRENT_SOURCE_DIR}/../../Source/GeoEntities)
+find_package(Threads REQUIRED)
+
+add_executable(geoentities_tests geoentities_main.cpp)
+target_include_directories(geoentities_tests PRIVATE ${GEOENTITIES_DIR}/Public ${GEOCORE_DIR}/Public)
+target_link_libraries(geoentities_tests PRIVATE Threads::Threads)
+
+if (MSVC)
+	target_compile_options(geoentities_tests PRIVATE /W4)
+else()
+	target_compile_options(geoentities_tests PRIVATE -Wall -Wextra -Werror=shadow -O2)
+endif()
+
+add_test(NAME geoentities COMMAND geoentities_tests
+	${CMAKE_CURRENT_SOURCE_DIR}/../../Source/GeoTiles/TestData/entities_fixture.bin)

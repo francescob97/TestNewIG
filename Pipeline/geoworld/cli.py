@@ -35,6 +35,7 @@ import time
 
 from . import __version__, tiling, tileformat, geoid, environment, fetch as fetch_module, manifest as manifest_module
 from . import starbuild
+from . import entitygen
 from . import (fetchimagery, imagecut, imageformat, imagerybuild,
                imagerymanifest)
 # Fase 8: le linee (strade, ferrovie, piste). Moduli che importano GDAL e
@@ -920,6 +921,21 @@ def command_build_stars(args: argparse.Namespace) -> int:
     return 0
 
 
+def command_demo_entities(args: argparse.Namespace) -> int:
+    if args.fixture:
+        entitygen.main_fixture(args.fixture)
+        log(f"Scritta la fixture dei test C++: {args.fixture}")
+        return 0
+    try:
+        frames = entitygen.run_demo(centre_lat=args.lat, centre_lon=args.lon, rate=args.rate,
+                                    duration=args.duration, name=args.name, crowd=args.crowd, report=log)
+    except (ValueError, RuntimeError, OSError) as error:
+        log(f"ERRORE: {error}")
+        return 1
+    log(f"Scritte {frames} fotografie.")
+    return 0
+
+
 def command_inspect_buildings(args: argparse.Namespace) -> int:
     from collections import Counter
     tile = bldformat.read_tile(args.tile)
@@ -1217,6 +1233,18 @@ def build_parser() -> argparse.ArgumentParser:
     build_stars.add_argument("--max-magnitude", type=float, default=starbuild.DEFAULT_MAX_MAGNITUDE,
                              help=f"fin dove (default {starbuild.DEFAULT_MAX_MAGNITUDE}: tutte quelle a occhio nudo)")
     build_stars.set_defaults(func=command_build_stars)
+
+    demo = subparsers.add_parser(
+        "demo-entities", help="Fase 7: aerei, un elicottero e auto finti in memoria condivisa, per geo.Entities.Listen")
+    demo.add_argument("--lat", type=float, default=entitygen.DEFAULT_CENTRE[0],
+                      help=f"il centro della scena (default {entitygen.DEFAULT_CENTRE[0]}, Torino)")
+    demo.add_argument("--lon", type=float, default=entitygen.DEFAULT_CENTRE[1])
+    demo.add_argument("--rate", type=float, default=10.0, help="fotografie al secondo (default 10)")
+    demo.add_argument("--duration", type=float, help="per quanti secondi (default: finche' non lo fermi con Ctrl+C)")
+    demo.add_argument("--crowd", type=int, default=0, help="quante auto in piu' entro 20 km (per provare il carico)")
+    demo.add_argument("--name", default=entitygen.NAME, help=f"il nome della memoria (default {entitygen.NAME})")
+    demo.add_argument("--fixture", help="invece di girare, scrive la fixture dei test C++ in questo file")
+    demo.set_defaults(func=command_demo_entities)
 
     inspect_bld = subparsers.add_parser("inspect-buildings", help="stampa il contenuto di una tile di edifici")
     inspect_bld.add_argument("tile")

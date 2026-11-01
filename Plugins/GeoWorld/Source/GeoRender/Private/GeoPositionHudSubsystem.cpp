@@ -57,10 +57,15 @@ void UGeoPositionHudSubsystem::Deinitialize()
 	Super::Deinitialize();
 }
 
-bool UGeoPositionHudSubsystem::GroundHeightAt(double LonDeg, double LatDeg, double& OutHeight) const
+FGeoHudExtraLines& UGeoPositionHudSubsystem::ExtraLines()
 {
-	UWorld* World = GetWorld();
-	UGeoTileStreamingSubsystem* Streaming = World ? World->GetSubsystem<UGeoTileStreamingSubsystem>() : nullptr;
+	static FGeoHudExtraLines Delegate;
+	return Delegate;
+}
+
+bool UGeoPositionHudSubsystem::GroundHeightAt(const UWorld* World, double LonDeg, double LatDeg, double& OutHeight)
+{
+	const UGeoTileStreamingSubsystem* Streaming = World ? World->GetSubsystem<UGeoTileStreamingSubsystem>() : nullptr;
 	if (!Streaming || !Streaming->IsDatasetOpen()) { return false; }
 
 	const UGeoTerrainSubsystem* Terrain = World->GetSubsystem<UGeoTerrainSubsystem>();
@@ -76,7 +81,9 @@ bool UGeoPositionHudSubsystem::GroundHeightAt(double LonDeg, double LatDeg, doub
 		uint32 X = 0, Y = 0;
 		Tiles::TileForLonLat(static_cast<uint32>(Level), LonDeg, LatDeg, X, Y);
 		const Tiles::FTileKey Key{ static_cast<uint32>(Level), X, Y };
-		const UGeoTileStreamingSubsystem::FTilePtr Tile = Streaming->FindLoadedTile(Key);
+		// Peek, non Find: le entita' lo chiamano per ogni veicolo, a ogni
+		// frame, e non devono falsare le statistiche della cache.
+		const UGeoTileStreamingSubsystem::FTilePtr Tile = Streaming->PeekLoadedTile(Key);
 		if (!Tile || !Tile->IsValid()) { continue; }
 
 		// Al largo la tile e' virtuale e le sue quote sono il FONDALE: il
@@ -138,7 +145,7 @@ void UGeoPositionHudSubsystem::Draw(UCanvas* Canvas, APlayerController* /*Contro
 	}
 
 	double Ground = 0.0;
-	if (GroundHeightAt(LonDeg, LatDeg, Ground))
+	if (GroundHeightAt(GetWorld(), LonDeg, LatDeg, Ground))
 	{
 		Add(TEXT("Dal suolo"), Format::Metres(Here.HeightM - Ground));
 	}
@@ -156,7 +163,7 @@ void UGeoPositionHudSubsystem::Draw(UCanvas* Canvas, APlayerController* /*Contro
 		Add(TEXT("Raffiche"), Format::Number(Wind.GustSpeed(), 1) + " m/s, adesso " + Format::Number(Wind.Speed(), 1)
 			+ ", verticale " + (Wind.Up >= 0.0 ? "+" : "") + Format::Number(Wind.Up, 1) + " m/s");
 		const Weather::FWindSample Surface = WeatherSubsystem->SampleWind(LatDeg, LonDeg,
-			(GroundHeightAt(LonDeg, LatDeg, Ground) ? Ground : Here.HeightM) + Weather::ReferenceHeightM);
+			(GroundHeightAt(GetWorld(), LonDeg, LatDeg, Ground) ? Ground : Here.HeightM) + Weather::ReferenceHeightM);
 		Add(TEXT("A 10 m"), Format::Wind(Surface.MeanSpeed(), Surface.MeanFromDegrees()));
 		// Le brezze qui sotto, se si sentono: di mare, di pendio, di valle.
 		const FString Breezes = WeatherSubsystem->DescribeBreezes();
@@ -271,6 +278,9 @@ void UGeoPositionHudSubsystem::Draw(UCanvas* Canvas, APlayerController* /*Contro
 			Add(TEXT("Lampioni"), std::string(TCHAR_TO_UTF8(*StreetLights->Describe())));
 		}
 	}
+
+	// Le righe degli altri moduli (le entita').
+	ExtraLines().Broadcast(GetWorld(), Canvas->SceneView->ViewLocation, Lines);
 
 	// --- Disegno --------------------------------------------------------------
 	const UFont* Font = GEngine->GetMediumFont();

@@ -15,7 +15,7 @@ Ultimo aggiornamento: 2026-10-31. Branch: `claude/charming-goodall-xd2r3g`.
 | 4 | Quadtree, selezione LOD, culling | **codice completo, mai compilato in UE** |
 | 5 | Mesh, gonne, terreno a schermo | **codice completo, mai compilato in UE** |
 | 6 | Ortofoto drappeggiate | **codice completo, mai compilato in UE** |
-| 7 | Entità e interoperabilità (CIGI, DIS, HLA, memoria condivisa) | **solo design** |
+| 7 | **Entità, primo pezzo: la memoria condivisa**. Lo strato puro (`GeoEntities/Public/Entities`): lo stato canonico (ECEF, quaternione dal corpo FRD, velocità angolari nel corpo), le tre trappole in un file (NED/NEU, angoli CIGI locali e DIS in ECEF, Z del corpo giù e dell'attore su), l'estrapolazione dei nove algoritmi di DIS in una funzione (negli assi del corpo con il teorema del trasporto), il rientro morbido con `3u²−2u³`, l'ora di DIS e l'orologio della simulazione, il registro (chiave sorgente + numero, disordine, riavvii, silenzi, geoide), la tabella dei modelli (tipo DIS o `cigi N` → forme di scatole o asset, ripiego dichiarato); la memoria condivisa `GeoWorldEntities` (fotografia di 64 + 128·N byte, seqlock) e il generatore finto `geoworld demo-entities` (due aerei in virata coordinata, un elicottero, quattro auto al suolo sopra Torino; `--crowd N`); il modulo Unreal `GeoEntities`: il thread che legge, la coda MPSC, `UGeoEntitySubsystem` (attori solo per le più vicine, terreno disegnato sotto le auto, nomi sul Canvas, camera che segue), `geo.Entities.*`, riga "Entita'" nelle stampe | **da compilare e provare** (nessun materiale nuovo) — `docs/fase7-design.md` (sezione 13), `docs/fase7-verifica.md`, `docs/manuale/20-entita.md`. Poi CIGI, DIS, HLA |
 | 8 | **Strade, ferrovie, piste** da OpenStreetMap: dipinte sul terreno, **3D da vicino** | dipinte provate dall'utente (si vedono); strade 3D provate ("manca la tridimensionalita'"), **rifatte: carreggiata in piano, scarpate, marciapiedi, guardrail, ponti con parapetti e pile — da compilare e provare** — `docs/fase8-design.md`, `docs/fase8-verifica.md`, `docs/strade-3d.md` |
 | dopo | **Flash quando la geometria si affina**: le figlie sostituivano il padre in un frame | **geomorphing e dissolvenza, da compilare e provare** — `docs/strade-3d.md`, sezione 2 |
 | dopo | **Flash del rebase**: l'origine del mondo stava alla quota della camera, e a ogni rebase cielo e nebbia saltavano | **corretto, da riprovare** — `docs/strade-3d.md`, sezione 2 |
@@ -92,7 +92,7 @@ costruisci-dted                                 :: i tuoi .dt2 -> dataset, in un
 geoworld fetch --area test -o dati/copernicus   :: DEM libero, 19 MB
 geoworld build -i "dati/copernicus/*.tif" -o dataset/test
 geoworld verify -o dataset/test
-geoworld test                                        :: 243 test
+geoworld test                                        :: 258 test
 
 :: Fase 8: strade su Torino (dettagli in docs/fase8-verifica.md)
 geoworld fetch-osm --area torino -o dati/osm
@@ -116,6 +116,9 @@ geoworld verify-buildings -o dataset/edifici
 
 :: Stelle vere (dettagli in docs/cielo-verifica.md, 3b): il catalogo di Yale, una volta sola
 geoworld build-stars -o dataset/stars.gst
+
+:: Entita' finte in memoria condivisa (dettagli in docs/fase7-verifica.md): aerei, elicottero, auto sopra Torino
+geoworld demo-entities                          :: Ctrl+C per fermare; --lat --lon altrove, --rate N, --crowd N
 ```
 
 `check-env` e' l'unico comando che sta fra te e un dataset sbagliato di 48
@@ -138,6 +141,7 @@ build\Debug\geoweather_tests.exe                    :: 109 test (il vento e le b
 build\Debug\geovegetation_tests.exe Plugins\GeoWorld\Source\GeoTiles\TestData\vegetation_fixture.gvg   :: 34 test (la vegetazione)
 build\Debug\geobuildings_tests.exe Plugins\GeoWorld\Source\GeoTiles\TestData\buildings_fixture.gbd    :: 26 test (gli edifici)
 build\Debug\geosky_tests.exe                       :: 60 test (il cielo: sole, luna, ora legale, notte, stelle vere, pianeti)
+build\Debug\geoentities_tests.exe Plugins\GeoWorld\Source\GeoTiles\TestData\entities_fixture.bin   :: 97 test (le entita': frame, estrapolazione, tempo, registro, modelli, memoria condivisa, la fixture di Python)
 Plugins\GeoWorld\Tools\CheckSourceDiscipline.sh      :: serve bash (Git Bash)
 ```
 
@@ -146,7 +150,7 @@ indici, header e giunzioni leggendoli davvero.
 
 ### Console di Unreal
 
-**L'elenco completo, con la spiegazione di ognuno: `docs/comandi-unreal.md`** (139 comandi,
+**L'elenco completo, con la spiegazione di ognuno: `docs/comandi-unreal.md`** (166 comandi,
 generato dal codice). Dentro Unreal: `geo.Help` (i gruppi) e `geo.Help Weather`
 (un gruppo). Qui sotto i piu' usati.
 
@@ -256,6 +260,9 @@ geo.Sky.Catalog <file|off>     le stelle vere (geoworld build-stars); Planets: d
 geo.Sky.LookAt <astro>         gira la camera: sole, luna, polare, venere, marte, giove, saturno...
 geo.Lights.Demo [HH:MM]        i lampioni: la sera (22:00), orologio fermo, overlay (serve geo.Roads.Open)
 geo.Lights.Force <auto|on|off> la fotocellula, o sempre accesi/spenti; Count <n>: le luci vere (48)
+geo.Entities.Listen [nome]     in ascolto della memoria condivisa (fuori: geoworld demo-entities); Stop: tutto via
+geo.Entities.List [n]          sorgenti ed entita' piu' vicine; Follow <nome|off>: la camera del Play le segue
+geo.Entities.Blend <s>         il rientro morbido (0,4); Models <file|default>: la tabella dei modelli a caldo
 ```
 
 Se hai un dataset e vuoi vedere subito qualcosa, il comando e'
@@ -439,6 +446,11 @@ Plugins/GeoWorld/Source/
     Public/Sky/       il giorno e la notte: Astronomy.h, DayLight.h (puri), NightSkyShader.inl
                       (HLSL e C++), UGeoSkySubsystem, UGeoSkySettings [Fase 12]
     GeoPositionHudSubsystem   le stampe della posizione                   [Fase 9]
+  GeoEntities/    le entita' che arrivano da fuori               [Fase 7]
+    Public/Entities/  C++ PURO: stato, frame (le tre trappole), estrapolazione e rientro,
+                      tempo, registro, modelli, formato della memoria condivisa
+    Public/Sources/   IGeoEntitySource e la coda MPSC; Private/Sources: la memoria e il thread
+    GeoEntitySubsystem, GeoEntitySettings   registro, attori, suolo, nomi, camera
   GeoWorldEditor/ i materiali costruiti da codice (geo.Imagery.CreateMaterial)
 
   Tools/StandaloneTests/   test C++ senza Unreal (CMake)

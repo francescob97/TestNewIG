@@ -26,6 +26,11 @@
 			"LoadingPhase": "Default"
 		},
 		{
+			"Name": "GeoEntities",
+			"Type": "Runtime",
+			"LoadingPhase": "Default"
+		},
+		{
 			"Name": "GeoWorldEditor",
 			"Type": "Editor",
 			"LoadingPhase": "PostEngineInit"

@@ -56,11 +56,13 @@ Due convenzioni tipografiche:
 | 17 | `17-edifici.md` | Fase 10 — Gli edifici: sagome e altezze da OpenStreetMap, dalla sagoma al solido (cortili, tetti), finestre disegnate dal materiale, i monumenti da una libreria |
 | 18 | `18-cielo.md` | Fase 12, primo pezzo — Il cielo: il sole e la luna all'ora giusta (l'astronomia di Meeus), le levate e i tramonti, la notte (luna, esposizione, stelle, finestre accese), le stelle vere e i pianeti |
 | 19 | `19-lampioni.md` | Fase 12, terzo pezzo — I lampioni: ricostruiti dalle strade (quali, dove, a che passo), le fotocellule, i punti luce da lontano, le luci vere da vicino |
+| 20 | `20-entita.md` | Fase 7, primo pezzo — Le entità: lo stato canonico, le tre trappole (NED, angoli CIGI e DIS, assi del corpo), l'estrapolazione e il rientro, il tempo, il registro e gli attori, la tabella dei modelli, la memoria condivisa (seqlock) e il generatore finto |
 
 Tutti i comandi della console di Unreal, con la spiegazione di ognuno, sono in
 `docs/comandi-unreal.md` (generato dal codice; in Unreal: `geo.Help`).
 
-La Fase 7 (entità, CIGI, DIS, HLA) è solo progettata: la trovi in
+La Fase 7 (entità, CIGI, DIS, HLA) ha il primo pezzo (capitolo 20: lo strato
+puro, la memoria condivisa, il modulo `GeoEntities`); il resto è progettato in
 `docs/fase7-design.md`. Il programma dalla Fase 8 alla 12 (strade, acqua,
 edifici, vegetazione, atmosfera) è nella sezione 0 di `docs/fase8-design.md`.
 

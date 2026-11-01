@@ -1,7 +1,10 @@
 # Fase 7 — Entità e interoperabilità: decisioni e motivazioni
 
-> Capitolo di design. Nessun codice scritto: serve a fissare le decisioni
-> prima, perché qui sbagliarle costa molto più che nelle fasi precedenti.
+> Capitolo di design: fissa le decisioni prima, perché qui sbagliarle costa
+> molto più che nelle fasi precedenti. Il **primo pezzo** (sezione 12, punti 1
+> e 2: lo strato puro e la memoria condivisa, più il modulo Unreal) è scritto:
+> la sezione 13 dice cosa c'è e cosa si è deciso scrivendolo. Come provarlo:
+> `docs/fase7-verifica.md`; per chi impara: `docs/manuale/20-entita.md`.
 
 ---
 
@@ -365,3 +368,91 @@ introduce insieme il parsing, la rete, le convenzioni e l'estrapolazione, e
 quando qualcosa non si muove come dovrebbe non si sa quale dei quattro
 incolpare. Con la memoria condivisa e un generatore finto, i primi tre sono
 fuori discussione e resta solo il quarto.
+
+---
+
+## 13. Il primo pezzo: cosa c'è, e cosa si è deciso scrivendolo
+
+Fatti i punti 1 e 2 della sezione 12, e il modulo Unreal che li usa.
+
+### 13.1 Dove sta
+
+| | |
+|---|---|
+| `GeoEntities/Public/Entities/EntityState.h` | lo stato canonico, il quaternione, la chiave (sorgente + numero), il tipo di DIS, gli algoritmi |
+| `.../Entities/EntityFrames.h` | le tre trappole: NED, Eulero 3-2-1, angoli locali (CIGI) e ECEF (DIS), gli assi dell'attore, la quota |
+| `.../Entities/DeadReckoning.h` | l'estrapolazione parametrica, il rientro (`FEntityTrack`), l'ora di DIS, l'orologio della simulazione |
+| `.../Entities/EntityRegistry.h` | il registro: aggiornamenti, disordine, riavvii, silenzi, geoide |
+| `.../Entities/EntityModels.h` | la tabella dei modelli (tipo o indice CIGI → forma o asset), il ripiego |
+| `.../Entities/SharedMemoryFormat.h` | il formato della memoria condivisa, il seqlock, la traduzione |
+| `GeoEntities/Public/Sources/GeoEntitySource.h` | l'interfaccia di una sorgente e la coda MPSC |
+| `GeoEntities/Private/Sources/GeoSharedMemory*.{h,cpp}` | la memoria su Windows/Linux/macOS e il thread che la legge |
+| `GeoEntities/Public/GeoEntitySubsystem.h` | il subsystem: coda, registro, attori, suolo, nomi, camera |
+| `Pipeline/geoworld/entitygen.py` | il generatore finto (`geoworld demo-entities`) e la fixture dei test |
+| `Tools/StandaloneTests/geoentities_main.cpp` | 97 test, compresa la fixture di Python |
+
+Lo strato puro è header-only e senza Unreal, come gli altri; i controlli
+statici (`CheckSourceDiscipline.sh`, `CheckModuleExports.py`) lo sanno.
+
+### 13.2 Decisioni prese scrivendo
+
+**Gli angoli della memoria condivisa sono quelli di CIGI** (rispetto al NED del
+punto), le velocità in NED. È il formato che un simulatore scrive più
+facilmente, ed esercita due delle tre trappole fin dal primo giorno. Le quote
+sono sul livello del mare o sull'ellissoide secondo un bit dell'intestazione:
+dichiarate, non indovinate (sezione 10).
+
+**La memoria condivisa è una fotografia, non un flusso.** Ci sono tutte le
+entità vive adesso; chi sparisce dalla fotografia se ne va (la sorgente manda
+un "rimuovi"). La coerenza fra i due processi è un **seqlock** (sequenza
+dispari durante la scrittura): nessun lock fra processi, chi scrive non
+aspetta mai.
+
+**Il nome della memoria si apre com'è.** `FPlatformMemory::MapNamedSharedMemoryRegion`
+di Unreal, su Windows, mette `Global\` davanti al nome (lo spazio di tutto il
+sistema, che per creare vuole l'amministratore); Python crea nello spazio della
+sessione. Un wrapper nostro, `FGeoSharedMemoryRegion`, usa
+`OpenFileMappingW`/`shm_open` con il nome nudo. Se la sequenza resta ferma
+per 2 s la memoria si riapre: su Linux un generatore ripartito ne crea una
+nuova con lo stesso nome.
+
+**Negli algoritmi del corpo (6–9) l'accelerazione nel corpo è
+`R⁻¹ a − ω × v`.** Lo stato canonico ha l'accelerazione nel mondo, che in
+virata contiene già la centripeta; la rotazione del corpo la produce da sé.
+La prima versione la contava due volte (5 m di errore in un secondo, trovato
+dal test). L'adattatore DIS farà il contrario: `a = R (ab + ω × vb)`.
+
+**Il rientro** smaltisce un errore nel mondo (un vettore e una rotazione a
+sinistra) con `3u² − 2u³`; 0,4 s di default (`geo.Entities.Blend`); oltre
+100 m o 60° si salta e si conta; oltre 5 s senza notizie ci si ferma.
+
+**Il tempo**: `FClockSync` per sorgente, il minimo degli scarti fra il tempo
+di simulazione e il nostro, che risale piano (1% a campione) e riparte oltre
+2 s di salto. Un aggiornamento più vecchio dell'ultimo si scarta; più vecchio
+di un secondo vuol dire simulazione ripartita.
+
+**I nomi sul Canvas, non nella scena**: un `UTextRenderComponent` di taglio non
+si legge e da lontano è un puntino; il Canvas (come le stampe della posizione)
+li tiene dritti e leggibili, anche nell'editor senza Play.
+
+**Il suolo** è il terreno **disegnato** della tile più fine in memoria
+(`UGeoPositionHudSubsystem::GroundHeightAt`, reso pubblico e statico, ora con
+`PeekLoadedTile` per non falsare le statistiche della cache), con l'ultima
+quota nota quando la tile non c'è (la politica della sezione 10). Per ora
+solo la quota, non l'assetto sul pendio.
+
+**Il geoide** dal dataset dell'acqua se c'è; altrimenti i 48 m dell'Italia
+(`Places::ItalyGeoidUndulationM`), e `geo.Entities.List` lo dice.
+
+**Le righe del riquadro** dei moduli che GeoRender non conosce arrivano da un
+delegato (`UGeoPositionHudSubsystem::ExtraLines`): GeoEntities dipende da
+GeoRender, non il contrario.
+
+### 13.3 Il prossimo pezzo
+
+CIGI (sezione 12, punto 3): un adattatore UDP sul suo thread, le Entity
+Control (angoli locali come la memoria condivisa, il modello per indice: la
+tabella ha già `cigi N`), il ground clamp anche di assetto, le risposte
+all'host (Start of Frame, le interrogazioni di quota). Poi DIS, con il
+timestamp (`FHourUnwrapper` c'è), gli algoritmi (ci sono), le enumerazioni (la
+tabella c'è) e la direzione di uscita, con un'interfaccia sua.

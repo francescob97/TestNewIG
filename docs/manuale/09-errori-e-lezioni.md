@@ -31,6 +31,7 @@ diverso.
 | Fase 6 | post sui nodi contro pixel sulle aree | strisce che sfarfallano ai bordi |
 | Fase 6 | un VRT elenca i file una volta per **banda**, non per file | "scartati −4 file" |
 | Fase 7 (design) | NED contro NEU, angoli DIS contro angoli CIGI | aerei che salgono mentre atterrano |
+| Fase 7 | accelerazione del mondo contro accelerazione nel corpo (la centripeta contata due volte) | aerei in virata che stringono il doppio: 5 m in un secondo, trovato dal test |
 
 **La difesa:**
 

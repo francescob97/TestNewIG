@@ -66,6 +66,8 @@ per fare prima. Fa scontrare le funzioni omonime nei namespace anonimi. (1)
 
 **Catabatica** — l'aria fredda che la notte scivola giù per i pendii: pochi metri di spessore, un paio di m/s, si raccoglie nei fondovalle. (14)
 
+**CIGI** (*Common Image Generator Interface*) — il protocollo nato apposta per gli Image Generator: l'host comanda, l'IG obbedisce. Angoli rispetto al NED del punto, il modello per indice. Il prossimo pezzo della Fase 7. (20)
+
 **Circuito (dei lampioni)** — i lampioni accesi dalla stessa fotocellula: qui una cella di ~300 m. Una via si accende tutta insieme, quella accanto qualche minuto dopo. (19)
 
 **Catalogo di Yale** (*Bright Star Catalogue*) — le 9.110 stelle piu' luminose del cielo, tutte quelle a occhio nudo, con posizione, magnitudine e colore. Dominio pubblico; `geoworld build-stars` lo scarica e lo riduce a un file `.gst`. (18)
@@ -102,6 +104,10 @@ possano leggere pezzi via rete senza scaricarlo tutto. (7)
 
 **Densita' della rete di casa** — la lunghezza delle strade residenziali, pedonali e "living street" attorno a un punto (in un quadrato di 500 m), divisa per l'area: km per km². Un paese 5–20, la campagna meno di 1. Dice dove una strada ha i lampioni. (19)
 
+**Dead reckoning** (*navigazione stimata*) — inventare dove sta un'entità fra due aggiornamenti, dalla sua velocità (e accelerazione, e velocità angolare). DIS ne definisce nove algoritmi; GeoWorld ne ha uno solo, parametrico (`Extrapolate`). (20)
+
+**DIS** (*Distributed Interactive Simulation*, IEEE 1278.1) — il protocollo dove ogni simulatore possiede e annuncia le sue entità, in UDP. Posizione in ECEF, angoli rispetto agli assi ECEF, un timestamp che riparte ogni ora. (20)
+
 **Delegato** — un meccanismo di Unreal per "avvisami quando succede X".
 `OnGeoreferenceRebased` è un delegato. (2)
 
@@ -126,6 +132,8 @@ camera non è un attore. (1)
 
 **Ellissoide** — la forma matematica della Terra: un'ellisse fatta ruotare. (2)
 
+**Entità** — qualcosa che si muove e che non decidiamo noi: un aereo, un veicolo, una nave che arrivano da un simulatore. Dentro GeoWorld ha una sola forma: ECEF, quaternione dal corpo, velocità angolari nel corpo, tempo di simulazione (`FEntityState`). (20)
+
 **Estrusione** — alzare una sagoma piana fino a un'altezza: i lati diventano muri verticali, la sagoma in alto il tetto. (17)
 
 **Equazione di Keplero** — E − e sin E = M: dalla posizione "media" di un pianeta (M, che cresce uniforme col tempo) a quella vera sull'ellisse (E). Si risolve per tentativi (Newton). (18)
@@ -144,11 +152,17 @@ del LOD. Soglia di default: 8 pixel (era 4: vedi `docs/prova-torino-2.md`). (5)
 
 **ExponentialHeightFog** — l'attore della nebbia di Unreal: una densità che cala con la quota. La precipitazione ne alza la densità (`56,4 / visibilità in m`) e la rimette com'era; nell'editor quella del livello non si tocca, perché si salverebbe. (15)
 
+**Fotografia (della memoria condivisa)** — lo stato di tutte le entità vive in un istante: chi non c'è più nella fotografia se n'è andato. Il contrario di un flusso di messaggi. (20)
+
+**FRD** (*Forward-Right-Down*) — gli assi del corpo in aeronautica: X avanti, Y a destra, Z in basso. Un attore di Unreal ha Z in alto: è la trappola 3. (20)
+
 **Fase (della luna)** — quanta parte del disco è illuminata. La luce che arriva cala molto più della parte illuminata: al primo quarto un decimo della piena (legge di Allen). (18)
 
 **Fascia** (del piano di residenza) — un gruppo di tile del piano con la stessa urgenza: 0 = adesso, 1..3 = posizioni previste, l'ultima = anello di sicurezza. (11)
 
 **FDynamicMesh3** — la mesh "da lavoro" di Unreal (modulo GeometryCore): vertici e triangoli più gli overlay degli attributi (normali, UV, colori). Si prepara su un worker e si consegna a un `UDynamicMeshComponent` con uno spostamento. (6, 17)
+
+**Gimbal lock** — a beccheggio ±90° (il muso dritto in su o in giù) imbardata e rollio ruotano attorno allo stesso asse e non si distinguono più. Per questo dentro il motore l'orientamento è un quaternione. (20)
 
 **Giorno giuliano** — il tempo degli astronomi: i giorni (con la frazione) da un mezzogiorno del 4713 a.C. Il 1 gennaio 2000 alle 12 è 2.451.545,0. (18)
 
@@ -173,6 +187,8 @@ che nessuno usa più. Vede solo i riferimenti che conosce. (1)
 
 **GDAL** — la libreria standard per leggere e trasformare dati geografici. (3)
 
+**Image Generator (IG)** — il visualizzatore di un simulatore: riceve lo stato del mondo e lo disegna. È il motivo per cui il progetto si chiama TestNewIG. (20)
+
 **Indice di colore (B−V)** — quanto una stella e' piu' luminosa nel blu che nel giallo: 0 bianco-azzurra (Vega), 0,65 il sole, 1,85 arancione (Betelgeuse). Ne viene la temperatura e il colore. (18)
 
 **Gelicidio** — pioggia che arriva liquida su un suolo sotto zero e gela al contatto, coprendolo di vetrato. Nel modello: pioggia imposta con il gelo. (15)
@@ -194,6 +210,8 @@ nascondere le crepe fra livelli diversi. (6)
 **Grandine posata** — la grandine al suolo, in strisce sotto il percorso dei nuclei dei temporali; una griglia di celle da 470 m ferma rispetto al terreno, che fonde con il caldo (`GroundHail.h`). (15)
 
 **Griglia fissa (degli alberi)** — un punto ogni 8 x 8 m numerato dall'equatore e da Greenwich, ognuno con il suo hash: lo stesso albero sta sempre nello stesso punto, da qualunque cella lo si guardi. (16)
+
+**HLA** (*High Level Architecture*, IEEE 1516) — come DIS ma mediato da una libreria, l'RTI, quasi sempre commerciale. Starà in un modulo opzionale, l'ultimo. (20)
 
 **Header-only** — codice scritto interamente negli header, con `inline`. Lo strato
 puro è così, per non dover esportare simboli dalle DLL. (0, 1)
@@ -225,6 +243,8 @@ più tempo. (4)
 **Large World Coordinates** (LWC) — in Unreal 5, `FVector` in `double`. Nei
 materiali la posizione nel mondo è LWC (due float): un nodo Custom la vuole come
 float normale, e per questo passa da un nodo `TruncateLWC`. (1, 2, 13)
+
+**Memoria condivisa** — una zona di memoria con un nome, che due programmi vedono insieme. Il trasporto più semplice per le entità: niente rete, niente protocollo (`Entities/SharedMemoryFormat.h`, nome `GeoWorldEntities`). (20)
 
 **Magnitudine** — quanto e' luminoso un astro: piu' piccola, piu' luminoso; una magnitudine in meno e' 2,512 volte la luce. Sirio −1,46, la Polare 2,02, le piu' deboli a occhio nudo 6. La **magnitudine limite** e' quella delle piu' deboli che si vedono adesso: scende nel crepuscolo e con la luna. (18)
 
@@ -259,6 +279,8 @@ modificabili a runtime. (1, 7)
 aggiungono e uno solo toglie. (4)
 
 **Nanite** — il sistema di Unreal 5 per la geometria densa: la mesh è divisa in gruppi di ~128 triangoli in una gerarchia, e la GPU sceglie a ogni frame il dettaglio di ogni gruppo. Niente LOD a mano; i dati si costruiscono solo nell'editor. I modelli degli alberi sono Nanite, il terreno no (nasce a runtime). (16)
+
+**NED** (*North-East-Down*) — l'ordine degli assi della simulazione: Nord, Est, **Giù**. Destrorso; una velocità di +5 sulla terza componente scende. È la trappola 1 (GeoWorld usa NEU). (20)
 
 **NEU** (*North-East-Up*) — l'ordine degli assi scelto per il progetto: Nord → X,
 Est → Y, Alto → Z. (2)
@@ -321,6 +343,8 @@ sul thread di rendering. (1)
 
 **Punto luce** — un lampione visto da lontano: un quadratino aperto verso la camera (billboard), additivo, mai piu' piccolo di 2,5 pixel. (19)
 
+**Quaternione** — quattro numeri che descrivono una rotazione senza convenzioni né gimbal lock: (cos θ/2, **u** sin θ/2) per un angolo θ attorno all'asse **u**. Dentro il motore l'orientamento delle entità è un quaternione (`FQuatD`). (20)
+
 **Quadtree** — albero in cui ogni nodo ha quattro figli. La piramide delle tile. (5)
 
 **Quadrato degenere** — un quadrato con i quattro vertici nello stesso punto: non si vede. Le particelle della pioggia sono quadrati degeneri che il materiale apre (World Position Offset) solo dove serve. (15)
@@ -330,10 +354,14 @@ mare. Il motore usa solo la prima. (3)
 
 **Quota neve** — la quota sopra cui la precipitazione cade come neve: 300 m sotto lo zero termico (i fiocchi ci mettono qualche centinaio di metri a fondere), con 150 m di neve mista sopra e sotto. (15)
 
+**Registro (delle entità)** — tutte le entità conosciute, anche lontane; solo le vicine hanno un attore. Chiave: sorgente + numero (`FEntityRegistry`). (20)
+
 **Raffica** — la variazione lenta del vento attorno alla media. Muove l'increspatura e la schiuma, non le onde lunghe, che seguono il vento medio. (13)
 
 **Rebasing** — spostare l'origine di Unreal vicino alla camera, per tenere piccoli
 i numeri. (2)
+
+**Rientro** — quando un aggiornamento non coincide con l'estrapolazione, l'errore si smaltisce in una frazione di secondo con una curva morbida, invece di saltare (scatto) o ignorarlo (deriva). `geo.Entities.Blend`. (20)
 
 **Registrazione sui nodi / sulle aree** — un campione rappresenta un punto (le
 quote) o un'area (i pixel). Decide se il bordo è condiviso. (3, 7)
@@ -345,6 +373,8 @@ quote) o un'area (i pixel). Decide se il bordo è condiviso. (3, 7)
 **Rombo** (del tuono) — il tuono che dura secondi: ogni pezzo del canale fa il botto nello stesso istante, ma i pezzi sono a distanze diverse da chi ascolta, e il suono ci mette tre secondi per chilometro. (15)
 
 **Riscaldamento** — dopo un salto, qualche decimo di secondo in cui si costruiscono più mesh per frame (24 invece di 4): il frame rallenta, il terreno arriva tutto insieme. (11)
+
+**Seqlock** — un modo di leggere senza lock quello che un altro scrive: chi scrive porta una sequenza a un numero dispari prima e al pari dopo; chi legge la controlla prima e dopo la copia, e riprova se era dispari o è cambiata. (20)
 
 **Scintillazione** — il tremolio delle stelle, dall'aria in movimento; piu' forte vicino all'orizzonte. I pianeti, che sono dischetti e non punti, non scintillano. (18)
 
@@ -578,11 +608,26 @@ il primo comando da provare quando non si vede niente. (6)
 | `Private/GeoVegetationModelFactory.cpp` | `geo.Vegetation.CreateModels`: i modelli Nanite degli alberi |
 | `Private/GeoTerrainMaterialFactory.cpp` | `geo.Imagery.CreateMaterial`: `M_GeoTerrain`, `M_GeoRoad`, `M_GeoWater`, `MPC_GeoWater`, `MPC_GeoWeather`, `M_GeoPrecipitation`, `M_GeoLightning`, `M_GeoClouds`, `M_GeoVegetation`, `M_GeoBuilding`, `M_GeoNightSky`, `M_GeoStars`, `M_GeoStreetLight`, `M_GeoStreetLamp` |
 
+### GeoEntities — le entità (Fase 7)
+
+| File | Contenuto |
+|---|---|
+| `GeoEntities.Build.cs` | dipende da GeoCore, GeoTiles, GeoRender |
+| `Public/Entities/EntityState.h` | lo stato canonico, il quaternione, la chiave, il tipo di DIS (puro) |
+| `Public/Entities/EntityFrames.h` | le tre trappole: NED, Eulero, angoli CIGI e DIS, assi dell'attore (puro) |
+| `Public/Entities/DeadReckoning.h` | estrapolazione, rientro, l'ora di DIS, l'orologio della simulazione (puro) |
+| `Public/Entities/EntityRegistry.h`, `EntityModels.h` | il registro, la tabella dei modelli (puri) |
+| `Public/Entities/SharedMemoryFormat.h` | il formato della memoria condivisa e il seqlock (puro) |
+| `Public/Sources/GeoEntitySource.h` | l'interfaccia di una sorgente, la coda MPSC |
+| `Private/Sources/GeoSharedMemory*.cpp` | la memoria con il nome (Windows, Linux, macOS) e il thread che la legge |
+| `Public/GeoEntitySubsystem.h`, `GeoEntitySettings.h` | il subsystem (registro, attori, suolo, nomi, camera), le impostazioni |
+| `Private/GeoEntitiesModule.cpp` | i comandi `geo.Entities.*`, la riga delle stampe |
+
 ### Strumenti
 
 | File | Contenuto |
 |---|---|
-| `Tools/StandaloneTests/*` | gli undici eseguibili di test senza Unreal |
+| `Tools/StandaloneTests/*` | i dodici eseguibili di test senza Unreal |
 | `Tools/StandaloneTests/HlslShim.h` | quel tanto di HLSL che serve a compilare come C++ gli shader di nuvole, suolo, alberi, edifici e cielo |
 | `Tools/CheckSourceDiscipline.sh` | sette regole di disciplina |
 | `Tools/CheckShadowedParameters.py` | parametri che nascondono campi |
@@ -612,9 +657,11 @@ il primo comando da provare quando non si vede niente. (6)
 | `geoworld/waterclasses.py`, `waterformat.py`, `waterbuild.py` | la pipeline dell'acqua |
 | `geoworld/vegclasses.py`, `vegformat.py`, `vegbuild.py` | la pipeline della vegetazione (ESA WorldCover) |
 | `geoworld/bldclasses.py`, `bldformat.py`, `bldbuild.py` | la pipeline degli edifici (OpenStreetMap) |
+| `geoworld/starbuild.py` | le stelle vere (il catalogo di Yale) |
+| `geoworld/entitygen.py` | il generatore finto di entità in memoria condivisa (`demo-entities`) |
 | `geoworld.bat`, `geoworld.sh` | la pipeline senza installazione (prepara l'ambiente la prima volta) |
 | `costruisci-dted.bat`, `costruisci-vegetazione.bat`, `costruisci-edifici.bat` | i doppi clic: terreno, alberi, edifici |
-| `tests/*.py` | 229 test |
+| `tests/*.py` | 258 test |
 
 ### Documenti
 
@@ -627,7 +674,8 @@ il primo comando da provare quando non si vede niente. (6)
 | `docs/dati.md` | da dove vengono i dati, licenze |
 | `docs/faseN-design.md` | decisioni e motivazioni, fase per fase |
 | `docs/faseN-verifica.md` | come verificare, fase per fase |
-| `docs/fase7-design.md` | entità e interoperabilità (solo design) |
+| `docs/fase7-design.md` | entità e interoperabilità: le decisioni, e cosa c'è del primo pezzo |
+| `docs/fase7-verifica.md` | come provare le entità (memoria condivisa, generatore) |
 | `docs/fase8-design.md` | strade, ferrovie, piste; il programma delle fasi 8–12 |
 | `docs/fase8-verifica.md` | come provare le strade |
 | `docs/strade-3d.md` | strade 3D da vicino, e il flash del rebase |
