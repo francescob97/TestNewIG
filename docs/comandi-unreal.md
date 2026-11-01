@@ -4,7 +4,7 @@
 > Non modificarlo a mano: i controlli statici (`CheckSourceDiscipline.sh`, regola 7)
 > dicono quando e' indietro. In Unreal lo stesso elenco lo da' `geo.Help`.
 
-**171 comandi** in 14 gruppi.
+**172 comandi** in 14 gruppi.
 
 ## Come si usano
 
@@ -55,7 +55,7 @@
 - [Gli edifici](#gli-edifici) — `geo.Buildings.*`, 9 comandi
 - [Il cielo](#il-cielo) — `geo.Sky.*`, 18 comandi
 - [La camera di volo](#la-camera-di-volo) — `geo.Fly.*`, 2 comandi
-- [Entities](#entities) — `geo.Entities.*`, 15 comandi
+- [Entities](#entities) — `geo.Entities.*`, 16 comandi
 - [Lights](#lights) — `geo.Lights.*`, 11 comandi
 
 ## Generale
@@ -302,10 +302,11 @@ Solo in Play: velocita' proporzionale alla quota.
 | `geo.Entities.Labels [0\|1]` | il nome sopra ogni entita' (magenta, con il tipo, se la forma e' di ripiego). |
 | `geo.Entities.Debug [0\|1]` | la velocita' (verde: dove sara' fra un secondo; rossa: notizie ferme), l'errore che il rientro sta smaltendo (giallo), la distanza nei nomi. |
 | `geo.Entities.ModelFolder [cartella]` | la cartella dei modelli (anche fuori dal progetto): le regole 'file' della tabella partono da qui, le texture si cercano qui per nome. I modelli si rileggono. |
-| `geo.Entities.ModelInfo <file>` | legge un modello (.flt, .obj) e dice cosa c'e': misure, DOF e loro limiti, switch, texture trovate e no, avvisi. Senza argomenti, i modelli gia' letti. |
+| `geo.Entities.ModelInfo <file>` | legge un modello (.flt, .obj, .gltf, .glb) e dice cosa c'e': misure, DOF e loro limiti, switch, animazioni, texture trovate e no, avvisi. Senza argomenti, i modelli gia' letti. |
 | `geo.Entities.ReloadModels` | Rilegge dal disco tutti i modelli da file (dopo averli cambiati), e rifa' gli attori. |
-| `geo.Entities.Dof <entita'> [dof] [imbardata] [beccheggio] [rollio] [x y z]` | muove una parte del modello (gradi di OpenFlight: imbardata positiva a SINISTRA; metri), nei limiti del modello. Senza dof: l'elenco di DOF e switch. |
+| `geo.Entities.Dof <entita'> [dof] [imbardata] [beccheggio] [rollio] [x y z]` | muove una parte del modello (gradi di OpenFlight: imbardata positiva a SINISTRA; metri), nei limiti del modello. Senza dof: l'elenco di DOF, switch e animazioni. |
 | `geo.Entities.Switch <entita'> <switch> <maschera>` | sceglie la maschera di uno switch del modello (es. il danno: 0 intatto, 1 distrutto; dipende dal modello). |
+| `geo.Entities.Animation <entita'> [animazione\|stop\|reset] [loop\|once] [velocita']` | fa girare un'animazione del modello (glTF: per nome o numero; default in loop, velocita' 1; negativa: all'indietro). Senza animazione: l'elenco. |
 
 ## Lights
 
@@ -342,7 +343,7 @@ Non sono di GeoWorld, ma la documentazione li usa spesso.
 | File | Comandi |
 |---|---|
 | `Plugins/GeoWorld/Source/GeoCore/Private/GeoCoreModule.cpp` | 10 |
-| `Plugins/GeoWorld/Source/GeoEntities/Private/GeoEntitiesModule.cpp` | 15 |
+| `Plugins/GeoWorld/Source/GeoEntities/Private/GeoEntitiesModule.cpp` | 16 |
 | `Plugins/GeoWorld/Source/GeoRender/Private/GeoRenderModule.cpp` | 134 |
 | `Plugins/GeoWorld/Source/GeoTiles/Private/GeoTilesModule.cpp` | 10 |
 | `Plugins/GeoWorld/Source/GeoWorldEditor/Private/GeoTerrainMaterialFactory.cpp` | 1 |

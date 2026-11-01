@@ -4,8 +4,9 @@
 //  La rappresentazione comune a tutti i formati (docs/modelli-design.md,
 //  sezione 2): un albero di nodi, ognuno con una trasformazione e forse della
 //  geometria; alcuni nodi si muovono (DOF), altri si accendono e si spengono
-//  (switch, LOD, sequenze). I lettori (OpenFlightReader.h, ObjReader.h) la
-//  riempiono; il rig (ModelRig.h) la porta nelle convenzioni dell'attore.
+//  (switch, LOD, sequenze), altri hanno un'animazione (glTF). I lettori
+//  (OpenFlightReader.h, ObjReader.h, GltfReader.h) la riempiono; il rig
+//  (ModelRig.h) la porta nelle convenzioni dell'attore.
 //
 //  QUI TUTTO E' NELLE CONVENZIONI DEL FORMATO: gli assi (Axes), la mano
 //  destra, l'origine delle UV (bUvOriginBottom). Solo le unita' sono gia'
@@ -205,6 +206,209 @@ namespace GeoWorld::Models
 	}
 
 	// =========================================================================
+	//  Traslazione, rotazione, scala (i nodi di glTF e le loro animazioni)
+	// =========================================================================
+
+	/**
+	 * Una posa come la scrive glTF: prima la scala, poi la rotazione (un
+	 * quaternione x, y, z, w), poi la traslazione: M = T * R * S.
+	 */
+	struct FTrs
+	{
+		double T[3] = { 0, 0, 0 };
+		double R[4] = { 0, 0, 0, 1 };
+		double S[3] = { 1, 1, 1 };
+	};
+
+	/** La matrice di rotazione di un quaternione (x, y, z, w; normalizzato qui). */
+	inline FAffine QuaternionMatrix(const double Q[4])
+	{
+		const double L = std::sqrt(Q[0] * Q[0] + Q[1] * Q[1] + Q[2] * Q[2] + Q[3] * Q[3]);
+		FAffine Out;
+		if (L < 1e-300) { return Out; }
+		const double X = Q[0] / L, Y = Q[1] / L, Z = Q[2] / L, W = Q[3] / L;
+		Out.M[0][0] = 1 - 2 * (Y * Y + Z * Z); Out.M[0][1] = 2 * (X * Y - Z * W);     Out.M[0][2] = 2 * (X * Z + Y * W);
+		Out.M[1][0] = 2 * (X * Y + Z * W);     Out.M[1][1] = 1 - 2 * (X * X + Z * Z); Out.M[1][2] = 2 * (Y * Z - X * W);
+		Out.M[2][0] = 2 * (X * Z - Y * W);     Out.M[2][1] = 2 * (Y * Z + X * W);     Out.M[2][2] = 1 - 2 * (X * X + Y * Y);
+		return Out;
+	}
+
+	inline FAffine TrsMatrix(const FTrs& Pose)
+	{
+		return FAffine::Translation(Pose.T[0], Pose.T[1], Pose.T[2]) * QuaternionMatrix(Pose.R) * FAffine::Scale(Pose.S[0], Pose.S[1], Pose.S[2]);
+	}
+
+	/**
+	 * Da una matrice (senza taglio) alla posa: la traslazione e' l'ultima
+	 * colonna, la scala la lunghezza delle colonne, la rotazione quello che
+	 * resta. Una riflessione finisce nel segno della scala in x.
+	 */
+	inline FTrs MatrixToTrs(const FAffine& A)
+	{
+		FTrs Out;
+		double C[3][3];
+		for (int J = 0; J < 3; ++J)
+		{
+			Out.T[J] = A.T[J];
+			const double L = std::sqrt(A.M[0][J] * A.M[0][J] + A.M[1][J] * A.M[1][J] + A.M[2][J] * A.M[2][J]);
+			Out.S[J] = L;
+			for (int I = 0; I < 3; ++I) { C[I][J] = L > 1e-300 ? A.M[I][J] / L : (I == J ? 1.0 : 0.0); }
+		}
+		if (A.Determinant() < 0.0)
+		{
+			Out.S[0] = -Out.S[0];
+			for (int I = 0; I < 3; ++I) { C[I][0] = -C[I][0]; }
+		}
+		// Il quaternione di una matrice di rotazione (il metodo di Shepperd: il ramo piu' stabile).
+		const double Trace = C[0][0] + C[1][1] + C[2][2];
+		double* Q = Out.R;
+		if (Trace > 0.0)
+		{
+			const double K = std::sqrt(Trace + 1.0) * 2.0;
+			Q[3] = 0.25 * K; Q[0] = (C[2][1] - C[1][2]) / K; Q[1] = (C[0][2] - C[2][0]) / K; Q[2] = (C[1][0] - C[0][1]) / K;
+		}
+		else if (C[0][0] > C[1][1] && C[0][0] > C[2][2])
+		{
+			const double K = std::sqrt(1.0 + C[0][0] - C[1][1] - C[2][2]) * 2.0;
+			Q[3] = (C[2][1] - C[1][2]) / K; Q[0] = 0.25 * K; Q[1] = (C[0][1] + C[1][0]) / K; Q[2] = (C[0][2] + C[2][0]) / K;
+		}
+		else if (C[1][1] > C[2][2])
+		{
+			const double K = std::sqrt(1.0 + C[1][1] - C[0][0] - C[2][2]) * 2.0;
+			Q[3] = (C[0][2] - C[2][0]) / K; Q[0] = (C[0][1] + C[1][0]) / K; Q[1] = 0.25 * K; Q[2] = (C[1][2] + C[2][1]) / K;
+		}
+		else
+		{
+			const double K = std::sqrt(1.0 + C[2][2] - C[0][0] - C[1][1]) * 2.0;
+			Q[3] = (C[1][0] - C[0][1]) / K; Q[0] = (C[0][2] + C[2][0]) / K; Q[1] = (C[1][2] + C[2][1]) / K; Q[2] = 0.25 * K;
+		}
+		return Out;
+	}
+
+	/** Fra due quaternioni, per la via piu' corta (slerp). */
+	inline void Slerp(const double A[4], const double BIn[4], double U, double Out[4])
+	{
+		double B[4] = { BIn[0], BIn[1], BIn[2], BIn[3] };
+		double Dot = A[0] * B[0] + A[1] * B[1] + A[2] * B[2] + A[3] * B[3];
+		// q e -q sono la stessa rotazione: si prende quella vicina.
+		if (Dot < 0.0) { Dot = -Dot; for (int I = 0; I < 4; ++I) { B[I] = -B[I]; } }
+		double WA = 1.0 - U, WB = U;
+		if (Dot < 0.9995)
+		{
+			const double Angle = std::acos(std::min(1.0, Dot));
+			const double Sin = std::sin(Angle);
+			WA = std::sin((1.0 - U) * Angle) / Sin;
+			WB = std::sin(U * Angle) / Sin;
+		}
+		double L = 0.0;
+		for (int I = 0; I < 4; ++I) { Out[I] = WA * A[I] + WB * B[I]; L += Out[I] * Out[I]; }
+		L = std::sqrt(L);
+		if (L > 1e-300) { for (int I = 0; I < 4; ++I) { Out[I] /= L; } }
+	}
+
+	// =========================================================================
+	//  Le animazioni (glTF): curve sui nodi
+	// =========================================================================
+
+	enum class EAnimPath : uint8_t { Translation, Rotation, Scale };
+	enum class EAnimInterpolation : uint8_t { Step, Linear, CubicSpline };
+
+	/**
+	 * Una curva: i tempi (s, crescenti) e i valori, 3 per chiave (traslazione,
+	 * scala) o 4 (rotazione, quaternione). Con CubicSpline ogni chiave ha tre
+	 * gruppi: tangente d'ingresso, valore, tangente d'uscita (come glTF).
+	 */
+	struct FAnimCurve
+	{
+		EAnimPath Path = EAnimPath::Translation;
+		EAnimInterpolation Interpolation = EAnimInterpolation::Linear;
+		std::vector<float> Times;
+		std::vector<float> Values;
+
+		int Components() const { return Path == EAnimPath::Rotation ? 4 : 3; }
+		bool IsValid() const
+		{
+			const size_t PerKey = static_cast<size_t>(Components()) * (Interpolation == EAnimInterpolation::CubicSpline ? 3 : 1);
+			return !Times.empty() && Values.size() == Times.size() * PerKey;
+		}
+		double Duration() const { return Times.empty() ? 0.0 : static_cast<double>(Times.back()); }
+	};
+
+	/** Il valore della curva a quel tempo (prima della prima chiave: la prima; dopo l'ultima: l'ultima). */
+	inline void SampleCurve(const FAnimCurve& Curve, double Time, double Out[4])
+	{
+		const int N = Curve.Components();
+		for (int I = 0; I < 4; ++I) { Out[I] = (I == 3 && N == 4) ? 1.0 : 0.0; }
+		if (!Curve.IsValid()) { return; }
+		const bool bCubic = Curve.Interpolation == EAnimInterpolation::CubicSpline;
+		const size_t Stride = static_cast<size_t>(N) * (bCubic ? 3 : 1);
+		// Il valore della chiave K (nella cubica sta in mezzo alle due tangenti).
+		const auto Value = [&](size_t K, int I) { return static_cast<double>(Curve.Values[K * Stride + (bCubic ? static_cast<size_t>(N) : 0) + static_cast<size_t>(I)]); };
+		const size_t Keys = Curve.Times.size();
+		if (Keys == 1 || Time <= Curve.Times.front()) { for (int I = 0; I < N; ++I) { Out[I] = Value(0, I); } return; }
+		if (Time >= Curve.Times.back()) { for (int I = 0; I < N; ++I) { Out[I] = Value(Keys - 1, I); } return; }
+		// La chiave prima di Time: Times[K] <= Time < Times[K + 1].
+		const size_t K = static_cast<size_t>(std::upper_bound(Curve.Times.begin(), Curve.Times.end(), static_cast<float>(Time)) - Curve.Times.begin()) - 1;
+		const double T0 = Curve.Times[K], T1 = Curve.Times[K + 1];
+		const double Delta = T1 - T0;
+		const double U = Delta > 0.0 ? (Time - T0) / Delta : 0.0;
+		if (Curve.Interpolation == EAnimInterpolation::Step)
+		{
+			for (int I = 0; I < N; ++I) { Out[I] = Value(K, I); }
+		}
+		else if (!bCubic)
+		{
+			if (Curve.Path == EAnimPath::Rotation)
+			{
+				const double A[4] = { Value(K, 0), Value(K, 1), Value(K, 2), Value(K, 3) };
+				const double B[4] = { Value(K + 1, 0), Value(K + 1, 1), Value(K + 1, 2), Value(K + 1, 3) };
+				Slerp(A, B, U, Out);
+			}
+			else
+			{
+				for (int I = 0; I < N; ++I) { Out[I] = Value(K, I) + (Value(K + 1, I) - Value(K, I)) * U; }
+			}
+		}
+		else
+		{
+			// Hermite: le tangenti sono per secondo, si moltiplicano per la durata dell'intervallo.
+			const double U2 = U * U, U3 = U2 * U;
+			const double H00 = 2 * U3 - 3 * U2 + 1, H10 = U3 - 2 * U2 + U, H01 = -2 * U3 + 3 * U2, H11 = U3 - U2;
+			for (int I = 0; I < N; ++I)
+			{
+				const double OutTangent = Curve.Values[K * Stride + 2 * static_cast<size_t>(N) + static_cast<size_t>(I)];
+				const double InTangent = Curve.Values[(K + 1) * Stride + static_cast<size_t>(I)];
+				Out[I] = H00 * Value(K, I) + H10 * Delta * OutTangent + H01 * Value(K + 1, I) + H11 * Delta * InTangent;
+			}
+			if (N == 4)
+			{
+				const double L = std::sqrt(Out[0] * Out[0] + Out[1] * Out[1] + Out[2] * Out[2] + Out[3] * Out[3]);
+				if (L > 1e-300) { for (int I = 0; I < 4; ++I) { Out[I] /= L; } }
+			}
+		}
+	}
+
+	struct FModelAnimChannel
+	{
+		/** Il nodo che muove (in FModel::Nodes). */
+		int32_t Node = 0;
+		FAnimCurve Curve;
+	};
+
+	struct FModelAnimation
+	{
+		std::string Name;
+		std::vector<FModelAnimChannel> Channels;
+
+		double Duration() const
+		{
+			double D = 0.0;
+			for (const FModelAnimChannel& C : Channels) { D = std::max(D, C.Curve.Duration()); }
+			return D;
+		}
+	};
+
+	// =========================================================================
 	//  Geometria e materiali
 	// =========================================================================
 
@@ -219,11 +423,23 @@ namespace GeoWorld::Models
 
 	struct FModelTexture
 	{
-		/** Come e' scritto nel file. */
+		/** Come e' scritto nel file (per una texture incorporata: un nome per riconoscerla). */
 		std::string Path;
-		/** Dove e' stato trovato (vuoto: non trovato). */
+		/** Dove e' stato trovato (vuoto: non trovato, o incorporata). */
 		std::string Resolved;
+		/** I byte dell'immagine, se e' DENTRO il modello (glTF: .glb, data:); il tipo ("image/png"). */
+		std::vector<uint8_t> Embedded;
+		std::string MimeType;
+
+		bool IsAvailable() const { return !Resolved.empty() || !Embedded.empty(); }
 	};
+
+	/**
+	 * Come si usa l'alfa. Auto: decide la texture (i formati vecchi, che non lo
+	 * dicono: tagliato se la texture ha l'alfa). Gli altri sono quelli di glTF:
+	 * Opaque ignora l'alfa, Mask ritaglia sotto AlphaCutoff, Blend e' trasparente.
+	 */
+	enum class EAlphaMode : uint8_t { Auto, Opaque, Mask, Blend };
 
 	struct FModelMaterial
 	{
@@ -240,11 +456,16 @@ namespace GeoWorld::Models
 		/** I codici di OpenFlight per i sensori: materiale IR e codice di superficie. -1 nessuno. */
 		int32_t IrMaterial = -1;
 		int32_t SurfaceCode = -1;
+		/** PBR (glTF): metallo 0..1, rugosita' 0..1; -1 non detto (il materiale usa il suo default). */
+		float Metallic = -1.0f;
+		float Roughness = -1.0f;
+		EAlphaMode AlphaMode = EAlphaMode::Auto;
+		float AlphaCutoff = 0.5f;
 
 		bool operator<(const FModelMaterial& O) const
 		{
-			return std::tie(Texture, bTwoSided, bTranslucent, Emissive[0], Emissive[1], Emissive[2], Shininess, IrMaterial, SurfaceCode, Name)
-				< std::tie(O.Texture, O.bTwoSided, O.bTranslucent, O.Emissive[0], O.Emissive[1], O.Emissive[2], O.Shininess, O.IrMaterial, O.SurfaceCode, O.Name);
+			return std::tie(Texture, bTwoSided, bTranslucent, Emissive[0], Emissive[1], Emissive[2], Shininess, IrMaterial, SurfaceCode, Metallic, Roughness, AlphaMode, AlphaCutoff, Name)
+				< std::tie(O.Texture, O.bTwoSided, O.bTranslucent, O.Emissive[0], O.Emissive[1], O.Emissive[2], O.Shininess, O.IrMaterial, O.SurfaceCode, O.Metallic, O.Roughness, O.AlphaMode, O.AlphaCutoff, O.Name);
 		}
 	};
 
@@ -401,6 +622,11 @@ namespace GeoWorld::Models
 		/** Riferimento esterno: il file. */
 		std::string ExternalPath;
 
+		/** La posa del nodo come la scrive glTF (Local e' la sua matrice); il punto di partenza delle animazioni. */
+		FTrs Trs;
+		/** Un'animazione del file lo muove: diventa una parte del rig. */
+		bool bAnimated = false;
+
 		int32_t MaskCount() const { return WordsPerMask > 0 ? static_cast<int32_t>(Masks.size()) / WordsPerMask : 0; }
 
 		bool MaskShows(int32_t Mask, int32_t Child) const
@@ -421,10 +647,11 @@ namespace GeoWorld::Models
 		std::vector<FModelMaterial> Materials;
 		std::vector<FModelTexture> Textures;
 		std::vector<FModelLightPoint> LightPoints;
+		std::vector<FModelAnimation> Animations;
 		FAxisConvention Axes;
 		/** L'origine delle UV e' in basso (OpenGL: OpenFlight, OBJ); in alto per glTF e Unreal. */
 		bool bUvOriginBottom = true;
-		/** "OpenFlight 16.4", "OBJ". */
+		/** "OpenFlight 16.4", "OBJ", "glTF 2.0". */
 		std::string Format;
 		std::vector<std::string> Warnings;
 
@@ -458,7 +685,9 @@ namespace GeoWorld::Models
 			{
 				if (Textures[Index].Path == Path) { return static_cast<int32_t>(Index); }
 			}
-			Textures.push_back(FModelTexture{ Path, std::string() });
+			FModelTexture Texture;
+			Texture.Path = Path;
+			Textures.push_back(std::move(Texture));
 			return static_cast<int32_t>(Textures.size() - 1);
 		}
 
@@ -538,7 +767,9 @@ namespace GeoWorld::Models
 			for (const FModelTexture& Texture : From.Textures)
 			{
 				const int32_t Index = FindOrAddTexture(Texture.Path);
-				if (Textures[static_cast<size_t>(Index)].Resolved.empty()) { Textures[static_cast<size_t>(Index)].Resolved = Texture.Resolved; }
+				FModelTexture& Mine = Textures[static_cast<size_t>(Index)];
+				if (Mine.Resolved.empty()) { Mine.Resolved = Texture.Resolved; }
+				if (Mine.Embedded.empty()) { Mine.Embedded = Texture.Embedded; Mine.MimeType = Texture.MimeType; }
 				TextureMap.push_back(Index);
 			}
 			for (FModelMaterial Material : From.Materials)

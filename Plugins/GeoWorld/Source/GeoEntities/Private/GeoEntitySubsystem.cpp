@@ -410,7 +410,7 @@ void UGeoEntitySubsystem::SelectActors(double Now)
 	// I modelli da file: switch e LOD secondo la camera di adesso.
 	for (TPair<FEntityKey, FVisual>& Pair : Visuals)
 	{
-		if (Pair.Value.Parts.Num() > 0) { ApplyRig(Pair.Value, Camera, true); }
+		if (Pair.Value.Parts.Num() > 0) { ApplyRig(Pair.Value, &Camera); }
 	}
 }
 
@@ -467,6 +467,7 @@ void UGeoEntitySubsystem::UpdateActors(double Now)
 		Core::FGeodetic Where;
 		if (!ComputeTransform(*Record, &Pair.Value, Now, Location, Rotation, Where)) { continue; }
 		Actor->SetActorLocationAndRotation(Location, Rotation);
+		if (Pair.Value.Animation >= 0) { AnimateVisual(Pair.Value, Now); }
 	}
 }
 
@@ -558,6 +559,7 @@ AActor* UGeoEntitySubsystem::SpawnActorFor(const FEntityRecord& Record, FVisual&
 	{
 		const FString Path = Library->ResolvePath(ToFString(Spec->File));
 		Visual.FileModel = Library->Request(Path, Spec->FileOptions, Path + TEXT("|") + ToFString(Spec->Text));
+		Visual.AutoAnimation = ToFString(Spec->Animation);
 		Visual.bWaitingModel = Visual.FileModel->State == EGeoModelState::Loading;
 		// Non si legge: la forma di serie, in magenta, come un ripiego.
 		if (Visual.FileModel->State == EGeoModelState::Failed) { Visual.bFallback = true; }
@@ -594,6 +596,30 @@ AActor* UGeoEntitySubsystem::SpawnActorFor(const FEntityRecord& Record, FVisual&
 	{
 		BuildModelParts(Actor, Root, *Visual.FileModel, Visual);
 		bBuilt = true;
+		// L'animazione della regola ('anim'): in loop, ognuno a un punto diverso del giro (non tutti i radar in fase).
+		const GeoWorld::Models::FModelRig& Rig = *Visual.FileModel->Rig;
+		if (!Visual.AutoAnimation.IsEmpty())
+		{
+			const int32 Found = Rig.FindAnimation(std::string(TCHAR_TO_UTF8(*Visual.AutoAnimation)));
+			if (Found >= 0)
+			{
+				const double Duration = Rig.Animations[static_cast<size_t>(Found)].Duration;
+				Visual.Animation = Found;
+				Visual.bAnimationLoop = true;
+				Visual.AnimationSpeed = 1.0;
+				Visual.AnimationStart = FPlatformTime::Seconds() - Duration * static_cast<double>(GetTypeHash(Record.Key) % 1000u) / 1000.0;
+			}
+			else
+			{
+				const FString Problem = FString::Printf(TEXT("%s: nessuna animazione '%s' (geo.Entities.ModelInfo per l'elenco)"),
+					*Visual.FileModel->Path, *Visual.AutoAnimation);
+				if (!ReportedProblems.Contains(Problem))
+				{
+					ReportedProblems.Add(Problem);
+					UE_LOG(LogGeoWorld, Warning, TEXT("[GeoEntities] %s"), *Problem);
+				}
+			}
+		}
 	}
 	else if (Spec && Spec->IsAsset())
 	{
@@ -844,24 +870,25 @@ void UGeoEntitySubsystem::BuildModelParts(AActor* Actor, USceneComponent* Root, 
 		}
 		Component->SetMobility(EComponentMobility::Movable);
 		Component->SetupAttachment(Parent);
-		Component->SetRelativeTransform(AffineToTransform(GeoWorld::Models::PartTransform(Part, Visual.RigState.Dofs[static_cast<size_t>(Index)])));
+		Component->SetRelativeTransform(AffineToTransform(GeoWorld::Models::PartTransform(Part, Visual.RigState, static_cast<size_t>(Index))));
 		Component->RegisterComponent();
 		Visual.Parts.Add(Component);
 	}
 	Visual.ExtentM = Rig.Extent();
-	ApplyRig(Visual, FVector::ZeroVector, false);
+	// La visibilita' (switch, LOD) la decide la scelta degli attori subito dopo, con la camera.
+	ApplyRig(Visual, nullptr);
 }
 
-void UGeoEntitySubsystem::ApplyRig(FVisual& Visual, const FVector& Camera, bool bHaveCamera) const
+void UGeoEntitySubsystem::ApplyRig(FVisual& Visual, const FVector* Camera) const
 {
 	const AActor* Actor = Visual.Actor.Get();
 	if (!Actor || !Visual.FileModel.IsValid() || !Visual.FileModel->Rig.IsValid()) { return; }
 	const GeoWorld::Models::FModelRig& Rig = *Visual.FileModel->Rig;
 	// La camera nel sistema della radice del modello (metri): la distanza dei LOD.
 	double CameraRoot[3] = { 0.0, 0.0, 0.0 };
-	if (bHaveCamera)
+	if (Camera)
 	{
-		const FVector Local = Actor->GetActorTransform().InverseTransformPosition(Camera) * Units::UuToMeters;
+		const FVector Local = Actor->GetActorTransform().InverseTransformPosition(*Camera) * Units::UuToMeters;
 		CameraRoot[0] = Local.X; CameraRoot[1] = Local.Y; CameraRoot[2] = Local.Z;
 	}
 	for (int32 Index = 0; Index < Visual.Parts.Num() && Index < static_cast<int32>(Rig.Parts.size()); ++Index)
@@ -869,13 +896,12 @@ void UGeoEntitySubsystem::ApplyRig(FVisual& Visual, const FVector& Camera, bool 
 		USceneComponent* Component = Visual.Parts[Index].Get();
 		if (!Component) { continue; }
 		const GeoWorld::Models::FRigPart& Part = Rig.Parts[static_cast<size_t>(Index)];
-		if (Part.Kind == GeoWorld::Models::EPartKind::Dof)
+		if (Part.Kind != GeoWorld::Models::EPartKind::Static)
 		{
-			Component->SetRelativeTransform(AffineToTransform(GeoWorld::Models::PartTransform(Part, Visual.RigState.Dofs[static_cast<size_t>(Index)])));
+			Component->SetRelativeTransform(AffineToTransform(GeoWorld::Models::PartTransform(Part, Visual.RigState, static_cast<size_t>(Index))));
 		}
-		if (!Part.Switches.empty() || !Part.Lods.empty())
+		if (Camera && (!Part.Switches.empty() || !Part.Lods.empty()))
 		{
-			// Senza camera i LOD si guardano da vicino (dall'origine del modello).
 			const bool bVisible = GeoWorld::Models::IsPartVisible(Rig, Part, Visual.RigState, CameraRoot);
 			if (Component->IsVisible() != bVisible) { Component->SetVisibility(bVisible, false); }
 		}
@@ -949,9 +975,10 @@ TArray<FString> UGeoEntitySubsystem::DescribeFileModels() const
 		else
 		{
 			const GeoWorld::Models::FModelRig& Rig = *Model.Rig;
-			Lines.Add(FString::Printf(TEXT("  %s: %s, %d parti (%d DOF, %d switch), %d triangoli, lungo %.1f m, %d texture%s, %.2f s"),
+			Lines.Add(FString::Printf(TEXT("  %s: %s, %d parti (%d DOF, %d animate, %d switch), %d animazioni, %d triangoli, lungo %.1f m, %d texture%s, %.2f s"),
 				*Model.Path, UTF8_TO_TCHAR(Rig.Format.c_str()), static_cast<int32>(Rig.Parts.size()), static_cast<int32>(Rig.DofCount()),
-				static_cast<int32>(Rig.Switches.size()), static_cast<int32>(Rig.TriangleCount()), Rig.Extent(), Model.Textures.Num(),
+				static_cast<int32>(Rig.AnimatedCount()), static_cast<int32>(Rig.Switches.size()), static_cast<int32>(Rig.Animations.size()),
+				static_cast<int32>(Rig.TriangleCount()), Rig.Extent(), Model.Textures.Num(),
 				Model.MissingTextures > 0 ? *FString::Printf(TEXT(" (%d mancanti)"), Model.MissingTextures) : TEXT(""), Model.LoadSeconds));
 		}
 		for (const FString& Warning : Model.Warnings) { Lines.Add(TEXT("      avviso: ") + Warning); }
@@ -976,9 +1003,10 @@ bool UGeoEntitySubsystem::InspectModelFile(const FString& File, TArray<FString>&
 	OutLines.Add(FString::Printf(TEXT("%s: %s, %d nodi, %d triangoli, %d materiali, %d punti luce"), *Path, *ToFString(Model.Format),
 		static_cast<int32>(Model.Nodes.size()), static_cast<int32>(Model.TriangleCount()), static_cast<int32>(Model.Materials.size()),
 		static_cast<int32>(Model.LightPoints.size())));
-	OutLines.Add(FString::Printf(TEXT("  misure (avanti, destra, alto): %.2f x %.2f x %.2f m; %d parti, %d DOF, %d switch/sequenze"),
+	OutLines.Add(FString::Printf(TEXT("  misure (avanti, destra, alto): %.2f x %.2f x %.2f m; %d parti, %d DOF, %d animate, %d switch/sequenze"),
 		Rig.BoundsMax[0] - Rig.BoundsMin[0], Rig.BoundsMax[1] - Rig.BoundsMin[1], Rig.BoundsMax[2] - Rig.BoundsMin[2],
-		static_cast<int32>(Rig.Parts.size()), static_cast<int32>(Rig.DofCount()), static_cast<int32>(Rig.Switches.size())));
+		static_cast<int32>(Rig.Parts.size()), static_cast<int32>(Rig.DofCount()), static_cast<int32>(Rig.AnimatedCount()),
+		static_cast<int32>(Rig.Switches.size())));
 	for (const GeoWorld::Models::FRigPart& Part : Rig.Parts)
 	{
 		if (Part.Kind != GeoWorld::Models::EPartKind::Dof) { continue; }
@@ -993,8 +1021,15 @@ bool UGeoEntitySubsystem::InspectModelFile(const FString& File, TArray<FString>&
 	}
 	for (const GeoWorld::Models::FModelTexture& Texture : Model.Textures)
 	{
-		OutLines.Add(FString::Printf(TEXT("  texture %s: %s"), *ToFString(Texture.Path),
-			Texture.Resolved.empty() ? TEXT("NON TROVATA") : *ToFString(Texture.Resolved)));
+		const FString Where = !Texture.Embedded.empty() ? FString::Printf(TEXT("dentro il file (%d byte)"), static_cast<int32>(Texture.Embedded.size()))
+			: Texture.Resolved.empty() ? FString(TEXT("NON TROVATA")) : ToFString(Texture.Resolved);
+		OutLines.Add(FString::Printf(TEXT("  texture %s: %s"), *ToFString(Texture.Path), *Where));
+	}
+	for (size_t Index = 0; Index < Rig.Animations.size(); ++Index)
+	{
+		const GeoWorld::Models::FRigAnimation& Animation = Rig.Animations[Index];
+		OutLines.Add(FString::Printf(TEXT("  animazione %d '%s': %.2f s, %d canali"), static_cast<int32>(Index), *ToFString(Animation.Name),
+			Animation.Duration, static_cast<int32>(Animation.Channels.size())));
 	}
 	for (const std::string& Warning : Model.Warnings) { OutLines.Add(TEXT("  avviso: ") + ToFString(Warning)); }
 	return true;
@@ -1028,6 +1063,13 @@ bool UGeoEntitySubsystem::DescribeEntityRig(const FString& Who, TArray<FString>&
 		const int32 Mask = Index < Visual->RigState.Masks.size() ? Visual->RigState.Masks[Index] : 0;
 		OutLines.Add(FString::Printf(TEXT("  %s '%s': maschera %d di %d"), Switch.bSequence ? TEXT("sequenza") : TEXT("switch"),
 			*ToFString(Switch.Name), Mask, Switch.MaskCount()));
+	}
+	for (size_t Index = 0; Index < Rig.Animations.size(); ++Index)
+	{
+		const GeoWorld::Models::FRigAnimation& Animation = Rig.Animations[Index];
+		const bool bPlaying = Visual->Animation == static_cast<int32>(Index);
+		OutLines.Add(FString::Printf(TEXT("  animazione %d '%s': %.2f s%s"), static_cast<int32>(Index), *ToFString(Animation.Name), Animation.Duration,
+			bPlaying ? (Visual->bAnimationLoop ? TEXT(" (gira, in loop)") : TEXT(" (gira)")) : TEXT("")));
 	}
 	return true;
 }
@@ -1065,7 +1107,7 @@ bool UGeoEntitySubsystem::SetEntityDof(const FString& Who, const FString& Dof, c
 	const GeoWorld::Models::FRigPart& Part = Rig.Parts[static_cast<size_t>(Found)];
 	V = GeoWorld::Models::ClampDof(Part.Dof, V);
 	Visual->RigState.Dofs[static_cast<size_t>(Found)] = V;
-	ApplyRig(*Visual, FVector::ZeroVector, false);
+	ApplyRig(*Visual, nullptr);
 	OutMessage = FString::Printf(TEXT("%s, DOF '%s': imbardata %.1f, beccheggio %.1f, rollio %.1f (dentro i limiti del modello)"),
 		*Label, *ToFString(Part.Name), V.Rotate[2], V.Rotate[0], V.Rotate[1]);
 	return true;
@@ -1089,11 +1131,81 @@ bool UGeoEntitySubsystem::SetEntitySwitch(const FString& Who, const FString& Swi
 		UWorld* World = GetWorld();
 		const UGeoreferenceSubsystem* Georeference = World ? World->GetSubsystem<UGeoreferenceSubsystem>() : nullptr;
 		FVector Camera = FVector::ZeroVector;
-		const bool bHaveCamera = Georeference && Georeference->GetActiveViewLocation(Camera);
-		ApplyRig(*Visual, Camera, bHaveCamera);
+		// Senza camera i LOD si guardano dall'origine del modello (da vicino).
+		if (!Georeference || !Georeference->GetActiveViewLocation(Camera)) { Camera = Visual->Actor.IsValid() ? Visual->Actor->GetActorLocation() : FVector::ZeroVector; }
+		ApplyRig(*Visual, &Camera);
 		OutMessage = FString::Printf(TEXT("%s, switch '%s': maschera %d di %d"), *Label, *Switch, Visual->RigState.Masks[Index], Count);
 		return true;
 	}
 	OutMessage = FString::Printf(TEXT("%s: nessuno switch '%s' (geo.Entities.Dof %s per l'elenco)"), *Label, *Switch, *Who);
 	return false;
+}
+
+void UGeoEntitySubsystem::AnimateVisual(FVisual& Visual, double Now) const
+{
+	if (!Visual.FileModel.IsValid() || !Visual.FileModel->Rig.IsValid()) { Visual.Animation = -1; return; }
+	const GeoWorld::Models::FModelRig& Rig = *Visual.FileModel->Rig;
+	if (Visual.Animation < 0 || static_cast<size_t>(Visual.Animation) >= Rig.Animations.size()) { Visual.Animation = -1; return; }
+	const double Duration = Rig.Animations[static_cast<size_t>(Visual.Animation)].Duration;
+	// In avanti si parte dal primo fotogramma, all'indietro (velocita' negativa) dall'ultimo.
+	const bool bBackward = Visual.AnimationSpeed < 0.0;
+	double Time = (bBackward ? Duration : 0.0) + (Now - Visual.AnimationStart) * Visual.AnimationSpeed;
+	bool bFinished = false;
+	if (Visual.bAnimationLoop && Duration > 0.0)
+	{
+		Time = FMath::Fmod(Time, Duration);
+		if (Time < 0.0) { Time += Duration; }
+	}
+	else if ((!bBackward && Time >= Duration) || (bBackward && Time <= 0.0))
+	{
+		Time = FMath::Clamp(Time, 0.0, Duration);
+		bFinished = true;
+	}
+	GeoWorld::Models::ApplyAnimation(Rig, Visual.Animation, Time, Visual.RigState);
+	ApplyRig(Visual, nullptr);
+	if (bFinished) { Visual.Animation = -1; }
+}
+
+bool UGeoEntitySubsystem::SetEntityAnimation(const FString& Who, const FString& Animation, bool bLoop, double Speed, FString& OutMessage)
+{
+	FString Label;
+	FVisual* Visual = FindVisual(Who, Label);
+	if (!Visual || !Visual->FileModel.IsValid() || !Visual->FileModel->Rig.IsValid())
+	{
+		OutMessage = FString::Printf(TEXT("'%s': nessuna entita' a schermo con un modello da file"), *Who);
+		return false;
+	}
+	const GeoWorld::Models::FModelRig& Rig = *Visual->FileModel->Rig;
+	if (Animation.Equals(TEXT("stop"), ESearchCase::IgnoreCase))
+	{
+		Visual->Animation = -1;
+		OutMessage = FString::Printf(TEXT("%s: animazione ferma dov'e'"), *Label);
+		return true;
+	}
+	if (Animation.Equals(TEXT("reset"), ESearchCase::IgnoreCase))
+	{
+		Visual->Animation = -1;
+		Visual->RigState.Poses = GeoWorld::Models::DefaultRigState(Rig).Poses;
+		ApplyRig(*Visual, nullptr);
+		OutMessage = FString::Printf(TEXT("%s: la posa di riposo"), *Label);
+		return true;
+	}
+	const int32 Found = Rig.FindAnimation(std::string(TCHAR_TO_UTF8(*Animation)));
+	if (Found < 0)
+	{
+		FString Names;
+		for (const GeoWorld::Models::FRigAnimation& A : Rig.Animations) { Names += (Names.IsEmpty() ? TEXT("") : TEXT(", ")) + ToFString(A.Name); }
+		OutMessage = Rig.Animations.empty()
+			? FString::Printf(TEXT("%s: il modello non ha animazioni"), *Label)
+			: FString::Printf(TEXT("%s: nessuna animazione '%s' (ci sono: %s)"), *Label, *Animation, *Names);
+		return false;
+	}
+	const double Duration = Rig.Animations[static_cast<size_t>(Found)].Duration;
+	Visual->Animation = Found;
+	Visual->bAnimationLoop = bLoop;
+	Visual->AnimationSpeed = FMath::IsNearlyZero(Speed) ? 1.0 : Speed;
+	Visual->AnimationStart = FPlatformTime::Seconds();
+	OutMessage = FString::Printf(TEXT("%s: animazione '%s' (%.2f s)%s, velocita' %.2f"), *Label, *ToFString(Rig.Animations[static_cast<size_t>(Found)].Name),
+		Duration, bLoop ? TEXT(" in loop") : TEXT(" una volta"), Visual->AnimationSpeed);
+	return true;
 }

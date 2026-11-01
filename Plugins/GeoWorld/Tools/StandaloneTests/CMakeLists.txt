@@ -216,3 +216,14 @@ else()
 endif()
 
 add_test(NAME geomodels COMMAND geomodels_tests)
+
+# --- Modelli, M2: glTF (JSON, .gltf, .glb), animazioni, scheletri ------------
+add_executable(geogltf_tests geogltf_main.cpp)
+target_include_directories(geogltf_tests PRIVATE ${GEOENTITIES_DIR}/Public ${GEOCORE_DIR}/Public)
+if (MSVC)
+	target_compile_options(geogltf_tests PRIVATE /W4)
+else()
+	target_compile_options(geogltf_tests PRIVATE -Wall -Wextra -Werror=shadow -O2)
+endif()
+add_test(NAME geogltf COMMAND geogltf_tests
+	${CMAKE_CURRENT_SOURCE_DIR}/../../Source/GeoTiles/TestData/blender_tank.glb)

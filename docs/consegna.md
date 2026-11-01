@@ -17,6 +17,7 @@ Ultimo aggiornamento: 2026-10-31. Branch: `claude/charming-goodall-xd2r3g`.
 | 6 | Ortofoto drappeggiate | **codice completo, mai compilato in UE** |
 | 7 | **Entità, primo pezzo: la memoria condivisa**. Lo strato puro (`GeoEntities/Public/Entities`): lo stato canonico (ECEF, quaternione dal corpo FRD, velocità angolari nel corpo), le tre trappole in un file (NED/NEU, angoli CIGI locali e DIS in ECEF, Z del corpo giù e dell'attore su), l'estrapolazione dei nove algoritmi di DIS in una funzione (negli assi del corpo con il teorema del trasporto), il rientro morbido con `3u²−2u³`, l'ora di DIS e l'orologio della simulazione, il registro (chiave sorgente + numero, disordine, riavvii, silenzi, geoide), la tabella dei modelli (tipo DIS o `cigi N` → forme di scatole o asset, ripiego dichiarato); la memoria condivisa `GeoWorldEntities` (fotografia di 64 + 128·N byte, seqlock) e il generatore finto `geoworld demo-entities` (due aerei in virata coordinata, un elicottero, quattro auto al suolo sopra Torino; `--crowd N`); il modulo Unreal `GeoEntities`: il thread che legge, la coda MPSC, `UGeoEntitySubsystem` (attori solo per le più vicine, terreno disegnato sotto le auto, nomi sul Canvas, camera che segue), `geo.Entities.*`, riga "Entita'" nelle stampe | **da compilare e provare** (nessun materiale nuovo) — `docs/fase7-design.md` (sezione 13), `docs/fase7-verifica.md`, `docs/manuale/20-entita.md`. Poi CIGI, DIS, HLA |
 | 7 | **Modelli dai file, primo pezzo (M1)**. Lo strato puro (`GeoEntities/Public/Models`): OpenFlight 15.x/16.x (record, palette, gerarchia, DOF con i limiti, switch, LOD, sequenze, istanze, riferimenti esterni, mesh, punti luce e codici IR tenuti da parte), OBJ con MTL, immagini SGI, la ricerca delle texture nominate con i percorsi di un'altra macchina, il rig (assi, mano, unità, UV in un punto solo; parti solo per DOF, switch, LOD); le regole `file` della tabella con `scale`, `yaw`, `offset`, `up`, `forward`; `geomodel_info`. In Unreal: la cartella dei modelli (anche fuori dal progetto), la lettura su un thread di lavoro, mesh/texture/materiali condivisi (`M_GeoEntity`, `Masked`, `Translucent`), un attore con le parti, LOD dalla camera, `geo.Entities.ModelFolder`, `ModelInfo`, `ReloadModels`, `Dof`, `Switch`. FBX e IVE: il messaggio dice come convertirli | **da compilare e provare**, anche con i `.flt` veri del database (i test usano file scritti dalla specifica); rilanciare `geo.Imagery.CreateMaterial` — `docs/modelli-design.md` (sezione 12), `docs/modelli-verifica.md`, `docs/manuale/21-modelli.md`. Poi M2 glTF e conversione, M3 articolazioni, M4 termica, M5 collisioni, M6 danno, M7 luci |
+| 7 | **Modelli, secondo pezzo (M2): glTF, animazioni, conversione**. Lo strato puro: un lettore JSON nostro (`Models/Json.h`), glTF 2.0 (`Models/GltfReader.h`: `.gltf` con `.bin` o `data:`, `.glb`, accessor anche quantizzati e sparse, strisce e ventagli, materiali PBR e modi dell'alfa, texture dentro il file, scheletri nella posa di riposo, `KHR_lights_punctual` come punti luce, `KHR_texture_transform`), le pose e le curve (gradino, lineare con slerp, cubica di Hermite), le parti animate nel rig (`Prima · Posa · Dopo`), `anim` nella tabella. In Unreal: texture incorporate, `Metallic`/`Roughness`/`AlphaCutoff`/`IgnoreAlpha` nei tre `M_GeoEntity*`, le animazioni per entità a ogni frame, `geo.Entities.Animation`. Pipeline: `geoworld convert-models` (osgconv → `.flt`, FBX2glTF o Blender → `.glb`, come make, texture mancanti dette). Un `.glb` fatto davvero con Blender nei test | **da compilare e provare**; rilanciare `geo.Imagery.CreateMaterial` (parametri nuovi); provare il carro di Blender (`TestData/blender_tank.glb` con `anim 0`) e i glTF di prova del Khronos — `docs/modelli-design.md` (sezione 13), `docs/modelli-verifica.md` (sezione 10), `docs/manuale/21-modelli.md`. Poi M3 articolazioni |
 | 8 | **Strade, ferrovie, piste** da OpenStreetMap: dipinte sul terreno, **3D da vicino** | dipinte provate dall'utente (si vedono); strade 3D provate ("manca la tridimensionalita'"), **rifatte: carreggiata in piano, scarpate, marciapiedi, guardrail, ponti con parapetti e pile — da compilare e provare** — `docs/fase8-design.md`, `docs/fase8-verifica.md`, `docs/strade-3d.md` |
 | dopo | **Flash quando la geometria si affina**: le figlie sostituivano il padre in un frame | **geomorphing e dissolvenza, da compilare e provare** — `docs/strade-3d.md`, sezione 2 |
 | dopo | **Flash del rebase**: l'origine del mondo stava alla quota della camera, e a ogni rebase cielo e nebbia saltavano | **corretto, da riprovare** — `docs/strade-3d.md`, sezione 2 |
@@ -120,6 +121,7 @@ geoworld build-stars -o dataset/stars.gst
 
 :: Entita' finte in memoria condivisa (dettagli in docs/fase7-verifica.md): aerei, elicottero, auto sopra Torino
 geoworld demo-entities                          :: Ctrl+C per fermare; --lat --lon altrove, --rate N, --crowd N
+geoworld convert-models D:\db\Models             :: .ive -> .flt (osgconv), .fbx .blend .dae ... -> .glb (FBX2glTF, Blender)
 ```
 
 `check-env` e' l'unico comando che sta fra te e un dataset sbagliato di 48
@@ -144,7 +146,8 @@ build\Debug\geobuildings_tests.exe Plugins\GeoWorld\Source\GeoTiles\TestData\bui
 build\Debug\geosky_tests.exe                       :: 60 test (il cielo: sole, luna, ora legale, notte, stelle vere, pianeti)
 build\Debug\geoentities_tests.exe Plugins\GeoWorld\Source\GeoTiles\TestData\entities_fixture.bin   :: 97 test (le entita': frame, estrapolazione, tempo, registro, modelli, memoria condivisa, la fixture di Python)
 build\Debug\geomodels_tests.exe                     :: 48 test (i modelli: OpenFlight, OBJ, SGI, texture, il rig)
-build\Debug\geomodel_info.exe D:\db\Models\x.flt D:\db\Models   :: cosa c'e' dentro un modello, senza Unreal
+build\Debug\geogltf_tests.exe Plugins\GeoWorld\Source\GeoTiles\TestData\blender_tank.glb   :: 50 test (glTF, animazioni, un .glb di Blender)
+build\Debug\geomodel_info.exe D:\db\Models\x.flt D:\db\Models   :: cosa c'e' dentro un modello (.flt .obj .gltf .glb), senza Unreal
 Plugins\GeoWorld\Tools\CheckSourceDiscipline.sh      :: serve bash (Git Bash)
 ```
 
@@ -269,6 +272,7 @@ geo.Entities.Blend <s>         il rientro morbido (0,4); Models <file|default>: 
 geo.Entities.ModelFolder <dir> la cartella dei modelli (.flt, .obj), anche fuori dal progetto; ReloadModels: rilegge
 geo.Entities.ModelInfo <file>  cosa c'e' in un modello: misure, DOF, switch, texture trovate e no
 geo.Entities.Dof <entita'> ... muove una parte (senza dof: l'elenco); Switch <entita'> <switch> <maschera>
+geo.Entities.Animation <e> [a] un'animazione del file (glTF): loop|once, velocita'; stop, reset; senza: l'elenco
 ```
 
 Se hai un dataset e vuoi vedere subito qualcosa, il comando e'
@@ -457,8 +461,9 @@ Plugins/GeoWorld/Source/
     Public/Entities/  C++ PURO: stato, frame (le tre trappole), estrapolazione e rientro,
                       tempo, registro, modelli, formato della memoria condivisa
     Public/Sources/   IGeoEntitySource e la coda MPSC; Private/Sources: la memoria e il thread
-    Public/Models/    C++ PURO: il modello (ModelData), OpenFlight, OBJ, SGI, la ricerca
-                      delle texture, il rig (assi dell'attore, parti, DOF, switch, LOD)
+    Public/Models/    C++ PURO: il modello (ModelData), OpenFlight, OBJ, glTF (con Json.h), SGI,
+                      la ricerca delle texture, il rig (assi dell'attore, parti, DOF, parti
+                      animate, switch, LOD, animazioni)
     Private/ModelLibrary/  i modelli letti su un thread di lavoro; mesh, texture, materiali
     GeoEntitySubsystem, GeoEntitySettings   registro, attori (con le parti), suolo, nomi, camera
   GeoWorldEditor/ i materiali costruiti da codice (geo.Imagery.CreateMaterial)

@@ -19,12 +19,15 @@
 //  matrici: la loro trasformazione si cuoce nei vertici. Restano parti solo:
 //    - la radice;
 //    - ogni DOF (si muove: la sua trasformazione e' Prima * Moto * Dopo);
+//    - ogni nodo che un'animazione del file muove (glTF): Prima * Posa * Dopo,
+//      con la posa (traslazione, rotazione, scala) nelle coordinate del file;
 //    - ogni LOD, ogni figlio di switch o di sequenza (si accende e si spegne:
 //      la parte porta le CONDIZIONI per essere visibile).
 //  Le parti vuote (senza geometria e senza figli) si tolgono.
 // =============================================================================
 #pragma once
 
+#include <algorithm>
 #include <array>
 #include <cmath>
 #include <cstdint>
@@ -64,7 +67,7 @@ namespace GeoWorld::Models
 		int32_t Child = 0;
 	};
 
-	enum class EPartKind : uint8_t { Static, Dof };
+	enum class EPartKind : uint8_t { Static, Dof, Animated };
 
 	struct FRigPart
 	{
@@ -77,6 +80,8 @@ namespace GeoWorld::Models
 		FAffine Before, After;
 		/** I limiti e i valori di partenza, nella semantica del file (gradi matematici, metri). */
 		FDof Dof;
+		/** Animated: la posa di riposo del nodo (coordinate del file); la parte nella madre = Before * Posa * After. */
+		FTrs RestTrs;
 		std::vector<FRigSection> Sections;
 		std::vector<FLodCondition> Lods;
 		std::vector<FSwitchCondition> Switches;
@@ -111,6 +116,20 @@ namespace GeoWorld::Models
 		}
 	};
 
+	/** Un canale di un'animazione: una curva su una parte (Animated). */
+	struct FRigAnimChannel
+	{
+		int32_t Part = 0;
+		FAnimCurve Curve;
+	};
+
+	struct FRigAnimation
+	{
+		std::string Name;
+		double Duration = 0.0;
+		std::vector<FRigAnimChannel> Channels;
+	};
+
 	struct FRigLight
 	{
 		int32_t Part = 0;
@@ -139,6 +158,7 @@ namespace GeoWorld::Models
 		std::vector<FModelMaterial> Materials;
 		std::vector<FModelTexture> Textures;
 		std::vector<FRigLight> Lights;
+		std::vector<FRigAnimation> Animations;
 		std::vector<std::string> Warnings;
 		std::string Format;
 		/** Il contenitore di tutto, nel sistema della radice, a riposo. */
@@ -156,6 +176,25 @@ namespace GeoWorld::Models
 			size_t Count = 0;
 			for (const FRigPart& Part : Parts) { Count += Part.Kind == EPartKind::Dof ? 1 : 0; }
 			return Count;
+		}
+
+		size_t AnimatedCount() const
+		{
+			size_t Count = 0;
+			for (const FRigPart& Part : Parts) { Count += Part.Kind == EPartKind::Animated ? 1 : 0; }
+			return Count;
+		}
+
+		/** Un'animazione per nome, o per numero ("0", "1"...). -1 se non c'e'. */
+		int32_t FindAnimation(const std::string& NameOrNumber) const
+		{
+			for (size_t I = 0; I < Animations.size(); ++I) { if (Animations[I].Name == NameOrNumber) { return static_cast<int32_t>(I); } }
+			if (!NameOrNumber.empty() && NameOrNumber.find_first_not_of("0123456789") == std::string::npos && NameOrNumber.size() < 9)
+			{
+				const int32_t Index = std::stoi(NameOrNumber);
+				if (Index < static_cast<int32_t>(Animations.size())) { return Index; }
+			}
+			return -1;
 		}
 
 		int32_t FindPart(const std::string& Name) const
@@ -177,25 +216,85 @@ namespace GeoWorld::Models
 		}
 	};
 
-	/** La trasformazione di una parte nella madre, con questi valori del DOF (ignorati se la parte non e' un DOF). */
-	inline FAffine PartTransform(const FRigPart& Part, const FDofValues& Values)
+	/**
+	 * La trasformazione di una parte nella madre: con questi valori del DOF
+	 * (se e' un DOF), con questa posa (se e' animata; nulla: quella di riposo).
+	 */
+	inline FAffine PartTransform(const FRigPart& Part, const FDofValues& Values, const FTrs* Pose = nullptr)
 	{
-		return Part.Kind == EPartKind::Dof ? Part.Before * DofMotion(Values) * Part.After : Part.Rest;
+		switch (Part.Kind)
+		{
+		case EPartKind::Dof: return Part.Before * DofMotion(Values) * Part.After;
+		case EPartKind::Animated: return Part.Before * TrsMatrix(Pose ? *Pose : Part.RestTrs) * Part.After;
+		default: return Part.Rest;
+		}
 	}
 
-	/** Lo stato di un modello in un'entita': i valori dei DOF (per parte) e la maschera di ogni switch. */
+	/**
+	 * Lo stato di un modello in un'entita', per parte: i valori dei DOF e la
+	 * posa delle parti animate; e la maschera di ogni switch.
+	 */
 	struct FRigState
 	{
 		std::vector<FDofValues> Dofs;
+		std::vector<FTrs> Poses;
 		std::vector<int32_t> Masks;
 	};
 
 	inline FRigState DefaultRigState(const FModelRig& Rig)
 	{
 		FRigState State;
-		for (const FRigPart& Part : Rig.Parts) { State.Dofs.push_back(FDofValues::Current(Part.Dof)); }
+		for (const FRigPart& Part : Rig.Parts)
+		{
+			State.Dofs.push_back(FDofValues::Current(Part.Dof));
+			State.Poses.push_back(Part.RestTrs);
+		}
 		for (const FRigSwitch& Switch : Rig.Switches) { State.Masks.push_back(Switch.DefaultMask); }
 		return State;
+	}
+
+	inline FAffine PartTransform(const FRigPart& Part, const FRigState& State, size_t Index)
+	{
+		static const FDofValues Zero;
+		const FDofValues& Values = Index < State.Dofs.size() ? State.Dofs[Index] : Zero;
+		return PartTransform(Part, Values, Index < State.Poses.size() ? &State.Poses[Index] : nullptr);
+	}
+
+	/** Dal sistema di una parte a quello della radice, con questo stato (le madri vengono prima delle figlie). */
+	inline FAffine PartToRoot(const FModelRig& Rig, const FRigState& State, int32_t Part)
+	{
+		FAffine Out;
+		int32_t Guard = 0;
+		while (Part > 0 && static_cast<size_t>(Part) < Rig.Parts.size() && Guard++ < 4096)
+		{
+			Out = PartTransform(Rig.Parts[static_cast<size_t>(Part)], State, static_cast<size_t>(Part)) * Out;
+			Part = Rig.Parts[static_cast<size_t>(Part)].Parent;
+		}
+		return Out;
+	}
+
+	/**
+	 * Un'animazione del file a quel tempo (s, dall'inizio; fuori dalla durata
+	 * si ferma al primo o all'ultimo fotogramma: il giro lo decide chi chiama).
+	 * Cambia solo le pose delle parti che l'animazione muove, e solo le
+	 * componenti che muove (una curva di rotazione lascia la traslazione).
+	 */
+	inline void ApplyAnimation(const FModelRig& Rig, int32_t Animation, double Time, FRigState& State)
+	{
+		if (Animation < 0 || static_cast<size_t>(Animation) >= Rig.Animations.size()) { return; }
+		for (const FRigAnimChannel& Channel : Rig.Animations[static_cast<size_t>(Animation)].Channels)
+		{
+			if (Channel.Part < 0 || static_cast<size_t>(Channel.Part) >= State.Poses.size()) { continue; }
+			FTrs& Pose = State.Poses[static_cast<size_t>(Channel.Part)];
+			double V[4];
+			SampleCurve(Channel.Curve, Time, V);
+			switch (Channel.Curve.Path)
+			{
+			case EAnimPath::Translation: for (int I = 0; I < 3; ++I) { Pose.T[I] = V[I]; } break;
+			case EAnimPath::Rotation: for (int I = 0; I < 4; ++I) { Pose.R[I] = V[I]; } break;
+			case EAnimPath::Scale: for (int I = 0; I < 3; ++I) { Pose.S[I] = V[I]; } break;
+			}
+		}
 	}
 
 	/** Visibile con questo stato, con la camera qui (nel sistema della radice, metri). */
@@ -236,6 +335,8 @@ namespace GeoWorld::Models
 		Rig.Textures = Model.Textures;
 		Rig.Warnings = Model.Warnings;
 		Rig.Format = Model.Format;
+		// La parte di ogni nodo animato, per i canali delle animazioni.
+		std::vector<int32_t> PartOfNode(Model.Nodes.size(), -1);
 
 		// La radice: dal file all'attore. K e' la parte lineare (assi, scala,
 		// imbardata): e' il sistema in cui vive la geometria delle parti mobili.
@@ -258,7 +359,8 @@ namespace GeoWorld::Models
 				const std::vector<FLodCondition>& LodsIn, const std::vector<FSwitchCondition>& SwitchesIn)
 		{
 			const FModelNode& Node = Model.Nodes[static_cast<size_t>(NodeIndex)];
-			FAffine Acc = Node.bHasMatrix ? AccIn * Node.Local : AccIn;
+			// Un nodo animato non cuoce la sua matrice: e' la posa della sua parte.
+			FAffine Acc = (Node.bHasMatrix && !Node.bAnimated) ? AccIn * Node.Local : AccIn;
 			FAffine ToRoot = Node.bHasMatrix ? ToRootIn * Node.Local : ToRootIn;
 			int32_t Part = PartIndex;
 			std::vector<FLodCondition> Lods = LodsIn;
@@ -276,7 +378,20 @@ namespace GeoWorld::Models
 				return static_cast<int32_t>(Rig.Parts.size()) - 1;
 			};
 
-			if (Node.Kind == ENodeKind::Dof)
+			if (Node.bAnimated && NodeIndex != 0)
+			{
+				// Come un DOF, con la posa del file al posto del moto: un vertice v
+				// del nodo sta nella parte a K v; nella madre a Acc Posa v.
+				const int32_t New = NewPart(EPartKind::Animated, Node.Name);
+				FRigPart& P = Rig.Parts[static_cast<size_t>(New)];
+				P.RestTrs = Node.Trs;
+				P.Before = Acc;
+				P.After = KInverse;
+				PartOfNode[static_cast<size_t>(NodeIndex)] = New;
+				Part = New;
+				Acc = K;
+			}
+			else if (Node.Kind == ENodeKind::Dof)
 			{
 				// Il sistema della parte nuova: K (assi dell'attore). Un vertice v del
 				// file sta nella parte a K v; nella madre a Acc F Moto F^-1 v.
@@ -399,6 +514,20 @@ namespace GeoWorld::Models
 		};
 		Visit(0, 0, G, G, {}, {});
 
+		// Le animazioni: i canali sui nodi diventano canali sulle parti.
+		for (const FModelAnimation& Animation : Model.Animations)
+		{
+			FRigAnimation Out;
+			Out.Name = Animation.Name;
+			Out.Duration = Animation.Duration();
+			for (const FModelAnimChannel& Channel : Animation.Channels)
+			{
+				const int32_t Part = static_cast<size_t>(Channel.Node) < PartOfNode.size() ? PartOfNode[static_cast<size_t>(Channel.Node)] : -1;
+				if (Part >= 0) { Out.Channels.push_back(FRigAnimChannel{ Part, Channel.Curve }); }
+			}
+			Rig.Animations.push_back(std::move(Out));
+		}
+
 		// Le parti vuote: si tolgono dal fondo, finche' ce ne sono.
 		bool bChanged = true;
 		while (bChanged)
@@ -413,6 +542,13 @@ namespace GeoWorld::Models
 					Rig.Parts.erase(Rig.Parts.begin() + static_cast<std::ptrdiff_t>(I));
 					for (FRigPart& P : Rig.Parts) { if (P.Parent > static_cast<int32_t>(I)) { --P.Parent; } }
 					for (FRigLight& L : Rig.Lights) { if (L.Part > static_cast<int32_t>(I)) { --L.Part; } }
+					// Un nodo animato senza niente da muovere (un osso, un punto vuoto): il suo canale sparisce.
+					for (FRigAnimation& A : Rig.Animations)
+					{
+						A.Channels.erase(std::remove_if(A.Channels.begin(), A.Channels.end(),
+							[&](const FRigAnimChannel& C) { return C.Part == static_cast<int32_t>(I); }), A.Channels.end());
+						for (FRigAnimChannel& C : A.Channels) { if (C.Part > static_cast<int32_t>(I)) { --C.Part; } }
+					}
 					bChanged = true;
 					break;
 				}
@@ -426,7 +562,7 @@ namespace GeoWorld::Models
 		for (size_t I = 0; I < Rig.Parts.size(); ++I)
 		{
 			const FRigPart& P = Rig.Parts[I];
-			const FAffine Local = PartTransform(P, FDofValues::Current(P.Dof));
+			const FAffine Local = PartTransform(P, FDofValues::Current(P.Dof));   // gli animati nella posa di riposo
 			ToRootOfPart[I] = P.Parent >= 0 ? ToRootOfPart[static_cast<size_t>(P.Parent)] * Local : FAffine::Identity();
 			if (!P.bHasBounds) { continue; }
 			for (int Corner = 0; Corner < 8; ++Corner)

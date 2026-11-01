@@ -2,6 +2,7 @@
 //  geomodel_info -- Che cosa c'e' dentro un modello, senza Unreal.
 //
 //      geomodel_info D:\db\Models\carro\carro.flt [cartella dei modelli]
+//      geomodel_info D:\modelli\radar.glb
 //
 //  Lo legge con gli stessi lettori del motore (Models/*.h) e stampa: il
 //  formato, gli avvisi, l'albero dei nodi (con i DOF e i loro limiti, gli
@@ -49,6 +50,7 @@ static void PrintNode(const FModel& Model, int32_t Index, int Depth)
 	if (N.Kind == ENodeKind::Switch) { std::printf(", %d maschere, accesa la %d", N.MaskCount(), N.CurrentMask); }
 	if (N.Kind == ENodeKind::Sequence) { std::printf(", %zu fotogrammi in %.2f s", N.Children.size(), N.LoopDuration); }
 	if (N.Kind == ENodeKind::ExternalRef) { std::printf(", '%s'", N.ExternalPath.c_str()); }
+	if (N.bAnimated) { std::printf(", ANIMATO"); }
 	std::printf("\n");
 	if (Depth > 40) { return; }
 	for (const int32_t Child : N.Children) { PrintNode(Model, Child, Depth + 1); }
@@ -58,7 +60,7 @@ int main(int ArgCount, char** Arguments)
 {
 	if (ArgCount < 2)
 	{
-		std::printf("uso: geomodel_info <modello.flt|modello.obj> [cartella dei modelli]\n");
+		std::printf("uso: geomodel_info <modello.flt|.obj|.gltf|.glb> [cartella dei modelli]\n");
 		return 2;
 	}
 	namespace fs = std::filesystem;
@@ -107,13 +109,18 @@ int main(int ArgCount, char** Arguments)
 	std::printf("\nLe texture:\n");
 	for (const FModelTexture& T : Model.Textures)
 	{
-		std::printf("  %-50s %s\n", T.Path.c_str(), T.Resolved.empty() ? "NON TROVATA" : T.Resolved.c_str());
+		if (!T.Embedded.empty()) { std::printf("  %-50s dentro il file (%s, %zu byte)\n", T.Path.c_str(), T.MimeType.empty() ? "?" : T.MimeType.c_str(), T.Embedded.size()); }
+		else { std::printf("  %-50s %s\n", T.Path.c_str(), T.Resolved.empty() ? "NON TROVATA" : T.Resolved.c_str()); }
 	}
 	std::printf("\nI materiali:\n");
 	for (size_t I = 0; I < Model.Materials.size(); ++I)
 	{
 		const FModelMaterial& M = Model.Materials[I];
-		std::printf("  %2zu  texture %d%s%s", I, M.Texture, M.bTwoSided ? ", due lati" : "", M.bTranslucent ? ", trasparente" : "");
+		std::printf("  %2zu  '%s', texture %d%s%s", I, M.Name.c_str(), M.Texture, M.bTwoSided ? ", due lati" : "", M.bTranslucent ? ", trasparente" : "");
+		if (M.AlphaMode == EAlphaMode::Mask) { std::printf(", ritagliato sotto %.2f", M.AlphaCutoff); }
+		if (M.AlphaMode == EAlphaMode::Opaque) { std::printf(", opaco (alfa ignorato)"); }
+		if (M.Metallic >= 0.0f) { std::printf(", metallo %.2f", M.Metallic); }
+		if (M.Roughness >= 0.0f) { std::printf(", rugosita' %.2f", M.Roughness); }
 		if (M.Emissive[0] + M.Emissive[1] + M.Emissive[2] > 0.0f) { std::printf(", luce propria %.2f %.2f %.2f", M.Emissive[0], M.Emissive[1], M.Emissive[2]); }
 		if (M.IrMaterial >= 0) { std::printf(", materiale IR %d", M.IrMaterial); }
 		if (M.SurfaceCode >= 0) { std::printf(", codice di superficie %d", M.SurfaceCode); }
@@ -122,17 +129,53 @@ int main(int ArgCount, char** Arguments)
 
 	const FModelRig Rig = BuildRig(Model);
 	std::printf("\nIl rig (assi dell'attore: X avanti, Y destra, Z alto; metri):\n");
-	std::printf("  %zu parti, %zu DOF, %zu switch/sequenze, %zu triangoli\n", Rig.Parts.size(), Rig.DofCount(), Rig.Switches.size(), Rig.TriangleCount());
+	std::printf("  %zu parti, %zu DOF, %zu animate, %zu switch/sequenze, %zu triangoli\n", Rig.Parts.size(), Rig.DofCount(), Rig.AnimatedCount(),
+		Rig.Switches.size(), Rig.TriangleCount());
 	std::printf("  misure: avanti %.2f..%.2f, destra %.2f..%.2f, alto %.2f..%.2f (lungo %.2f m)\n", Rig.BoundsMin[0], Rig.BoundsMax[0],
 		Rig.BoundsMin[1], Rig.BoundsMax[1], Rig.BoundsMin[2], Rig.BoundsMax[2], Rig.Extent());
+	// I triangoli girati: (B - A) x (C - A) contro la normale dei vertici. Se sono tanti, il
+	// modello si vedra' "da dentro" (o il file ha le normali sbagliate).
+	size_t Against = 0, Counted = 0;
+	for (const FRigPart& P : Rig.Parts)
+	{
+		for (const FRigSection& S : P.Sections)
+		{
+			for (size_t T = 0; T + 2 < S.Indices.size(); T += 3)
+			{
+				const FRigVertex& A = S.Vertices[S.Indices[T]];
+				const FRigVertex& B = S.Vertices[S.Indices[T + 1]];
+				const FRigVertex& C = S.Vertices[S.Indices[T + 2]];
+				const double U[3] = { B.P[0] - A.P[0], B.P[1] - A.P[1], B.P[2] - A.P[2] };
+				const double V[3] = { C.P[0] - A.P[0], C.P[1] - A.P[1], C.P[2] - A.P[2] };
+				const double X[3] = { U[1] * V[2] - U[2] * V[1], U[2] * V[0] - U[0] * V[2], U[0] * V[1] - U[1] * V[0] };
+				const double N[3] = { A.N[0] + B.N[0] + C.N[0], A.N[1] + B.N[1] + C.N[1], A.N[2] + B.N[2] + C.N[2] };
+				const double Dot = X[0] * N[0] + X[1] * N[1] + X[2] * N[2];
+				if (X[0] == 0.0 && X[1] == 0.0 && X[2] == 0.0) { continue; }
+				++Counted;
+				if (Dot < 0.0) { ++Against; }
+			}
+		}
+	}
+	std::printf("  triangoli girati contro le loro normali: %zu su %zu%s\n", Against, Counted,
+		Counted > 0 && Against * 10 > Counted ? "  <-- TANTI: il modello si vedra' da dentro, o le normali del file sono sbagliate" : "");
 	for (size_t I = 0; I < Rig.Parts.size(); ++I)
 	{
 		const FRigPart& P = Rig.Parts[I];
-		std::printf("  [%zu] %s%s, %zu triangoli in %zu sezioni", I, P.Kind == EPartKind::Dof ? "DOF " : "", P.Name.c_str(), P.TriangleCount(), P.Sections.size());
+		std::printf("  [%zu] %s%s, %zu triangoli in %zu sezioni", I, P.Kind == EPartKind::Dof ? "DOF " : P.Kind == EPartKind::Animated ? "animata " : "",
+			P.Name.c_str(), P.TriangleCount(), P.Sections.size());
 		if (P.Parent >= 0) { std::printf(", dentro [%d]", P.Parent); }
 		if (!P.Switches.empty()) { std::printf(", se lo switch %d mostra il figlio %d", P.Switches.back().Switch, P.Switches.back().Child); }
 		if (!P.Lods.empty()) { std::printf(", da %.0f a %.0f m", P.Lods.back().Near, P.Lods.back().Far); }
 		std::printf("\n");
+	}
+	if (!Rig.Animations.empty())
+	{
+		std::printf("\nLe animazioni (geo.Entities.Animation, o 'anim' nella regola):\n");
+		for (size_t I = 0; I < Rig.Animations.size(); ++I)
+		{
+			const FRigAnimation& A = Rig.Animations[I];
+			std::printf("  %zu  '%s': %.2f s, %zu canali\n", I, A.Name.c_str(), A.Duration, A.Channels.size());
+		}
 	}
 	return 0;
 }

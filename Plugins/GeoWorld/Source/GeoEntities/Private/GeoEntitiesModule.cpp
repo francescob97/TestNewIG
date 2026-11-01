@@ -239,7 +239,7 @@ static FAutoConsoleCommandWithWorldAndArgs GeoEntitiesModelFolderCommand(
 // --- geo.Entities.ModelInfo -----------------------------------------------------
 static FAutoConsoleCommandWithWorldAndArgs GeoEntitiesModelInfoCommand(
 	TEXT("geo.Entities.ModelInfo"),
-	TEXT("geo.Entities.ModelInfo <file> - legge un modello (.flt, .obj) e dice cosa c'e': misure, DOF e loro limiti, switch, texture trovate e no, avvisi. Senza argomenti, i modelli gia' letti."),
+	TEXT("geo.Entities.ModelInfo <file> - legge un modello (.flt, .obj, .gltf, .glb) e dice cosa c'e': misure, DOF e loro limiti, switch, animazioni, texture trovate e no, avvisi. Senza argomenti, i modelli gia' letti."),
 	FConsoleCommandWithWorldAndArgsDelegate::CreateStatic([](const TArray<FString>& RawArgs, UWorld* World)
 	{
 		UGeoEntitySubsystem* Entities = GeoEntitiesConsole::Get(World);
@@ -275,7 +275,7 @@ static FAutoConsoleCommandWithWorld GeoEntitiesReloadModelsCommand(
 // --- geo.Entities.Dof -------------------------------------------------------------
 static FAutoConsoleCommandWithWorldAndArgs GeoEntitiesDofCommand(
 	TEXT("geo.Entities.Dof"),
-	TEXT("geo.Entities.Dof <entita'> [dof] [imbardata] [beccheggio] [rollio] [x y z] - muove una parte del modello (gradi di OpenFlight: imbardata positiva a SINISTRA; metri), nei limiti del modello. Senza dof: l'elenco di DOF e switch."),
+	TEXT("geo.Entities.Dof <entita'> [dof] [imbardata] [beccheggio] [rollio] [x y z] - muove una parte del modello (gradi di OpenFlight: imbardata positiva a SINISTRA; metri), nei limiti del modello. Senza dof: l'elenco di DOF, switch e animazioni."),
 	FConsoleCommandWithWorldAndArgsDelegate::CreateStatic([](const TArray<FString>& RawArgs, UWorld* World)
 	{
 		UGeoEntitySubsystem* Entities = GeoEntitiesConsole::Get(World);
@@ -316,6 +316,45 @@ static FAutoConsoleCommandWithWorldAndArgs GeoEntitiesSwitchCommand(
 		}
 		FString Message;
 		const bool bOk = Entities->SetEntitySwitch(Args[0], Args[1], FCString::Atoi(*Args[2]), Message);
+		GeoEntitiesConsole::Report(Message, bOk ? FColor::Cyan : FColor::Red);
+	}));
+
+// --- geo.Entities.Animation -------------------------------------------------------
+static FAutoConsoleCommandWithWorldAndArgs GeoEntitiesAnimationCommand(
+	TEXT("geo.Entities.Animation"),
+	TEXT("geo.Entities.Animation <entita'> [animazione|stop|reset] [loop|once] [velocita'] - fa girare un'animazione del modello (glTF: per nome o numero; default in loop, velocita' 1; negativa: all'indietro). Senza animazione: l'elenco."),
+	FConsoleCommandWithWorldAndArgsDelegate::CreateStatic([](const TArray<FString>& RawArgs, UWorld* World)
+	{
+		UGeoEntitySubsystem* Entities = GeoEntitiesConsole::Get(World);
+		if (!Entities) { return; }
+		const TArray<FString> Args = GeoWorld::Console::QuotedArgs(RawArgs);
+		if (Args.Num() < 1)
+		{
+			GeoEntitiesConsole::Report(TEXT("Uso: geo.Entities.Animation <entita'> [animazione|stop|reset] [loop|once] [velocita']"), FColor::Red);
+			return;
+		}
+		if (Args.Num() < 2)
+		{
+			TArray<FString> Lines;
+			const bool bOk = Entities->DescribeEntityRig(Args[0], Lines);
+			for (const FString& Line : Lines) { GeoEntitiesConsole::Report(Line, bOk ? FColor::White : FColor::Red); }
+			return;
+		}
+		bool bLoop = true;
+		double Speed = 1.0;
+		for (int32 Index = 2; Index < Args.Num(); ++Index)
+		{
+			if (Args[Index].Equals(TEXT("once"), ESearchCase::IgnoreCase)) { bLoop = false; }
+			else if (Args[Index].Equals(TEXT("loop"), ESearchCase::IgnoreCase)) { bLoop = true; }
+			else if (Args[Index].IsNumeric()) { Speed = FCString::Atod(*Args[Index]); }
+			else
+			{
+				GeoEntitiesConsole::Report(FString::Printf(TEXT("'%s'? Dopo l'animazione: loop, once, o la velocita' (es. 0.5, -1)"), *Args[Index]), FColor::Red);
+				return;
+			}
+		}
+		FString Message;
+		const bool bOk = Entities->SetEntityAnimation(Args[0], Args[1], bLoop, Speed, Message);
 		GeoEntitiesConsole::Report(Message, bOk ? FColor::Cyan : FColor::Red);
 	}));
 

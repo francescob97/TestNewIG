@@ -2447,8 +2447,14 @@ namespace
 		UMaterialExpressionMultiply* Coloured = G.Make<UMaterialExpressionMultiply>(-500, 0);
 		UMaterialExpressionMultiply* Emissive = G.Make<UMaterialExpressionMultiply>(-500, 550);
 		UMaterialExpressionMultiply* Alpha = G.Make<UMaterialExpressionMultiply>(-500, 300);
-		UMaterialExpressionConstant* Roughness = G.Make<UMaterialExpressionConstant>(-500, 200);
+		// PBR (glTF): metallo e rugosita' per materiale; i formati vecchi lasciano i default.
+		UMaterialExpressionScalarParameter* Roughness = G.Make<UMaterialExpressionScalarParameter>(-500, 150);
+		UMaterialExpressionScalarParameter* Metallic = G.Make<UMaterialExpressionScalarParameter>(-500, 230);
 		if (!G.bOk) { return false; }
+		Roughness->ParameterName = TEXT("Roughness");
+		Roughness->DefaultValue = 0.6f;
+		Metallic->ParameterName = TEXT("Metallic");
+		Metallic->DefaultValue = 0.0f;
 
 		Texture->ParameterName = TEXT("BaseTexture");
 		Texture->Texture = White;
@@ -2457,7 +2463,6 @@ namespace
 		Tint->DefaultValue = FLinearColor::White;
 		Glow->ParameterName = TEXT("Emissive");
 		Glow->DefaultValue = FLinearColor::Black;
-		Roughness->R = 0.6f;
 		G.Connect(Coordinates, TEXT(""), Texture, TEXT("UVs"));
 
 		const int32 PaintRgb = FindOutputByChannels(Paint, true, true, true, false);
@@ -2487,7 +2492,34 @@ namespace
 		G.Connect(Coloured, TEXT(""), MP_BaseColor);
 		G.Connect(Emissive, TEXT(""), MP_EmissiveColor);
 		G.Connect(Roughness, TEXT(""), MP_Roughness);
-		if (Mode == 1) { G.Connect(Alpha, TEXT(""), MP_OpacityMask); }
+		G.Connect(Metallic, TEXT(""), MP_Metallic);
+		if (Mode == 1)
+		{
+			// Il taglio e' fisso a 0,5 nel materiale; la soglia del file (AlphaCutoff di glTF)
+			// si ottiene spostando l'alfa: alfa + (0,5 - soglia). IgnoreAlpha = 1 per i
+			// materiali OPAQUE a due facce, che usano questo materiale solo per le due facce.
+			UMaterialExpressionScalarParameter* Cutoff = G.Make<UMaterialExpressionScalarParameter>(-700, 400);
+			UMaterialExpressionScalarParameter* Ignore = G.Make<UMaterialExpressionScalarParameter>(-700, 480);
+			UMaterialExpressionMultiply* NegativeCutoff = G.Make<UMaterialExpressionMultiply>(-500, 400);
+			UMaterialExpressionAdd* Shift = G.Make<UMaterialExpressionAdd>(-350, 400);
+			UMaterialExpressionAdd* Shifted = G.Make<UMaterialExpressionAdd>(-250, 320);
+			UMaterialExpressionLinearInterpolate* Mask = G.Make<UMaterialExpressionLinearInterpolate>(-150, 350);
+			if (!G.bOk) { return false; }
+			Cutoff->ParameterName = TEXT("AlphaCutoff");
+			Cutoff->DefaultValue = 0.5f;
+			Ignore->ParameterName = TEXT("IgnoreAlpha");
+			Ignore->DefaultValue = 0.0f;
+			NegativeCutoff->A.Connect(0, Cutoff);
+			NegativeCutoff->ConstB = -1.0f;
+			Shift->A.Connect(0, NegativeCutoff);
+			Shift->ConstB = 0.5f;
+			Shifted->A.Connect(0, Alpha);
+			Shifted->B.Connect(0, Shift);
+			Mask->A.Connect(0, Shifted);
+			Mask->ConstB = 1.0f;
+			Mask->Alpha.Connect(0, Ignore);
+			G.Connect(Mask, TEXT(""), MP_OpacityMask);
+		}
 		if (Mode == 2) { G.Connect(Alpha, TEXT(""), MP_Opacity); }
 		if (!G.bOk) { return false; }
 		UMaterialEditingLibrary::RecompileMaterial(Material);

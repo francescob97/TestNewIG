@@ -14,7 +14,7 @@ Il progetto `TestNewIG` e' un guscio vuoto: tutto il codice vive in
 | `GeoCore` | Runtime | Geodesia, georeferenziazione, origin rebasing |
 | `GeoTiles` | Runtime | Formato tile, loader asincrono, cache LRU, ortofoto *(Fasi 2/3/6)* |
 | `GeoRender` | Runtime | Quadtree, LOD, mesh, terreno, drappeggio, strade, acqua, vento, pioggia e neve, fulmini, nuvole *(Fasi 4/5/6/8/9)* |
-| `GeoEntities` | Runtime | Entità da fuori: stato canonico, frame, estrapolazione, registro, memoria condivisa, attori; i modelli dai file (OpenFlight, OBJ) con le parti mobili *(Fase 7)* |
+| `GeoEntities` | Runtime | Entità da fuori: stato canonico, frame, estrapolazione, registro, memoria condivisa, attori; i modelli dai file (OpenFlight, OBJ, glTF) con le parti mobili e le animazioni *(Fase 7)* |
 | `GeoWorldEditor` | Editor | I materiali costruiti da codice (`geo.Imagery.CreateMaterial`) |
 
 `GeoCore` e' diviso in due strati fisicamente separati:
@@ -50,9 +50,14 @@ Il progetto `TestNewIG` e' un guscio vuoto: tutto il codice vive in
       (`geo.Entities.Dof`, `geo.Entities.Switch`); `geomodel_info` per guardare
       dentro i propri modelli *(`docs/modelli-design.md`, sezione 12; prova:
       `docs/modelli-verifica.md`; per chi impara: `docs/manuale/21-modelli.md`)*.
-      Poi glTF e conversione (M2), articolazioni e animazione (M3), termica per
-      i sensori (M4), collisioni (M5), danno (M6), luci ed effetti (M7);
-      poi CIGI, DIS, HLA
+      **Il secondo pezzo (M2)**: glTF 2.0 (`.gltf`, `.glb`, texture dentro il
+      file, materiali PBR, scheletri nella posa di riposo, luci), le animazioni
+      dei file (curve a gradino, lineari, cubiche; `geo.Entities.Animation`,
+      `anim` nella tabella), e `geoworld convert-models` (`.ive` con osgconv,
+      `.fbx`/`.blend`/`.dae`... con FBX2glTF o Blender); provato anche con un
+      carro fatto in Blender *(`docs/modelli-design.md`, sezione 13)*.
+      Poi articolazioni (M3), termica per i sensori (M4), collisioni (M5),
+      danno (M6), luci ed effetti (M7); poi CIGI, DIS, HLA
 - [x] **Fase 8** — strade, ferrovie e piste da OpenStreetMap, dipinte da lontano e
       **3D da vicino** *(`docs/fase8-design.md`, prova: `docs/fase8-verifica.md`,
       strade 3D, transizioni morbide del terreno e flash: `docs/strade-3d.md`)*
@@ -173,7 +178,9 @@ cmake --build build
 ./build/geoentities_tests Plugins/GeoWorld/Source/GeoTiles/TestData/entities_fixture.bin
                              # 97 test  -- entita': quaternione, NED/NEU, angoli CIGI e DIS, assi del corpo e dell'attore, estrapolazione e rientro, l'ora di DIS, il registro, i modelli, la memoria condivisa (due thread veri), la fixture di Python estrapolata
 ./build/geomodels_tests      # 48 test  -- modelli: matrici e assi dei formati, immagini SGI, ricerca delle texture, OBJ con MTL, OpenFlight (un carro scritto byte per byte: DOF, switch, LOD, sequenza, mesh, istanze, riferimento esterno), il rig (triangoli girati, UV, gli angoli dei DOF), i formati da convertire, le regole 'file'
-./build/geomodel_info <modello> [cartella]   # cosa c'e' dentro un .flt o un .obj, senza Unreal
+./build/geogltf_tests Plugins/GeoWorld/Source/GeoTiles/TestData/blender_tank.glb
+                             # 50 test  -- glTF: JSON, quaternioni e curve, .gltf e .glb costruiti byte per byte (assi, UV, colori lineari, PBR, texture dentro il file, animazioni, scheletro, interi quantizzati, strisce, sparse), i file sbagliati, un .glb scritto da Blender
+./build/geomodel_info <modello> [cartella]   # cosa c'e' dentro un .flt, .obj, .gltf, .glb, senza Unreal
 
 ./Plugins/GeoWorld/Tools/CheckSourceDiscipline.sh
 python3 Plugins/GeoWorld/Tools/CheckShadowedParameters.py
@@ -187,7 +194,7 @@ le classi di errore di compilazione gia' incontrate su Windows -- shadowing,
 simboli non esportati fra moduli, tipi di comando console inesistenti,
 collisioni da build unity, metodi inesistenti chiamati sulle nostre classi.
 
-832 test C++ in totale, piu' 258 test Python della pipeline.
+882 test C++ in totale, piu' 269 test Python della pipeline.
 
 **Dopo la prima prova su Torino** (materiale, scene Sentinel, prestazioni): `docs/prova-torino.md`.
 **Dopo la seconda** (troppi triangoli, RAM): `docs/prova-torino-2.md`.

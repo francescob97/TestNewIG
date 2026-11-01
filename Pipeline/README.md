@@ -249,6 +249,34 @@ appoggiate al terreno, scritti nella memoria condivisa `GeoWorldEntities`
 `geo.Entities.Listen`. Solo la libreria standard di Python, niente GDAL
 (`geoworld/entitygen.py`). `--fixture <file>` riscrive la fixture dei test C++.
 
+### I modelli nei formati chiusi (`.ive`, `.fbx`, ...)
+
+GeoWorld legge da solo OpenFlight (`.flt`), OBJ e glTF (`.gltf`, `.glb`). Gli
+altri formati si convertono una volta, con gli strumenti di chi li ha fatti:
+
+```bat
+geoworld convert-models D:\db\Models                     :: accanto agli originali, solo quelli da rifare
+geoworld convert-models D:\db\Models -o D:\db\Convertiti :: altrove, con le sottocartelle e le texture
+geoworld convert-models D:\db\Models --dry-run           :: dice cosa farebbe
+geoworld convert-models D:\db\Models --blender "C:\Program Files\Blender Foundation\Blender 4.2\blender.exe"
+```
+
+| Da | A | Con |
+|---|---|---|
+| `.ive` `.osgb` `.osgt` `.osg` (OpenSceneGraph) | `.flt` (conserva DOF, switch, LOD; `--osg-format obj` per OBJ) | `osgconv` |
+| `.fbx` | `.glb` | FBX2glTF se c'e', se no Blender |
+| `.dae` `.3ds` `.blend` `.stl` `.ply` `.abc` `.usd` `.x3d` `.wrl` | `.glb` (animazioni comprese) | Blender, in background |
+
+Come `make`: un modello gia' convertito e piu' recente dell'originale si salta
+(`--force` li rifa' tutti). Gli strumenti si cercano nel PATH (Blender anche
+dove lo mette l'installatore); se uno manca, i file che ne hanno bisogno si
+elencano con il modo di procurarselo e il resto si converte lo stesso. Dopo
+`osgconv` si controllano le texture che il `.flt` nomina: se mancano, lo dice
+(succede quando le immagini erano dentro il `.ive`). Solo la libreria standard
+di Python (`geoworld/modelconvert.py`). In Unreal: `geo.Entities.ModelFolder`
+sulla cartella, e i nomi `.flt`/`.glb` nella tabella dei modelli
+(`docs/modelli-verifica.md`).
+
 ## Stadi
 
 | # | Stadio | Produce |

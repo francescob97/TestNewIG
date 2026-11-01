@@ -36,6 +36,7 @@ import time
 from . import __version__, tiling, tileformat, geoid, environment, fetch as fetch_module, manifest as manifest_module
 from . import starbuild
 from . import entitygen
+from . import modelconvert
 from . import (fetchimagery, imagecut, imageformat, imagerybuild,
                imagerymanifest)
 # Fase 8: le linee (strade, ferrovie, piste). Moduli che importano GDAL e
@@ -936,6 +937,19 @@ def command_demo_entities(args: argparse.Namespace) -> int:
     return 0
 
 
+def command_convert_models(args: argparse.Namespace) -> int:
+    tools = modelconvert.find_tools(osgconv=args.osgconv, fbx2gltf=args.fbx2gltf, blender=args.blender)
+    try:
+        result = modelconvert.convert(args.source, output_dir=args.output, tools=tools, osg_format=args.osg_format,
+                                      force=args.force, dry_run=args.dry_run, report=log)
+    except (FileNotFoundError, ValueError, OSError) as error:
+        log(f"ERRORE: {error}")
+        return 1
+    if result.converted and not args.dry_run:
+        log("In Unreal: geo.Entities.ModelFolder <la cartella> e, nella tabella dei modelli, i nomi .flt/.glb nuovi.")
+    return 0 if result.ok else 1
+
+
 def command_inspect_buildings(args: argparse.Namespace) -> int:
     from collections import Counter
     tile = bldformat.read_tile(args.tile)
@@ -1245,6 +1259,21 @@ def build_parser() -> argparse.ArgumentParser:
     demo.add_argument("--name", default=entitygen.NAME, help=f"il nome della memoria (default {entitygen.NAME})")
     demo.add_argument("--fixture", help="invece di girare, scrive la fixture dei test C++ in questo file")
     demo.set_defaults(func=command_demo_entities)
+
+    convert = subparsers.add_parser(
+        "convert-models",
+        help="modelli: converte .ive/.osgb (osgconv -> .flt) e .fbx/.dae/.3ds/.blend... (FBX2glTF o Blender -> .glb)")
+    convert.add_argument("source", help="la cartella dei modelli (anche il database intero: si cammina nelle sottocartelle)")
+    convert.add_argument("-o", "--output",
+                         help="dove scrivere (rifa' le sottocartelle e copia le texture); senza: accanto agli originali")
+    convert.add_argument("--osg-format", choices=("flt", "obj"), default="flt",
+                         help="in cosa convertire i file di OpenSceneGraph (default flt: conserva DOF, switch e LOD)")
+    convert.add_argument("--osgconv", help="il percorso di osgconv (se non e' nel PATH)")
+    convert.add_argument("--fbx2gltf", help="il percorso di FBX2glTF (se non e' nel PATH)")
+    convert.add_argument("--blender", help="il percorso di blender.exe (se non si trova da solo)")
+    convert.add_argument("--force", action="store_true", help="riconverte anche quelli gia' aggiornati")
+    convert.add_argument("--dry-run", action="store_true", help="dice cosa farebbe, senza farlo")
+    convert.set_defaults(func=command_convert_models)
 
     inspect_bld = subparsers.add_parser("inspect-buildings", help="stampa il contenuto di una tile di edifici")
     inspect_bld.add_argument("tile")

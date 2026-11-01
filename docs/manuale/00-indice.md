@@ -57,14 +57,14 @@ Due convenzioni tipografiche:
 | 18 | `18-cielo.md` | Fase 12, primo pezzo — Il cielo: il sole e la luna all'ora giusta (l'astronomia di Meeus), le levate e i tramonti, la notte (luna, esposizione, stelle, finestre accese), le stelle vere e i pianeti |
 | 19 | `19-lampioni.md` | Fase 12, terzo pezzo — I lampioni: ricostruiti dalle strade (quali, dove, a che passo), le fotocellule, i punti luce da lontano, le luci vere da vicino |
 | 20 | `20-entita.md` | Fase 7, primo pezzo — Le entità: lo stato canonico, le tre trappole (NED, angoli CIGI e DIS, assi del corpo), l'estrapolazione e il rientro, il tempo, il registro e gli attori, la tabella dei modelli, la memoria condivisa (seqlock) e il generatore finto |
-| 21 | `21-modelli.md` | Fase 7, i modelli (primo pezzo) — Dai file del database alle parti che si muovono: OpenFlight e OBJ, le trappole (la mano, l'avanti, gli angoli dei DOF, le unità, le UV), il rig, Prima · Moto · Dopo, switch e LOD, le texture da cercare, il lavoro su due thread |
+| 21 | `21-modelli.md` | Fase 7, i modelli (M1, M2) — Dai file del database alle parti che si muovono: OpenFlight, OBJ e glTF, le trappole (la mano, l'avanti, gli angoli matematici, le unità, le UV, i colori lineari), il rig, Prima · Moto · Dopo, switch e LOD, le texture da cercare o dentro il file, i materiali PBR, le animazioni dei file (curve, slerp, Hermite), il lavoro su due thread, la conversione dei formati chiusi |
 
 Tutti i comandi della console di Unreal, con la spiegazione di ognuno, sono in
 `docs/comandi-unreal.md` (generato dal codice; in Unreal: `geo.Help`).
 
 La Fase 7 (entità, CIGI, DIS, HLA) ha il primo pezzo (capitolo 20: lo strato
 puro, la memoria condivisa, il modulo `GeoEntities`) e il primo pezzo dei
-modelli dai file (capitolo 21); il resto è progettato in `docs/fase7-design.md`
+modelli dai file (capitolo 21: OpenFlight, OBJ, glTF, animazioni, conversione); il resto è progettato in `docs/fase7-design.md`
 e in `docs/modelli-design.md` (articolazioni, termica, collisioni, danno). Il programma dalla Fase 8 alla 12 (strade, acqua,
 edifici, vegetazione, atmosfera) è nella sezione 0 di `docs/fase8-design.md`.
 

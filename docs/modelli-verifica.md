@@ -1,7 +1,9 @@
-# Modelli, primo pezzo (M1) — come provare i modelli dai file
+# Modelli (M1, M2) — come provare i modelli dai file
 
-> Le decisioni sono in `docs/modelli-design.md` (la sezione 12 dice cosa c'è
-> già); il racconto per chi impara in `docs/manuale/21-modelli.md`. Prima
+> Le decisioni sono in `docs/modelli-design.md` (le sezioni 12 e 13 dicono
+> cosa c'è); il racconto per chi impara in `docs/manuale/21-modelli.md`. Le
+> sezioni 0–9 sono il primo pezzo (OpenFlight, OBJ), la 10 il secondo (glTF,
+> animazioni, conversione). Prima
 > serve la Fase 7 funzionante (`docs/fase7-verifica.md`): le entità devono
 > già muoversi come scatole.
 
@@ -277,3 +279,160 @@ attore).
 - **Un `.fbx` o un `.ive`**: non si leggono (sezione 3 di `modelli-design.md`);
   il messaggio dice come convertirli. Un FBX si può anche importare
   nell'editor come asset e usare con una regola `/Game/...`.
+
+---
+
+## 10. Il secondo pezzo (M2): glTF, le animazioni, la conversione
+
+### 10.0 Cosa è già provato qui, senza Unreal
+
+**C++** (`geogltf_tests`, 50 controlli):
+
+1. **JSON**: numeri, escape, coppie surrogate, il BOM; i numeri letti senza
+   `strtod` (15 cifre giuste); i documenti sbagliati con riga e colonna; 300
+   parentesi non fanno saltare lo stack;
+2. **quaternioni, pose, curve**: il quaternione e la matrice d'accordo; da
+   matrice a traslazione/rotazione/scala e ritorno; slerp per la via corta;
+   una curva prima, durante e dopo;
+3. **una freccia in `.gltf`** con il `.bin` accanto (con lo spazio nel nome,
+   `%20`): l'avanti (+Z) diventa +X, l'alto (+Y) +Z, e **+X di glTF è la
+   sinistra**; triangoli verso fuori; normali piatte calcolate quando
+   mancano; le UV **non** girate; il colore lineare 0,25 diventa 128; i
+   materiali PBR e quello di default (metallo 1);
+4. **un carro in `.glb`**: la texture **dentro** il file; il ritaglio sotto
+   0,3; una luce; la torretta parte animata, l'osso vuoto tolto con il suo
+   canale; "gira" a 1 s porta la canna 60 gradi a **sinistra** attorno al
+   perno; dopo la fine resta all'ultima chiave; "sali" a gradino; "cubica" a
+   metà vale 0,75 (Hermite);
+5. **uno scheletro**: la mesh nella posa di riposo, nella radice (la
+   traslazione di 100 m del nodo della mesh si ignora, come vuole glTF);
+6. **interi quantizzati** (short e byte normalizzati), una **striscia** con i
+   triangoli dispari girati, un **ventaglio**, una parte **sparse**, le linee
+   saltate;
+7. **i file sbagliati**: Draco, glTF 1.0, `.glb` tagliato, accessor fuori
+   dal buffer, indici oltre i vertici, `.bin` che manca, JSON rotto: un
+   errore che dice cosa fare;
+8. **la tabella**: `anim ruota`, e `anim` senza nome è un errore di riga;
+9. **un `.glb` scritto da Blender** (`Source/GeoTiles/TestData/blender_tank.glb`):
+   le misure, nessun triangolo girato, la torretta che con +90 gradi di
+   Blender porta la canna a sinistra.
+
+**Python** (`tests/test_modelconvert.py`, 11 test, con strumenti finti):
+quale strumento per quale formato, il file convertito accanto o altrove, "già
+aggiornato", `--force`, le copie con `--output`, lo strumento che manca (il
+resto si converte), lo strumento che fallisce (con il motivo), le texture
+che il `.flt` di `osgconv` nomina e non ci sono, `--dry-run`.
+
+**Blender vero** (5.0.1, come modulo Python): lo script di `convert-models`
+ha convertito un `.blend` e un `.fbx` con un'animazione; i due `.glb` danno lo
+stesso carro e la stessa animazione.
+
+Quello che **non** è provato: Unreal, `osgconv` e FBX2glTF veri, i glTF di
+altri esportatori.
+
+### 10.1 Rifare i materiali
+
+```
+geo.Imagery.CreateMaterial
+```
+
+I tre `M_GeoEntity*` hanno parametri nuovi (`Metallic`, `Roughness`,
+`AlphaCutoff`, `IgnoreAlpha`): vanno rifatti. Senza, i modelli di M1 si vedono
+come prima e quelli glTF senza metallo e rugosità.
+
+### 10.2 Il carro di Blender in Unreal
+
+Il file dei test è anche un modello: un carro verde di 6 m con la torretta
+che gira. Nella tabella dei modelli (il percorso è quello del tuo
+repository):
+
+```
+1.1.105.81    "D:/TestNewIG/Plugins/GeoWorld/Source/GeoTiles/TestData/blender_tank.glb" anim 0
+```
+
+Atteso: le quattro auto diventano carri, con la canna **in avanti** (dove
+vanno), e la torretta che gira a **sinistra** di 90 gradi in 2 s e poi
+ricomincia (l'animazione va da 0 a 90 e il loop salta indietro). Ogni carro
+è in un punto diverso del giro. `geo.Entities.Models` dice
+`glTF 2.0 (Khronos glTF Blender I/O v5.0.21), 2 parti (0 DOF, 1 animate, 0 switch), 1 animazioni, 148 triangoli`.
+
+Poi, a mano:
+
+```
+geo.Entities.Animation AUTO-1                  l'elenco: 'torrettaAction', 2.04 s (gira, in loop)
+geo.Entities.Animation AUTO-1 stop             si ferma dov'e'
+geo.Entities.Animation AUTO-1 reset            torna a riposo (canna in avanti)
+geo.Entities.Animation AUTO-1 0 once           un giro solo, poi resta girata a sinistra
+geo.Entities.Animation AUTO-1 0 loop -1        all'indietro
+geo.Entities.Animation AUTO-1 0 loop 0.25      quattro volte piu' piano
+```
+
+Da guardare: la torretta gira **sul suo perno** (il centro, a 1,9 m), non
+attorno al centro del carro o all'origine del mondo; la canna non si stacca;
+il carro non si vede "da dentro".
+
+### 10.3 I glTF di prova del Khronos Group
+
+Il Khronos Group pubblica i modelli di prova di glTF (su GitHub:
+*glTF-Sample-Assets*). Ognuno prova una cosa; quelli utili qui, in `.glb`:
+
+| Modello | Cosa guardare |
+|---|---|
+| `Duck` | la texture dentro il file, il verso (il becco in avanti: se guarda di lato, `yaw` nella regola: molti modelli non guardano verso +Z) |
+| `BoxAnimated` | un'animazione: `geo.Entities.Animation <entità>` per l'elenco |
+| `AlphaBlendModeTest` | i tre modi dell'alfa: opaco (l'alfa non conta), ritagliato (alla soglia giusta), trasparente |
+| `MetalRoughSpheres` | metallo e rugosità: da opache a specchi |
+| `TextureTransformTest` | `KHR_texture_transform`: le texture spostate, girate, scalate |
+| `CesiumMan` | uno scheletro: l'omino fermo nella posa di riposo, e un avviso in `geo.Entities.ModelInfo` |
+
+Prima di Unreal, `geomodel_info <file.glb>`: misure, animazioni, texture
+"dentro il file", e la riga **triangoli girati contro le loro normali**, che
+deve essere 0 (o quasi).
+
+### 10.4 La conversione
+
+Con Blender installato, in una cartella di prova con un `.fbx` o un `.blend`:
+
+```bat
+geoworld convert-models D:\ModelliProva --dry-run
+geoworld convert-models D:\ModelliProva
+```
+
+Atteso: la prima dice cosa farebbe (e con quale strumento); la seconda scrive
+il `.glb` accanto, e alla seconda volta dice "già aggiornati". Se dice
+**MANCA blender**: `--blender "C:\Program Files\Blender Foundation\Blender 4.2lender.exe"`
+(la tua versione). Con OpenSceneGraph installato, un `.ive` diventa `.flt`:
+`geomodel_info` sul `.flt` deve mostrare i DOF e gli switch del modello
+originale. Se dice che delle texture mancano, erano dentro il `.ive`.
+
+Il carro di Blender si rifà anche da sé: `blender --background
+--factory-startup --python Plugins/GeoWorld/Tools/StandaloneTests/make_blender_tank.py -- D:\ModelliProva`.
+
+### 10.5 Le API più a rischio (se non compila)
+
+| Dove | Cosa | Se non c'è |
+|---|---|---|
+| `GeoModelLibrary.cpp` | `EImageFormat::PNG`, `EImageFormat::JPEG` | sono i nomi dell'enum di `IImageWrapper.h` |
+| `GeoModelLibrary.cpp` | `UMaterialInstanceDynamic::SetScalarParameterValue` | uso standard |
+| `GeoTerrainMaterialFactory.cpp` | `MP_Metallic`, `UMaterialExpressionLinearInterpolate::ConstB`, `UMaterialExpressionMultiply::ConstB`, `UMaterialExpressionAdd::ConstB` | gli stessi usati dagli altri materiali della fabbrica |
+| `GeoEntitySubsystem.cpp` | `FMath::Fmod`, `GetTypeHash(FEntityKey)` | `GetTypeHash` sta in `Entities/EntityState.h` |
+
+### 10.6 Se qualcosa non torna
+
+- **Un glTF troppo scuro e "metallico"**: senza `pbrMetallicRoughness` glTF
+  vuole metallo 1 (la specifica). `geomodel_info` dice i valori per
+  materiale.
+- **Il modello guarda di lato**: l'avanti di glTF è +Z, ma molti esportatori
+  lasciano il modello come l'hanno disegnato. `yaw 90`, `yaw -90`, `yaw 180`.
+- **La torretta gira al contrario** rispetto a quanto ci si aspetta: gli
+  angoli di glTF (e di Blender) sono matematici, positivi a **sinistra**. Il
+  carro di Blender dei test lo fissa.
+- **"nessuna animazione 'X'"** nel registro: il nome nella regola (`anim`) non
+  è quello del file. `geo.Entities.ModelInfo` li elenca; il numero (`anim 0`)
+  funziona sempre.
+- **"la geometria è compressa"**: il file usa Draco o meshopt. Riesportalo
+  senza compressione (o passalo da `convert-models` con Blender, che esporta
+  senza).
+- **Una persona ferma in posa**: lo scheletro non si anima (sezione 13.2 di
+  `modelli-design.md`).
+

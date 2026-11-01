@@ -208,13 +208,15 @@ TSharedPtr<FGeoModelLibrary::FCooked, ESPMode::ThreadSafe> FGeoModelLibrary::Coo
 	Models::FModelRig Rig = Models::BuildRig(Model, Options);
 	for (const std::string& Warning : Rig.Warnings) { Out->Warnings.Add(FromUtf8(Warning)); }
 
-	// Le texture: decodificate, in BGRA, con le mipmap.
-	for (const Models::FModelTexture& Texture : Rig.Textures)
+	// Le texture: decodificate, in BGRA, con le mipmap. Quelle DENTRO il modello (glTF)
+	// hanno gia' i loro byte: si decodificano e poi si tolgono dal rig (non servono piu').
+	for (Models::FModelTexture& Texture : Rig.Textures)
 	{
 		FCookedTexture& Cooked = Out->Textures.AddDefaulted_GetRef();
-		if (Texture.Resolved.empty()) { Cooked.Error = TEXT("non trovata"); continue; }
 		std::vector<uint8_t> Bytes;
-		if (!ReadBytes(Texture.Resolved, Bytes)) { Cooked.Error = TEXT("non si legge"); continue; }
+		if (!Texture.Embedded.empty()) { Bytes.swap(Texture.Embedded); }
+		else if (Texture.Resolved.empty()) { Cooked.Error = TEXT("non trovata"); continue; }
+		else if (!ReadBytes(Texture.Resolved, Bytes)) { Cooked.Error = TEXT("non si legge"); continue; }
 		int32 Width = 0, Height = 0;
 		std::vector<uint8_t> Bgra;
 		if (Models::IsSgiImage(Bytes))
@@ -230,8 +232,10 @@ TSharedPtr<FGeoModelLibrary::FCooked, ESPMode::ThreadSafe> FGeoModelLibrary::Coo
 		else
 		{
 			EImageFormat Format = Decoders->DetectImageFormat(Bytes.data(), static_cast<int64>(Bytes.size()));
-			// Il TGA non ha una firma all'inizio: se non si riconosce, si prova dall'estensione.
+			// Il TGA non ha una firma all'inizio: se non si riconosce, si prova dall'estensione (o dal tipo di glTF).
 			if (Format == EImageFormat::Invalid && Models::ExtensionOf(Texture.Resolved) == "tga") { Format = EImageFormat::TGA; }
+			if (Format == EImageFormat::Invalid && Texture.MimeType == "image/png") { Format = EImageFormat::PNG; }
+			if (Format == EImageFormat::Invalid && Texture.MimeType == "image/jpeg") { Format = EImageFormat::JPEG; }
 			TSharedPtr<IImageWrapper> Wrapper = Format == EImageFormat::Invalid ? nullptr : Decoders->CreateImageWrapper(Format);
 			TArray64<uint8> Raw;
 			if (!Wrapper.IsValid() || !Wrapper->SetCompressed(Bytes.data(), static_cast<int64>(Bytes.size()))
@@ -269,7 +273,11 @@ TSharedPtr<FGeoModelLibrary::FCooked, ESPMode::ThreadSafe> FGeoModelLibrary::Coo
 
 int32 FGeoModelLibrary::MaterialMode(const Models::FModelMaterial& Material, bool bTextureHasAlpha)
 {
-	if (Material.bTranslucent) { return 2; }
+	if (Material.bTranslucent || Material.AlphaMode == Models::EAlphaMode::Blend) { return 2; }
+	if (Material.AlphaMode == Models::EAlphaMode::Mask) { return 1; }
+	// OPAQUE di glTF: l'alfa non conta; le due facce le ha solo il materiale tagliato (con IgnoreAlpha).
+	if (Material.AlphaMode == Models::EAlphaMode::Opaque) { return Material.bTwoSided ? 1 : 0; }
+	// I formati che non lo dicono: decide la texture.
 	return (Material.bTwoSided || bTextureHasAlpha) ? 1 : 0;
 }
 
@@ -344,6 +352,11 @@ void FGeoModelLibrary::Finish(FCooked& Cooked)
 		{
 			if (bTextured) { Instance->SetTextureParameterValue(TEXT("BaseTexture"), Model.Textures[Source.Texture].Get()); }
 			Instance->SetVectorParameterValue(TEXT("Emissive"), FLinearColor(Source.Emissive[0], Source.Emissive[1], Source.Emissive[2], 1.0f));
+			// PBR di glTF (i formati vecchi lasciano i default del materiale).
+			if (Source.Metallic >= 0.0f) { Instance->SetScalarParameterValue(TEXT("Metallic"), Source.Metallic); }
+			if (Source.Roughness >= 0.0f) { Instance->SetScalarParameterValue(TEXT("Roughness"), Source.Roughness); }
+			if (Source.AlphaMode == Models::EAlphaMode::Mask) { Instance->SetScalarParameterValue(TEXT("AlphaCutoff"), Source.AlphaCutoff); }
+			if (Source.AlphaMode == Models::EAlphaMode::Opaque) { Instance->SetScalarParameterValue(TEXT("IgnoreAlpha"), 1.0f); }
 		}
 		Model.Materials.Add(TStrongObjectPtr<UMaterialInterface>(Instance));
 	}

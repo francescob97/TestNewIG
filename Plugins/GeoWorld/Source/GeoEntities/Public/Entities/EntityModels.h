@@ -16,6 +16,7 @@
 //      cigi 12                            box 4.5 1.8 1.5
 //      1.2.105.1                          F16/f16.flt yaw 90
 //      1.1.105.81                         "auto rossa/auto.obj" scale 0.01 up z forward x
+//      1.1.105.12                         radar/radar.glb anim ruota
 //
 //  - i campi mancanti in fondo valgono *: "1.2" e' "1.2.*.*.*.*.*";
 //  - vince la regola PIU' SPECIFICA (piu' campi scritti); a parita', l'ULTIMA
@@ -31,8 +32,9 @@
 //        heli L R H    un elicottero: corpo lungo L, rotore di diametro R,
 //                      alto H, centrato.
 //
-//  - oppure un FILE di modello (docs/modelli-design.md): .flt, .obj (e gli
-//    altri formati, che il caricatore dice come convertire), relativo alla
+//  - oppure un FILE di modello (docs/modelli-design.md): .flt, .obj, .gltf,
+//    .glb (e gli altri formati, che il caricatore dice come convertire; o
+//    'geoworld convert-models' li converte), relativo alla
 //    cartella dei modelli (geo.Entities.ModelFolder) o assoluto; con le
 //    virgolette se ha degli spazi. Dopo, le correzioni:
 //        scale S          moltiplica le misure (un modello in centimetri: 0.01)
@@ -40,6 +42,9 @@
 //        offset A D H     sposta l'origine: avanti, destra, alto (metri)
 //        up X, forward X  gli assi del file (x, -x, y, -y, z, -z) quando non
 //                         sono quelli del formato (OBJ: up y, forward -z)
+//        anim A           un'animazione del file (glTF: nome o numero) che
+//                         gira sempre, in loop (un radar, un rotore, uno che
+//                         cammina)
 //
 //  La REGOLA DI RIPIEGO: se nessuna regola del file vale, si usa la tabella
 //  di serie (una forma per dominio) e lo si DICE (bFallback): un'entita'
@@ -78,6 +83,8 @@ namespace GeoWorld::Entities
 		/** Un file di modello (.flt, .obj...), come scritto nella regola; le sue correzioni. */
 		std::string File;
 		Models::FRigOptions FileOptions;
+		/** L'animazione del file che gira sempre (nome o numero; vuoto: nessuna). */
+		std::string Animation;
 		std::vector<FBoxPart> Parts;
 		/** Il testo della regola, per la diagnostica (geo.Entities.Models). */
 		std::string Text;
@@ -309,7 +316,7 @@ namespace GeoWorld::Entities
 			if (IsModelFileName(Words[0]))
 			{
 				Out.File = Words[0];
-				return ParseFileOptions(Words, Out.FileOptions, Error);
+				return ParseFileOptions(Words, Out.FileOptions, Out.Animation, Error);
 			}
 			if (Words[0].front() == '/')
 			{
@@ -318,7 +325,7 @@ namespace GeoWorld::Entities
 				Out.Asset = Words[0];
 				return true;
 			}
-			Error = "modello sconosciuto '" + Words[0] + "': box, plane, heli, un file (.flt, .obj) o un percorso /Game/...";
+			Error = "modello sconosciuto '" + Words[0] + "': box, plane, heli, un file (.flt, .obj, .gltf, .glb) o un percorso /Game/...";
 			return false;
 		}
 
@@ -335,10 +342,11 @@ namespace GeoWorld::Entities
 			return false;
 		}
 
-		/** Le correzioni dopo il nome del file: scale, yaw, offset, up, forward. */
-		static bool ParseFileOptions(const std::vector<std::string>& Words, Models::FRigOptions& Out, std::string& Error)
+		/** Le correzioni dopo il nome del file: scale, yaw, offset, up, forward; e anim. */
+		static bool ParseFileOptions(const std::vector<std::string>& Words, Models::FRigOptions& Out, std::string& OutAnimation, std::string& Error)
 		{
 			Out = Models::FRigOptions{};
+			OutAnimation.clear();
 			bool bUp = false, bForward = false;
 			const auto Number = [&](size_t At, double& Value)
 			{
@@ -381,9 +389,15 @@ namespace GeoWorld::Entities
 					(Key == "up" ? bUp : bForward) = true;
 					I += 2;
 				}
+				else if (Key == "anim")
+				{
+					if (I + 1 >= Words.size()) { Error = "'anim' vuole il nome (o il numero) di un'animazione del file"; return false; }
+					OutAnimation = Words[I + 1];
+					I += 2;
+				}
 				else
 				{
-					Error = "dopo il file: scale, yaw, offset, up, forward (non '" + Key + "')";
+					Error = "dopo il file: scale, yaw, offset, up, forward, anim (non '" + Key + "')";
 					return false;
 				}
 			}

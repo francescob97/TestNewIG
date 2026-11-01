@@ -6,6 +6,8 @@
 
 Termini in ordine alfabetico. Tra parentesi, il capitolo dove sono spiegati.
 
+**Accessor** — in glTF, la descrizione di come leggere una fetta di un buffer: quanti elementi, di che tipo (SCALAR, VEC2, VEC3, VEC4, MAT4), con che numeri (float, interi, "normalizzati": un byte 255 vale 1). Le primitive nominano gli accessor, non i numeri. (21)
+
 **Acqua appoggiata** — un'acqua troppo stretta per la mesh del terreno a quel livello (meno di 4 post): non si scava, e la sua superficie sta sul terreno, 0,3 m sopra, con gli stessi vertici. La forma la disegna la maschera della riva. (13)
 
 **Acqua risolta** — un'acqua larga almeno 4 post al livello della tile: si scava, con la sponda a V, e la superficie è piana. (13)
@@ -117,6 +119,8 @@ possano leggere pezzi via rete senza scaricarlo tutto. (7)
 
 **DEM** (*Digital Elevation Model*) — una griglia di quote del terreno. (3)
 
+**Draco** — una compressione della geometria dei glTF (di Google). Non la leggiamo: un file che la richiede va riesportato senza (Blender lo fa). (21)
+
 **Draw call** — una richiesta di disegno dalla CPU alla scheda video. Ogni tile
 oggi ne costa una. (6)
 
@@ -137,6 +141,8 @@ camera non è un attore. (1)
 **Ellissoide** — la forma matematica della Terra: un'ellisse fatta ruotare. (2)
 
 **Entità** — qualcosa che si muove e che non decidiamo noi: un aereo, un veicolo, una nave che arrivano da un simulatore. Dentro GeoWorld ha una sola forma: ECEF, quaternione dal corpo, velocità angolari nel corpo, tempo di simulazione (`FEntityState`). (20)
+
+**Estensioni (di glTF)** — le aggiunte alla specifica, con nomi come `KHR_lights_punctual`. Un file le elenca in `extensionsUsed`, e in `extensionsRequired` quelle senza le quali non si legge. (21)
 
 **Estrusione** — alzare una sagoma piana fino a un'altezza: i lati diventano muri verticali, la sagoma in alto il tetto. (17)
 
@@ -168,7 +174,7 @@ del LOD. Soglia di default: 8 pixel (era 4: vedi `docs/prova-torino-2.md`). (5)
 
 **FDynamicMesh3** — la mesh "da lavoro" di Unreal (modulo GeometryCore): vertici e triangoli più gli overlay degli attributi (normali, UV, colori). Si prepara su un worker e si consegna a un `UDynamicMeshComponent` con uno spostamento. (6, 17)
 
-**glTF** — il formato aperto dei modelli 3D del Khronos Group ("il JPEG del 3D"): metri, +Y in alto, +Z avanti, materiali PBR, animazioni. Arriva con M2. (21)
+**glTF** — il formato aperto dei modelli 3D del Khronos Group ("il JPEG del 3D"): metri, +Y in alto, +Z avanti (e −X a destra), UV con l'origine in alto, colori lineari, materiali PBR, animazioni. `.gltf` è il JSON con i dati accanto, `.glb` tutto in un file. Si legge dal secondo pezzo dei modelli. (21)
 
 **Gimbal lock** — a beccheggio ±90° (il muso dritto in su o in giù) imbardata e rollio ruotano attorno allo stesso asse e non si distinguono più. Per questo dentro il motore l'orientamento è un quaternione. (20)
 
@@ -221,6 +227,8 @@ nascondere le crepe fra livelli diversi. (6)
 
 **HLA** (*High Level Architecture*, IEEE 1516) — come DIS ma mediato da una libreria, l'RTI, quasi sempre commerciale. Starà in un modulo opzionale, l'ultimo. (20)
 
+**Hermite (curva cubica di)** — una curva che passa per i valori delle chiavi con una pendenza data (le tangenti) in ognuna: è l'interpolazione CUBICSPLINE delle animazioni di glTF. (21)
+
 **Header-only** — codice scritto interamente negli header, con `inline`. Lo strato
 puro è così, per non dover esportare simboli dalle DLL. (0, 1)
 
@@ -263,6 +271,8 @@ float normale, e per questo passa da un nodo `TruncateLWC`. (1, 2, 13)
 **Magnitudine** — quanto e' luminoso un astro: piu' piccola, piu' luminoso; una magnitudine in meno e' 2,512 volte la luce. Sirio −1,46, la Polare 2,02, le piu' deboli a occhio nudo 6. La **magnitudine limite** e' quella delle piu' deboli che si vedono adesso: scende nel crepuscolo e con la luna. (18)
 
 **Manifest** — il file `manifest.json` che descrive un dataset. (3)
+
+**Morph target** — forme alternative di una mesh (un sorriso, un'espressione) da mescolare con dei pesi. Le ignoriamo, con un avviso. (21)
 
 **Mappa meteo** — la texture di 256 × 256 texel (160 km attorno alla camera) con le nubi di pioggia, calcolata dal C++ su un thread di lavoro ogni 8 s e spostata dallo shader con il vento fra un ricalcolo e l'altro. (15)
 
@@ -333,6 +343,8 @@ sua coordinata. (7)
 
 **Parallasse (della luna)** — la luna vista dalla superficie della Terra sta più in basso che vista dal centro: fino a un grado all'orizzonte. (18)
 
+**PBR** (*physically based rendering*) — descrivere un materiale con grandezze fisiche: colore di base, metallo (0..1), rugosità (0..1). È il modello dei materiali di glTF e di Unreal. (21)
+
 **Per Instance Custom Data** — qualche numero per ogni istanza di un componente di istanze, letto dal materiale con il nodo PerInstanceCustomData. Per gli alberi: il verde, l'altezza, la fase del vento. (16)
 
 **Piano di residenza** — la lista, in ordine di urgenza, delle tile da tenere pronte: qui, dove si sarà fra qualche secondo, e un anello di sicurezza. Rifatto ogni 0,25 s. (11)
@@ -348,6 +360,8 @@ sua coordinata. (7)
 **Post** — un punto di campionamento di una griglia di quote. (3)
 
 **Post riempito** — un post del terreno dove il sorgente non aveva dati, scritto dalla pipeline con il livello del mare. Per l'acqua non è terreno: si riconosce perché vale esattamente il geoide. (13)
+
+**Posa (di un nodo)** — traslazione, rotazione (un quaternione) e scala, come le scrive glTF: la matrice è T · R · S. Le animazioni cambiano la posa; per i nodi animati sta nello stato del rig. (21)
 
 **Precessione** — l'asse della Terra gira come una trottola, un giro in 26.000 anni: il cielo scivola di 50" l'anno. Le posizioni di un catalogo del 2000 vanno portate alla data. (18)
 
@@ -431,6 +445,10 @@ quote) o un'area (i pixel). Decide se il bordo è condiviso. (3, 7)
 **Simple 3D Buildings** — lo schema di OSM per gli edifici in 3D: altezze (`height`, `building:levels`), tetti (`roof:shape`, `roof:height`), colori, parti. (17)
 
 **Single Layer Water** — il modello d'ombreggiatura di Unreal per l'acqua: il colore viene da assorbimento e diffusione nello spessore d'acqua letto dal depth buffer, non da un BaseColor. (13)
+
+**Scheletro** (*skin*) — un insieme di ossa (nodi) che deforma una mesh: ogni vertice segue fino a quattro ossa, con dei pesi. Lo usiamo solo nella posa di riposo. (21)
+
+**Slerp** (*spherical linear interpolation*) — l'interpolazione fra due rotazioni (quaternioni) a velocità costante, per la via più corta: quella delle animazioni lineari di glTF. (21)
 
 **SkyAtmosphere** — il componente di Unreal che simula l'aria: il blu del cielo, il rosso al tramonto, il crepuscolo, la luce del sole attenuata. (18)
 
@@ -647,10 +665,11 @@ il primo comando da provare quando non si vede niente. (6)
 | `Public/Entities/EntityFrames.h` | le tre trappole: NED, Eulero, angoli CIGI e DIS, assi dell'attore (puro) |
 | `Public/Entities/DeadReckoning.h` | estrapolazione, rientro, l'ora di DIS, l'orologio della simulazione (puro) |
 | `Public/Entities/EntityRegistry.h`, `EntityModels.h` | il registro, la tabella dei modelli, con le regole `file` (puri) |
-| `Public/Models/ModelData.h` | il modello fedele al file: matrici, assi dei formati, materiali, nodi, DOF (puro) |
+| `Public/Models/ModelData.h` | il modello fedele al file: matrici, assi dei formati, materiali, nodi, DOF, pose, quaternioni, curve, animazioni (puro) |
 | `Public/Models/ModelFiles.h`, `SgiImage.h` | percorsi e ricerca delle texture; le immagini SGI (puri) |
-| `Public/Models/OpenFlightReader.h`, `ObjReader.h`, `ModelLoader.h` | i lettori, e chi legge cosa (puri) |
-| `Public/Models/ModelRig.h` | il rig: assi dell'attore, parti, DOF, switch, LOD (puro) |
+| `Public/Models/OpenFlightReader.h`, `ObjReader.h`, `GltfReader.h`, `ModelLoader.h` | i lettori, e chi legge cosa (puri) |
+| `Public/Models/Json.h` | un lettore JSON piccolo, per glTF (puro) |
+| `Public/Models/ModelRig.h` | il rig: assi dell'attore, parti, DOF, parti animate, switch, LOD, animazioni (puro) |
 | `Private/ModelLibrary/GeoModelLibrary.cpp` | i modelli letti su un thread di lavoro, mesh, texture e materiali sul game thread |
 | `Public/Entities/SharedMemoryFormat.h` | il formato della memoria condivisa e il seqlock (puro) |
 | `Public/Sources/GeoEntitySource.h` | l'interfaccia di una sorgente, la coda MPSC |
@@ -662,8 +681,9 @@ il primo comando da provare quando non si vede niente. (6)
 
 | File | Contenuto |
 |---|---|
-| `Tools/StandaloneTests/*` | i tredici eseguibili di test senza Unreal |
-| `Tools/StandaloneTests/geomodel_info.cpp` | `geomodel_info`: cosa c'è dentro un modello (`.flt`, `.obj`), senza Unreal |
+| `Tools/StandaloneTests/*` | i quattordici eseguibili di test senza Unreal |
+| `Tools/StandaloneTests/make_blender_tank.py` | il carro della fixture `blender_tank.glb`, fatto con Blender |
+| `Tools/StandaloneTests/geomodel_info.cpp` | `geomodel_info`: cosa c'è dentro un modello (`.flt`, `.obj`, `.gltf`, `.glb`), senza Unreal |
 | `Tools/StandaloneTests/HlslShim.h` | quel tanto di HLSL che serve a compilare come C++ gli shader di nuvole, suolo, alberi, edifici e cielo |
 | `Tools/CheckSourceDiscipline.sh` | sette regole di disciplina |
 | `Tools/CheckShadowedParameters.py` | parametri che nascondono campi |
@@ -697,7 +717,8 @@ il primo comando da provare quando non si vede niente. (6)
 | `geoworld/entitygen.py` | il generatore finto di entità in memoria condivisa (`demo-entities`) |
 | `geoworld.bat`, `geoworld.sh` | la pipeline senza installazione (prepara l'ambiente la prima volta) |
 | `costruisci-dted.bat`, `costruisci-vegetazione.bat`, `costruisci-edifici.bat` | i doppi clic: terreno, alberi, edifici |
-| `tests/*.py` | 258 test |
+| `geoworld/modelconvert.py` | `convert-models`: i modelli chiusi in `.flt` e `.glb` (osgconv, FBX2glTF, Blender) |
+| `tests/*.py` | 269 test |
 
 ### Documenti
 

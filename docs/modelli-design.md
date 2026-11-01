@@ -342,7 +342,8 @@ dover avere. In ordine di quanto si faranno sentire:
 
 ## 11. La scaletta
 
-Ogni pezzo si verifica prima del successivo; l'ordine si può cambiare.
+Ogni pezzo si verifica prima del successivo; l'ordine si può cambiare. M1 e
+M2 sono fatti: le sezioni 12 e 13 dicono cosa c'è.
 
 | | Pezzo | Si verifica con |
 |---|---|---|
@@ -497,3 +498,135 @@ modo loro: `geomodel_info` è fatto per trovarli.
 M2: glTF 2.0 (`.gltf` e `.glb`, gerarchia, materiali PBR, animazioni) e
 `geoworld convert-models`, che converte una cartella di `.ive`/`.osgb`/`.fbx`
 con `osgconv` e FBX2glTF se ci sono.
+
+---
+
+## 13. Il secondo pezzo (M2): glTF, le animazioni dei file, la conversione
+
+### 13.1 Dove sta
+
+| | |
+|---|---|
+| `GeoEntities/Public/Models/Json.h` | un lettore JSON piccolo (RFC 8259), puro: numeri letti a mano, profondità limitata, errori con riga e colonna |
+| `.../Models/GltfReader.h` | glTF 2.0: `.gltf` (con `.bin` accanto o `data:` in base64) e `.glb`; accessor (anche interi normalizzati e `sparse`), triangoli, strisce, ventagli; materiali PBR; texture in file, in `data:` o dentro il `.glb`; nodi con matrice o traslazione/rotazione/scala; scheletri nella posa di riposo; luci (`KHR_lights_punctual`); animazioni |
+| `.../Models/ModelData.h` | in più: `FTrs` (la posa di glTF), i quaternioni (matrice, slerp, dalla matrice), le curve (`FAnimCurve`, `SampleCurve`: gradino, lineare, cubica di Hermite), le animazioni del modello, le texture incorporate, `EAlphaMode`, metallo e rugosità |
+| `.../Models/ModelRig.h` | in più: le parti **animate** (`EPartKind::Animated`), le animazioni del rig, `ApplyAnimation`, `PartToRoot`, le pose nello stato del rig |
+| `.../Entities/EntityModels.h` | in più: `anim <nome|numero>` nelle regole `file` |
+| `GeoEntities/Private/ModelLibrary/GeoModelLibrary.cpp` | le texture incorporate; il materiale secondo il modo dell'alfa di glTF; metallo, rugosità, soglia del ritaglio |
+| `GeoEntities/Public/GeoEntitySubsystem.h` | le animazioni per entità, a ogni frame; `geo.Entities.Animation` |
+| `GeoWorldEditor/Private/GeoTerrainMaterialFactory.cpp` | `M_GeoEntity*` con i parametri `Metallic`, `Roughness`, `AlphaCutoff`, `IgnoreAlpha` |
+| `Pipeline/geoworld/modelconvert.py` | `geoworld convert-models`: `osgconv`, FBX2glTF, Blender |
+| `Tools/StandaloneTests/geogltf_main.cpp` | 50 test: JSON, quaternioni e curve, quattro glTF costruiti byte per byte, i file sbagliati, la tabella, e un `.glb` scritto da Blender |
+| `Tools/StandaloneTests/make_blender_tank.py`, `Source/GeoTiles/TestData/blender_tank.glb` | il carro di Blender (scafo, torretta animata, canna): un esportatore vero nei test |
+| `Pipeline/tests/test_modelconvert.py` | 11 test con strumenti finti |
+
+### 13.2 Decisioni prese scrivendo
+
+**Un JSON nostro, non quello di Unreal.** Lo strato puro gira senza Unreal (i
+test, `geomodel_info`) e non vuole librerie esterne. Sono 300 righe: oggetti,
+array, stringhe con gli escape (anche le coppie surrogate verso UTF-8),
+numeri. I numeri si leggono **a mano** e non con `strtod`, che dipende dal
+*locale*: con quello italiano "0.5" si legge 0. L'accesso è tollerante
+(`V["a"][3]` su quello che non c'è dà null): i default li decide glTF.
+
+**Le convenzioni di glTF nel punto solito.** +Y in alto, +Z avanti, −X a
+destra, metri, destrorso: `FAxisConvention::Gltf()` c'era già, e `BuildRig`
+gira i triangoli come per gli altri formati. Le UV di glTF hanno l'origine in
+alto come Unreal: **non** si girano (`bUvOriginBottom = false`), e un test lo
+fissa.
+
+**I colori lineari.** glTF scrive colori dei vertici e fattori in lineare; i
+vertici del rig sono "sRGB" e il materiale li eleva al quadrato. Si scrive la
+**radice quadrata**: andata e ritorno esatti con l'approssimazione del
+materiale (0,25 lineare diventa 128, e torna 0,25). Il fattore del colore di
+base finisce nei vertici, come il `Kd` di OBJ.
+
+**I default di glTF.** Senza `pbrMetallicRoughness`, metallo **1** e
+rugosità 1 (la specifica dice così, anche se sembra strano): si rispetta. Un
+modello che ne esce troppo scuro e metallico è scritto così.
+
+**L'alfa decide il materiale.** `OPAQUE` ignora l'alfa della texture,
+`MASK` ritaglia sotto `alphaCutoff`, `BLEND` è trasparente. Il ritaglio dei
+materiali di Unreal è una proprietà fissa (0,5), non un parametro: la soglia
+del file si ottiene **spostando l'alfa** (alfa + 0,5 − soglia). Un materiale
+`OPAQUE` a due facce usa il materiale tagliato (l'unico a due facce) con
+`IgnoreAlpha = 1`. I formati vecchi (`EAlphaMode::Auto`) fanno come prima:
+decide la texture.
+
+**Metallo e rugosità** diventano parametri dei tre materiali (default 0 e
+0,6: i modelli OpenFlight e OBJ restano come erano). Le texture normali, di
+occlusione e metallo/rugosità **non** si usano ancora: servono le tangenti e
+un materiale più grande, e per un IG visto da centinaia di metri valgono
+poco. I fattori sì.
+
+**Le texture dentro il file.** Nel `.glb` le immagini sono fette del buffer;
+nei `.gltf` possono essere `data:`. `FModelTexture` porta i byte
+(`Embedded`) e il tipo; la libreria li decodifica con l'`ImageWrapper` e poi
+li **toglie** dal rig, che resta in memoria finché il modello serve.
+
+**Un nodo animato diventa una parte**, come un DOF, e per la stessa ragione:
+si muove. La sua trasformazione è `Prima · Posa(t) · Dopo`, con Prima = le
+trasformazioni sopra di lui (cotte, nel sistema della madre) e Dopo = K⁻¹; la
+posa (traslazione, quaternione, scala) resta **nelle coordinate del file**,
+come i valori dei DOF di OpenFlight. Il resto della gerarchia continua a
+cuocersi nei vertici. Un nodo animato senza niente sotto (un osso, un punto
+vuoto) si toglie con il suo canale.
+
+**Le curve** come le scrive glTF: a gradino, lineari (slerp per le rotazioni,
+per la via più corta) e cubiche di Hermite (tangenti per secondo, moltiplicate
+per la durata dell'intervallo). Prima della prima chiave vale la prima, dopo
+l'ultima l'ultima: il giro (loop) lo decide chi chiama.
+
+**Gli scheletri: la posa di riposo.** Una mesh con lo scheletro (persone,
+animali) si deforma **una volta**, alla lettura, con le ossa nella loro posa
+del file: `Σ peso · Globale(osso) · InversaDiBind(osso) · v`. Sta nella
+radice, perché glTF ignora la trasformazione del nodo della mesh. Le
+animazioni delle ossa non la muovono: far camminare le persone vuole una
+`USkeletalMesh`, ed è un altro pezzo (non in scaletta finché non serve).
+
+**I morph target** si ignorano, con un avviso. **Le estensioni**:
+`KHR_mesh_quantization` (interi normalizzati: l'accessor li legge già),
+`KHR_texture_transform` (applicata alle UV), `KHR_materials_emissive_strength`,
+`KHR_materials_unlit` (il colore diventa luce propria), `KHR_lights_punctual`
+(le luci diventano **punti luce**, come quelli di OpenFlight: per M7). Le
+compressioni (Draco, meshopt) e le texture KTX2/WebP no: se il file le
+**richiede**, l'errore dice come riesportarlo; `convert-models` con Blender
+esporta senza.
+
+**Le animazioni in Unreal.** Ogni entità ha la sua animazione che gira (da
+quando, a che velocità, in loop o una volta) e la sua posa nello stato del
+rig; a ogni frame, dopo la posizione dell'attore, la posa di adesso e le
+trasformazioni delle parti animate. La regola `anim <nome>` fa girare
+un'animazione per sempre (un radar, un rotore), con ogni entità in un punto
+diverso del giro: cento radar uguali non girano in fase. Le animazioni dei
+protocolli (DIS, CIGI) e le curve nostre sono M3: useranno la stessa posa.
+
+**I formati chiusi si convertono**, con lo strumento giusto per ognuno:
+`osgconv` per OpenSceneGraph verso `.flt` (l'unico formato aperto che
+conserva DOF, switch e LOD), FBX2glTF per l'FBX se c'è, Blender per il resto
+(e per l'FBX se FBX2glTF manca), in background con uno script nostro che
+importa ed esporta in `.glb` con le animazioni e senza Draco. Come `make`: si
+rifà solo quello che è cambiato. Dopo `osgconv` si leggono le texture che il
+`.flt` nomina (i record 64) e si dice quali mancano.
+
+**Un esportatore vero nei test.** I file costruiti a mano provano che il
+lettore fa quello che pensiamo dica la specifica; non provano che la
+pensiamo come Blender. Il carro di `make_blender_tank.py`, fatto con Blender
+5.0.1 e passato dallo stesso script di `convert-models` (anche via FBX), è
+nei test: misure, triangoli, e la torretta che con +90 gradi di Blender
+porta la canna a **sinistra**.
+
+### 13.3 Cosa non è provato
+
+Il codice Unreal (non si compila qui). `osgconv` e FBX2glTF veri (i test
+usano strumenti finti; Blender invece è stato provato davvero, come modulo
+Python). I glTF di altri esportatori (3ds Max, Maya, Sketchfab): le varianti
+ci saranno, e `geomodel_info` dice ora anche quanti triangoli sono girati
+contro le loro normali.
+
+### 13.4 Il prossimo pezzo
+
+M3: le articolazioni. La tabella che lega i parametri articolati di DIS e
+CIGI ai DOF e ai nodi dei modelli (con il segno degli angoli), le curve
+nostre, le regole procedurali (rotori, ruote, eliche), le sequenze di
+OpenFlight che girano, i cavi a catenaria, i carichi che si staccano.

@@ -1,10 +1,11 @@
 # Capitolo 21 — I modelli: dai file del database alle parti che si muovono
 
 > Come un aereo smette di essere una scatola: leggere un modello da una
-> cartella qualsiasi (OpenFlight, OBJ), le sue texture, la sua gerarchia, le
-> parti che si muovono (DOF) e quelle che si accendono e si spengono (switch,
-> LOD), e farne attori di Unreal senza fermare il frame. Il capitolo di
-> progetto è `docs/modelli-design.md`; come provarlo è in
+> cartella qualsiasi (OpenFlight, OBJ, glTF), le sue texture, la sua
+> gerarchia, le parti che si muovono (DOF, nodi animati) e quelle che si
+> accendono e si spengono (switch, LOD), le animazioni dei file, e farne
+> attori di Unreal senza fermare il frame; e convertire i formati chiusi.
+> Il capitolo di progetto è `docs/modelli-design.md`; come provarlo è in
 > `docs/modelli-verifica.md`.
 
 ---
@@ -48,7 +49,7 @@ pochissime **parti**.
 ```
 .flt  ─┐
 .obj  ─┼─> FModel (convenzioni del formato) ──BuildRig──> FModelRig (attore) ──> Unreal
-(.gltf)┘                                       │
+.gltf ─┘                                       │
                                      l'UNICO punto di conversione
 ```
 
@@ -374,6 +375,7 @@ degli attori. Nessuna collisione: arriva con M5.
 | `geo.Entities.ReloadModels` | rilegge tutto |
 | `geo.Entities.Dof <entità> [dof] [imb] [becc] [rollio] [x y z]` | muove una parte (senza dof: l'elenco) |
 | `geo.Entities.Switch <entità> <switch> <maschera>` | sceglie una maschera |
+| `geo.Entities.Animation <entità> [animazione] [loop\|once] [velocità]` | fa girare un'animazione del file (21.11) |
 | `geo.Entities.Models` | elenca anche i modelli letti, con i tempi e gli avvisi |
 
 Fuori da Unreal, `geomodel_info <modello> [cartella]` (in
@@ -385,33 +387,194 @@ modello nuovo.
 ## 21.9 Che cosa non si legge, e perché
 
 **FBX** è un formato chiuso: l'SDK di Autodesk non si può ridistribuire in un
-plugin, e il formato binario non è documentato. Si converte (FBX2glTF,
-Blender) verso glTF o OBJ, oppure si importa nell'editor come asset e la
-regola usa il percorso dell'asset.
+plugin, e il formato binario non è documentato. **IVE** (e `.osgb`) è il
+formato binario **interno** di OpenSceneGraph: cambia con la versione della
+libreria, nessuno lo legge fuori da OSG.
 
-**IVE** (e `.osgb`) è il formato binario **interno** di OpenSceneGraph:
-cambia con la versione della libreria, nessuno lo legge fuori da OSG. Si
-converte con lo strumento di OSG: `osgconv modello.ive modello.flt` (o
-`.obj`).
-
-Il caricatore li riconosce e dice il comando, invece di "formato
-sconosciuto". glTF arriva con M2, insieme a `geoworld convert-models`.
+Scrivere un lettore "a tentativi" per formati così è un lavoro enorme che si
+rompe alla versione dopo. Si convertono invece **una volta**, fuori da Unreal,
+con gli strumenti di chi li ha fatti: `geoworld convert-models` (21.12). Il
+caricatore li riconosce e dice il comando, invece di "formato sconosciuto".
+Per un FBX resta anche la strada dell'editor: importarlo come asset e usare
+il suo percorso `/Game/...` nella tabella.
 
 ---
 
-## 21.10 Che cosa manca
+## 21.10 glTF: il "JPEG del 3D"
+
+glTF 2.0 è il formato aperto dei modelli del Khronos Group (quelli di OpenGL
+e Vulkan). Due forme: `.gltf`, un testo JSON con accanto i dati binari
+(`.bin`) e le immagini; `.glb`, tutto in un file (un pezzo JSON e un pezzo
+binario).
+
+### Come è fatto
+
+Il JSON non contiene i numeri dei vertici: dice **dove trovarli**. È una
+catena di quattro passi:
+
+```
+buffers       i byte (un .bin, un "data:" in base64, il pezzo binario del .glb)
+  └ bufferViews     una fetta di un buffer (da dove, quanto, con che passo)
+      └ accessors       come leggere la fetta: quanti elementi, di che tipo
+                        (SCALAR, VEC2, VEC3, VEC4, MAT4), con che numeri
+          └ meshes          le primitive: POSITION -> accessor 3, NORMAL -> accessor 4...
+```
+
+Un **accessor** può leggere float, ma anche interi (un byte, due byte) e
+"normalizzati": un byte 255 vale 1,0, uno short 32767 vale 1,0. Così si
+risparmia memoria (le UV in un byte ciascuna). Può anche essere **sparse**:
+una base, più pochi elementi che cambiano.
+
+Le **primitive** sono triangoli, o strisce (ogni vertice nuovo fa un
+triangolo con i due prima, girando il verso a quelli dispari), o ventagli
+(tutti attorno al primo vertice). Il lettore le porta tutte a triangoli.
+
+Sopra c'è l'albero dei **nodi**: ognuno con una matrice, oppure con
+traslazione, rotazione (un **quaternione**) e scala, e una mesh, e dei figli.
+
+### Le convenzioni
+
+| | glTF |
+|---|---|
+| avanti | +Z |
+| alto | +Y |
+| destra | **−X** (sì: +X è la sinistra) |
+| unità | metri |
+| UV | origine in **alto**, come Unreal |
+| colori | **lineari** |
+
+Le prime quattro righe le gestisce `BuildRig` come per gli altri formati.
+Le UV non si girano: un test lo fissa, perché girarle "per abitudine" è
+proprio l'errore da non fare. I colori lineari si scrivono nei vertici con la
+**radice quadrata**, perché il materiale li eleva al quadrato (21.8): 0,25
+lineare diventa 0,5 nel vertice, e torna 0,25.
+
+### I materiali PBR
+
+glTF descrive i materiali come li disegna un motore moderno (*physically
+based rendering*): colore di base, **metallo** (0 plastica, 1 metallo),
+**rugosità** (0 specchio, 1 opaco), luce propria, e come usare l'**alfa**:
+
+- `OPAQUE`: l'alfa non conta;
+- `MASK`: si ritaglia sotto una soglia (foglie, reti);
+- `BLEND`: trasparente (vetri).
+
+Metallo e rugosità diventano parametri dei materiali `M_GeoEntity*`. La
+soglia del ritaglio, in Unreal, è una proprietà fissa del materiale (0,5),
+non un parametro: la soglia del file si ottiene **spostando l'alfa**, alfa +
+0,5 − soglia. Un trucco piccolo che evita un materiale per ogni soglia.
+
+Attenzione a un default: un materiale glTF senza fattori ha metallo **1** (la
+specifica dice così). Un modello che sembra troppo scuro e metallico spesso è
+scritto così davvero.
+
+### Quello che non disegniamo ancora
+
+Gli **scheletri** (persone, animali): la mesh si deforma una volta, alla
+lettura, con le ossa nella loro posa del file, e resta così. I **morph
+target** (le facce che cambiano espressione): ignorati. Le texture normali e
+di occlusione: ignorate (i fattori no). Le compressioni (Draco, meshopt): un
+errore che dice come riesportare.
+
+---
+
+## 21.11 Le animazioni dei file
+
+Un'animazione di glTF è un insieme di **canali**: ognuno muove una cosa
+(traslazione, rotazione o scala) di un nodo, con una **curva**: dei tempi e
+dei valori.
+
+### Le curve
+
+Fra due chiavi il valore si **interpola** in tre modi:
+
+- **a gradino**: il valore resta quello della chiave prima, poi salta;
+- **lineare**: in linea retta. Per le rotazioni non si può fare una media dei
+  quaternioni: si usa lo **slerp** (*spherical linear interpolation*), che va
+  da una rotazione all'altra a velocità costante, per la via più corta;
+- **cubica** (Hermite): ogni chiave ha anche due **tangenti** (la velocità
+  in entrata e in uscita), e la curva passa per i valori con quelle
+  pendenze. Con le tangenti a zero è una "S" morbida.
+
+Prima della prima chiave vale la prima, dopo l'ultima l'ultima. Il giro
+(*loop*) lo decide chi fa girare l'animazione, non la curva.
+
+### Un nodo animato è una parte
+
+Un nodo che si muove non si può cuocere nei vertici (21.4): diventa una
+**parte**, come un DOF. Anche la formula è la stessa:
+
+```
+trasformazione della parte = Prima · Posa(t) · Dopo
+```
+
+con Prima = le trasformazioni sopra il nodo, Dopo = l'inverso della
+conversione degli assi, e la Posa (traslazione, quaternione, scala) **nelle
+coordinate del file**, come i valori dei DOF di OpenFlight. A riposo la posa
+è quella del file, e il modello è com'è stato fatto.
+
+Anche qui gli angoli sono **matematici**: una rotazione positiva attorno
+all'alto gira a **sinistra**. È così in glTF, in Blender, in OpenFlight. Un
+test con un carro fatto davvero in Blender lo fissa: +90 gradi, la canna
+finisce a sinistra.
+
+### In Unreal
+
+Ogni entità ha la sua animazione che gira (quale, da quando, a che velocità,
+in loop o una volta) e la sua **posa** nello stato del rig. A ogni frame,
+dopo la posizione dell'attore, si calcola la posa di adesso e si aggiornano
+le parti animate. Un modello, cento entità, cento pose.
+
+- `geo.Entities.Animation <entità>`: l'elenco delle animazioni;
+- `geo.Entities.Animation <entità> <nome|numero> [loop|once] [velocità]`:
+  la fa girare (velocità negativa: all'indietro);
+- `stop` la ferma dov'è, `reset` torna a riposo;
+- nella tabella, `anim <nome>` la fa girare sempre (un radar, un rotore),
+  ogni entità in un punto diverso del giro: cento radar non girano in fase.
+
+---
+
+## 21.12 La conversione: `geoworld convert-models`
+
+```bat
+geoworld convert-models D:\db\Models
+```
+
+Cammina nella cartella (anche tutto il database) e converte ogni modello che
+GeoWorld non legge, con lo strumento giusto:
+
+| Da | A | Con |
+|---|---|---|
+| `.ive`, `.osgb`, `.osgt`, `.osg` | `.flt` | `osgconv` (OpenSceneGraph): `.flt` è l'unico formato aperto che conserva DOF, switch e LOD |
+| `.fbx` | `.glb` | FBX2glTF, o Blender |
+| `.dae`, `.3ds`, `.blend`, `.stl`, `.ply`... | `.glb` | Blender, in background (senza finestra), con uno script nostro |
+
+Come `make`: un modello già convertito, più recente dell'originale, si salta.
+Senza `-o` il file nuovo va **accanto** all'originale: la cartella dei
+modelli resta la stessa e le texture si trovano dove erano. Uno strumento che
+manca non ferma il resto: il comando elenca i file rimasti e dice come
+procurarselo.
+
+I test usano strumenti **finti** (tre script che si comportano come
+`osgconv`, FBX2glTF e Blender): provano tutto quello che è nostro. Lo script
+di Blender è stato provato con Blender vero.
+
+---
+
+## 21.13 Che cosa manca
 
 La scaletta è nella sezione 11 di `modelli-design.md`:
 
-- **M2**: glTF 2.0 e la conversione automatica dei formati chiusi;
-- **M3**: articolazioni e animazione (DIS, CIGI, curve, regole procedurali
-  come i rotori, cavi a catenaria, carichi che si staccano);
+- **M3**: le articolazioni: i parametri articolati di DIS e CIGI legati ai
+  DOF e ai nodi (con il segno degli angoli), le curve nostre, le regole
+  procedurali (rotori, ruote, eliche), le sequenze di OpenFlight che girano,
+  i cavi a catenaria, i carichi che si staccano;
 - **M4**: la **termica**, per i sensori IR: zone a parametri concentrati,
   sole, cielo, vento, motori;
 - **M5**: collisioni e interrogazioni (HAT/HOT, linea di vista);
 - **M6**: il danno;
-- **M7**: luci (i punti luce di OpenFlight), assetto su terreno e onde,
-  effetti.
+- **M7**: luci (i punti luce di OpenFlight e di glTF), assetto su terreno e
+  onde, effetti.
 
 ---
 
@@ -420,16 +583,20 @@ La scaletta è nella sezione 11 di `modelli-design.md`:
 - Due rappresentazioni: **`FModel`** fedele al file, **`FModelRig`** pronto da
   disegnare. Le conversioni stanno in **un punto solo**, `BuildRig`.
 - Le trappole: la **mano** (riflessione, triangoli da girare), l'**avanti** non
-  garantito (le correzioni della regola), gli **angoli di OpenFlight** che
-  girano a sinistra, le **unità** e le **UV**.
-- OpenFlight è una sequenza di record con **Push/Pop** e **palette**; i
-  dettagli che contano (bit dal più significativo, matrici a vettore riga,
-  istanze, riferimenti esterni) hanno ognuno un test.
-- Il rig tiene **parti solo dove servono**: radice, DOF, switch, LOD,
-  sequenze. Il resto si cuoce nei vertici.
-- Un DOF è **Prima · Moto · Dopo**: a riposo il modello è com'è stato fatto.
-- Le texture si **cercano** (il percorso del file è di un'altra macchina);
-  SGI la decodifichiamo noi.
+  garantito (le correzioni della regola), gli **angoli** matematici che
+  girano a sinistra (OpenFlight, glTF, Blender), le **unità**, le **UV**
+  (girate per OpenFlight e OBJ, non per glTF), i **colori lineari** di glTF.
+- OpenFlight è una sequenza di record con **Push/Pop** e **palette**; glTF è
+  un JSON che dice dove sono i numeri (buffer, fette, accessor).
+- Il rig tiene **parti solo dove servono**: radice, DOF, nodi animati,
+  switch, LOD, sequenze. Il resto si cuoce nei vertici.
+- Un DOF è **Prima · Moto · Dopo**, un nodo animato **Prima · Posa · Dopo**:
+  a riposo il modello è com'è stato fatto.
+- Le curve: a gradino, lineari (slerp per le rotazioni), cubiche di Hermite.
+- Le texture si **cercano** (il percorso del file è di un'altra macchina), o
+  sono **dentro** il file (glTF); SGI la decodifichiamo noi.
 - In Unreal: il file su un **thread di lavoro**, gli oggetti sul **game
   thread**, un modello per frame; un modello per tutti, uno **stato del rig**
-  per entità.
+  (DOF, pose, switch) per entità.
+- I formati chiusi si **convertono** una volta, con gli strumenti di chi li
+  ha fatti.

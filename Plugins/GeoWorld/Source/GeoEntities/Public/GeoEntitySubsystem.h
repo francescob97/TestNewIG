@@ -143,6 +143,11 @@ public:
 	bool SetEntityDof(const FString& Who, const FString& Dof, const TArray<double>& Values, FString& OutMessage);
 	/** Sceglie la maschera di uno switch del modello di un'entita'. */
 	bool SetEntitySwitch(const FString& Who, const FString& Switch, int32 Mask, FString& OutMessage);
+	/**
+	 * Fa girare un'animazione del file (glTF) sul modello di un'entita': per nome o
+	 * numero; "stop" la ferma dov'e', "reset" torna alla posa di riposo.
+	 */
+	bool SetEntityAnimation(const FString& Who, const FString& Animation, bool bLoop, double Speed, FString& OutMessage);
 	/** Vuota se i materiali dei modelli ci sono. */
 	FString GetModelMaterialProblem() const;
 
@@ -186,8 +191,15 @@ private:
 		bool bWaitingModel = false;
 		/** Un componente per parte del rig (vuoto senza modello da file). */
 		TArray<TWeakObjectPtr<USceneComponent>> Parts;
-		/** I DOF e gli switch di questa entita'. */
+		/** I DOF, le pose e gli switch di questa entita'. */
 		GeoWorld::Models::FRigState RigState;
+		/** L'animazione del file che gira (-1 nessuna): da quando, a che velocita', in loop o una volta. */
+		int32 Animation = -1;
+		double AnimationStart = 0.0;
+		double AnimationSpeed = 1.0;
+		bool bAnimationLoop = true;
+		/** Quella che la regola fa girare sempre ('anim' nella tabella). */
+		FString AutoAnimation;
 	};
 
 	struct FCandidate
@@ -211,8 +223,13 @@ private:
 	AActor* SpawnActorFor(const GeoWorld::Entities::FEntityRecord& Record, FVisual& Visual);
 	/** Le parti di un modello da file sotto la radice dell'attore. */
 	void BuildModelParts(AActor* Actor, USceneComponent* Root, const FGeoLoadedModel& Model, FVisual& Visual);
-	/** Le trasformazioni dei DOF e la visibilita' (switch, LOD) delle parti. */
-	void ApplyRig(FVisual& Visual, const FVector& Camera, bool bHaveCamera) const;
+	/**
+	 * Le trasformazioni delle parti mobili (DOF, animate) e, se c'e' la camera
+	 * (nello spazio di Unreal), la visibilita' (switch, LOD).
+	 */
+	void ApplyRig(FVisual& Visual, const FVector* Camera) const;
+	/** Un passo dell'animazione che gira: la posa di adesso; alla fine (senza loop) si ferma. */
+	void AnimateVisual(FVisual& Visual, double Now) const;
 	/** L'entita' con questo nome (o numero) che ha un attore. */
 	FVisual* FindVisual(const FString& Who, FString& OutLabel);
 	const FVisual* FindVisual(const FString& Who, FString& OutLabel) const;
@@ -243,6 +260,8 @@ private:
 	TMap<FString, TStrongObjectPtr<UStaticMesh>> AssetMeshes;
 	/** I modelli da file (Private/ModelLibrary/GeoModelLibrary.h). */
 	TSharedPtr<FGeoModelLibrary> Library;
+	/** I problemi gia' detti nel registro (un'animazione della tabella che il modello non ha...): una volta sola. */
+	TSet<FString> ReportedProblems;
 
 	double TimeoutSeconds = 5.0;
 	double ActorRadiusM = 30000.0;
