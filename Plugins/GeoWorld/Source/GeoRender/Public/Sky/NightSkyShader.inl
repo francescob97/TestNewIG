@@ -14,11 +14,14 @@
 //    locale all'equatoriale, Astronomy.h HorizonToEquatorial), Moon
 //    (SkyMoon: direzione e raggio in radianti), Sun (SkySun: direzione),
 //    Night (SkyNight: x stelle 0..1, y il sole del livello in lux, w quanto
-//    si vede la luna fra le nuvole).
+//    si vede la luna fra le nuvole), Catalog (SkyStars: x 2 se le stelle vere
+//    del catalogo sono accese, Sky/StarShader.inl: allora queste no; 1 solo i
+//    pianeti, e queste restano).
 //
 //  LE STELLE sono sul cielo EQUATORIALE: girano attorno alla stella polare un
-//  giro al giorno siderale, come quelle vere. Non sono quelle vere (niente
-//  catalogo): una griglia di celle di ~0,4 gradi, in una cella su ~28 una
+//  giro al giorno siderale, come quelle vere. Non sono quelle vere (quelle del
+//  catalogo, quando c'e', le disegna M_GeoStars e queste si spengono): una
+//  griglia di celle di ~0,4 gradi, in una cella su ~28 una
 //  stella, con la luminosita' che segue la statistica del cielo (tre volte
 //  piu' stelle a ogni magnitudine in piu').
 //  LA VIA LATTEA e' una fascia lungo il piano della galassia, piu' luminosa
@@ -42,7 +45,7 @@ if (Night.x > 0.001)
 	H = (H ^ (H >> 15u)) * 0x846ca68bu;
 	H = H ^ (H >> 16u);
 	float Pick = (float)(H & 1023u) / 1024.0;
-	if (Pick < 0.035)
+	if (Pick < 0.035 && Catalog.x < 1.5)
 	{
 		uint G = H * 0x9e3779b9u + 0x632be5abu;
 		G = (G ^ (G >> 15u)) * 0x846ca68bu;

@@ -257,6 +257,9 @@ void UGeoPositionHudSubsystem::Draw(UCanvas* Canvas, APlayerController* /*Contro
 				Add(TEXT("Luna"), std::string(Sky.Bodies.bMoonWaxing ? "crescente " : "calante ")
 					+ Format::Number(100.0 * Sky.Bodies.MoonIllumination, 0) + "%, alta " + Format::Number(Sky.Bodies.Moon.AltitudeDeg, 0) + Format::Degree);   /* percentuale, non-unita */
 			}
+			// I pianeti che si vedono adesso (Venere gia' nel crepuscolo).
+			const FString Planets = SkySubsystem->DescribeVisiblePlanets();
+			if (Altitude < -2.0 && !Planets.IsEmpty()) { Add(TEXT("Pianeti"), std::string(TCHAR_TO_UTF8(*Planets))); }
 		}
 	}
 

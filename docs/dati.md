@@ -140,6 +140,23 @@ stare a livelli diversi.
 
 ---
 
+## 2b. Le stelle — la Fase 12
+
+| | |
+|---|---|
+| Fonte | **Bright Star Catalogue**, 5a edizione (Hoffleit e Warren, Yale 1991), catalogo V/50 del CDS di Strasburgo |
+| Contenuto | 9.110 stelle fino alla magnitudine 6,5: posizione J2000, magnitudine visuale, indice di colore B-V |
+| Peso | `catalog.gz` ~0,4 MB; il file `.gst` che ne fa la pipeline 109 KB |
+| Licenza | **dominio pubblico** (catalogo della NASA / ADC) |
+| Accesso | `geoworld build-stars -o <file>`: lo scarica da `https://cdsarc.cds.unistra.fr/ftp/V/50/catalog.gz`; con `--catalog` uno gia' scaricato |
+| Provato da qui | **no**: il proxy di questo ambiente blocca il CDS. Il formato e' provato con righe costruite secondo il ReadMe del catalogo |
+
+I **pianeti** non hanno bisogno di dati: gli elementi orbitali approssimati
+del JPL (E. M. Standish, *Keplerian Elements for Approximate Positions of the
+Major Planets*, 1800–2050) stanno nel codice (`Sky/Stars.h`).
+
+---
+
 ## 3. Verificare quello che hai generato
 
 I test automatici girano su un sorgente sintetico. Sul dataset **vero** si usa:
@@ -157,6 +174,9 @@ tile non lo lancerebbe nessuno.
 ---
 
 ## Fonti
+
+* [Bright Star Catalogue, 5a edizione — CDS, catalogo V/50](https://cdsarc.cds.unistra.fr/viz-bin/cat/V/50)
+* [Keplerian Elements for Approximate Positions of the Major Planets — JPL](https://ssd.jpl.nasa.gov/planets/approx_pos.html)
 
 * [Download area 1.1 — TINITALY, INGV](https://tinitaly.pi.ingv.it/Download_Area1_1.html)
 * [TINITALY DEM — pagina principale INGV](https://tinitaly.pi.ingv.it/)

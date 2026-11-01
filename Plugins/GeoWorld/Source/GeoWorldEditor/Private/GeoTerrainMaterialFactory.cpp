@@ -562,6 +562,10 @@ namespace
 		Wanted.Emplace(FName(TEXT("SkyEquatorY")), FLinearColor(0.0f, 1.0f, 0.0f, 0.0f));
 		Wanted.Emplace(FName(TEXT("SkyEquatorZ")), FLinearColor(0.0f, 0.0f, 1.0f, 0.0f));
 		Wanted.Emplace(FName(TEXT("SkyNight")), FLinearColor(0.0f, 10.0f, 0.0f, 1.0f));
+		// Le stelle vere e i pianeti (Sky/StarShader.inl): x 2 catalogo e
+		// pianeti, 1 solo i pianeti, 0 niente; la magnitudine limite; quanta
+		// luce; un pixel in radianti.
+		Wanted.Emplace(FName(TEXT("SkyStars")), FLinearColor(0.0f, 6.0f, 0.0f, 0.001f));
 		// I lampioni (Roads/StreetLightShader.inl). StreetLights: la luce che
 		// c'e' (lux), il fattore della mattina, la luce al piede di un palo, la
 		// riduzione del flusso (0 = spenti: il default). StreetLightView: un
@@ -2025,7 +2029,8 @@ namespace
 	 * UGeoSkySubsystem tiene attorno alla camera. Unlit, ADDITIVO (aggiunge
 	 * luce al cielo dietro, non lo copre), due facce (la camera sta dentro).
 	 *
-	 *   CameraVectorWS, MPC_GeoWeather SkyEquatorX/Y/Z, SkyMoon, SkySun, SkyNight
+	 *   CameraVectorWS, MPC_GeoWeather SkyEquatorX/Y/Z, SkyMoon, SkySun, SkyNight,
+	 *   SkyStars (le stelle finte si spengono con quelle vere)
 	 *       --> Custom "Cielo di notte" (float3) --> Emissive
 	 *
 	 * NOTA UE: un oggetto trasparente a 100 km riceverebbe tutta la nebbia e la
@@ -2064,6 +2069,7 @@ namespace
 		Inputs.Add(FNamedPin{ TEXT("Moon"), CollectionParameter(G, Collection, TEXT("SkyMoon"), -1350, 100) });
 		Inputs.Add(FNamedPin{ TEXT("Sun"), CollectionParameter(G, Collection, TEXT("SkySun"), -1350, 200) });
 		Inputs.Add(FNamedPin{ TEXT("Night"), CollectionParameter(G, Collection, TEXT("SkyNight"), -1350, 300) });
+		Inputs.Add(FNamedPin{ TEXT("Catalog"), CollectionParameter(G, Collection, TEXT("SkyStars"), -1350, 400) });
 		const FString Code(ANSI_TO_TCHAR(NightSkyCode));
 		UMaterialExpressionCustom* Sky = MakeCustom(G, TEXT("Cielo di notte"), *Code, CMOT_Float3, Inputs, -700, 0);
 		G.Connect(Sky, TEXT(""), MP_EmissiveColor);
@@ -2295,9 +2301,106 @@ namespace
 	}
 }
 
+// ============================================================================
+//  LE STELLE VERE E I PIANETI: M_GeoStars
+// ============================================================================
+
+namespace
+{
+	const TCHAR* StarsMaterialPackagePath = TEXT("/GeoWorld/Materials/M_GeoStars");
+	const TCHAR* StarsMaterialAssetName = TEXT("M_GeoStars");
+
+	/** I nodi Custom: il testo di Sky/StarShader.inl (i test lo compilano come C++). */
+#define GEO_STAR_SPRITE(...) #__VA_ARGS__
+#define GEO_STAR_GLOW(...)
+	const char* StarSpriteCode =
+#include "Sky/StarShader.inl"
+		;
+#undef GEO_STAR_SPRITE
+#undef GEO_STAR_GLOW
+#define GEO_STAR_SPRITE(...)
+#define GEO_STAR_GLOW(...) #__VA_ARGS__
+	const char* StarGlowCode =
+#include "Sky/StarShader.inl"
+		;
+#undef GEO_STAR_SPRITE
+#undef GEO_STAR_GLOW
+
+	/**
+	 * M_GeoStars: le stelle del catalogo e i pianeti (UGeoSkySubsystem), un
+	 * quadratino per astro a 150 km che il materiale apre verso la camera.
+	 * Unlit, ADDITIVO, due facce, per componenti di istanze; niente nebbia
+	 * (a 150 km la nebbia le coprirebbe tutte), "Responsive AA" per i punti
+	 * piccoli come un pixel.
+	 *
+	 *   WorldPosition (senza offset), CameraPositionWS, VertexColor (l'angolo),
+	 *   MPC SkyStars, PerInstanceCustomData 3 (la magnitudine)
+	 *       --> Custom "Stelle (punto)" --> World Position Offset
+	 *   VertexColor, WorldPosition, CameraPositionWS, PerInstanceCustomData
+	 *   0..2 (il colore), 3, 4 (la scintillazione), MPC SkyStars, Time
+	 *       --> Custom "Stelle (luce)" --> Emissive
+	 */
+	bool BuildStarsGraph(UMaterial* Material)
+	{
+		UMaterialParameterCollection* Collection = LoadWeatherCollectionFor(TEXT("M_GeoStars"));
+		if (!Collection) { return false; }
+
+		Material->MaterialDomain = MD_Surface;
+		Material->SetShadingModel(MSM_Unlit);
+		Material->BlendMode = BLEND_Additive;
+		Material->TwoSided = true;
+		Material->bUsedWithInstancedStaticMeshes = true;
+		SetMaterialFlag(Material, TEXT("bUseTranslucencyVertexFog"), false);
+		SetMaterialFlag(Material, TEXT("bApplyCloudFogging"), false);
+		SetMaterialFlag(Material, TEXT("bEnableResponsiveAA"), true);
+
+		FGraph G{ Material };
+		const FPin Corner = VertexPaint4(G, -1350, -500);
+		const FPin Rest = TruncatedWorldPosition(G, true, -1350, -400);
+		const FPin Pos = TruncatedWorldPosition(G, false, -1350, 100);
+		const FPin Cam = TruncatedCameraPosition(G, -1350, -300);
+		const FPin Stars = CollectionParameter(G, Collection, TEXT("SkyStars"), -1350, -200);
+		const FPin Tint = LampTint(G, -1350, 200);
+		const FPin Mag = InstanceFloat(G, 3, -1350, 350);
+		const FPin Seed = InstanceFloat(G, 4, -1350, 450);
+		UMaterialExpressionTime* Clock = G.Make<UMaterialExpressionTime>(-1350, 550);
+		UMaterialExpressionConstant* UuPerMetre = G.Make<UMaterialExpressionConstant>(-1350, 0);
+		if (!G.bOk || !Corner.Node || !Rest.Node || !Pos.Node || !Cam.Node || !Tint.Node || !Mag.Node || !Seed.Node) { return false; }
+		UuPerMetre->R = static_cast<float>(GeoWorld::Units::MetersToUu);
+
+		TArray<FNamedPin> VertexInputs;
+		VertexInputs.Add(FNamedPin{ TEXT("Pos"), Rest });
+		VertexInputs.Add(FNamedPin{ TEXT("Cam"), Cam });
+		VertexInputs.Add(FNamedPin{ TEXT("Corner"), Corner });
+		VertexInputs.Add(FNamedPin{ TEXT("Stars"), Stars });
+		VertexInputs.Add(FNamedPin{ TEXT("Mag"), Mag });
+		VertexInputs.Add(FNamedPin{ TEXT("UuPerMetre"), FPin{ UuPerMetre, 0 } });
+		const FString VertexCode(ANSI_TO_TCHAR(StarSpriteCode));
+		UMaterialExpressionCustom* Sprite = MakeCustom(G, TEXT("Stelle (punto)"), *VertexCode, CMOT_Float3, VertexInputs, -700, -400);
+
+		TArray<FNamedPin> PixelInputs;
+		PixelInputs.Add(FNamedPin{ TEXT("Corner"), Corner });
+		PixelInputs.Add(FNamedPin{ TEXT("Pos"), Pos });
+		PixelInputs.Add(FNamedPin{ TEXT("Cam"), Cam });
+		PixelInputs.Add(FNamedPin{ TEXT("Tint"), Tint });
+		PixelInputs.Add(FNamedPin{ TEXT("Mag"), Mag });
+		PixelInputs.Add(FNamedPin{ TEXT("Seed"), Seed });
+		PixelInputs.Add(FNamedPin{ TEXT("Stars"), Stars });
+		PixelInputs.Add(FNamedPin{ TEXT("Clock"), FPin{ Clock, 0 } });
+		const FString PixelCode(ANSI_TO_TCHAR(StarGlowCode));
+		UMaterialExpressionCustom* Glow = MakeCustom(G, TEXT("Stelle (luce)"), *PixelCode, CMOT_Float3, PixelInputs, -700, 200);
+
+		G.Connect(Sprite, TEXT(""), MP_WorldPositionOffset);
+		G.Connect(Glow, TEXT(""), MP_EmissiveColor);
+		if (!G.bOk) { return false; }
+		UMaterialEditingLibrary::RecompileMaterial(Material);
+		return true;
+	}
+}
+
 static FAutoConsoleCommand GeoImageryCreateMaterialCommand(
 	TEXT("geo.Imagery.CreateMaterial"),
-	TEXT("Costruisce (o RIFA') in /GeoWorld/Materials: M_GeoTerrain (foto e strade dipinte), M_GeoRoad (strade 3D), M_GeoWater e MPC_GeoWater (acqua), MPC_GeoWeather, M_GeoPrecipitation, M_GeoLightning e M_GeoClouds (meteo), M_GeoVegetation (alberi), M_GeoBuilding (edifici), M_GeoNightSky (stelle e luna), M_GeoStreetLight e M_GeoStreetLamp (lampioni)."),
+	TEXT("Costruisce (o RIFA') in /GeoWorld/Materials: M_GeoTerrain (foto e strade dipinte), M_GeoRoad (strade 3D), M_GeoWater e MPC_GeoWater (acqua), MPC_GeoWeather, M_GeoPrecipitation, M_GeoLightning e M_GeoClouds (meteo), M_GeoVegetation (alberi), M_GeoBuilding (edifici), M_GeoNightSky (stelle e luna), M_GeoStars (stelle vere e pianeti), M_GeoStreetLight e M_GeoStreetLamp (lampioni)."),
 	FConsoleCommandDelegate::CreateStatic([]()
 	{
 		// Il meteo per primo: terreno e strade leggono MPC_GeoWeather (suolo
@@ -2329,9 +2432,11 @@ static FAutoConsoleCommand GeoImageryCreateMaterialCommand(
 			&& CreateOrRebuildMaterial(StreetLightMaterialPackagePath, StreetLightMaterialAssetName, &BuildStreetLightGraph);
 		const bool bStreetLamp = bWeatherCollection
 			&& CreateOrRebuildMaterial(StreetLampMaterialPackagePath, StreetLampMaterialAssetName, &BuildStreetLampGraph);
+		const bool bStars = bWeatherCollection
+			&& CreateOrRebuildMaterial(StarsMaterialPackagePath, StarsMaterialAssetName, &BuildStarsGraph);
 
 		if (bTerrain && bRoad && bWater && bPrecipitation && bLightning && bClouds && bVegetation && bBuildings && bNightSky
-			&& bStreetLight && bStreetLamp)
+			&& bStreetLight && bStreetLamp && bStars)
 		{
 			Report(TEXT("Materiali pronti. Riavvia il Play (o rilancia geo.Roads.Demo / geo.Water.Demo)."));
 		}
@@ -2357,6 +2462,11 @@ static FAutoConsoleCommand GeoImageryCreateMaterialCommand(
 		if (!bNightSky)
 		{
 			Report(TEXT("M_GeoNightSky non fatto: di notte niente stelle ne' luna. Output Log (LogGeoWorld) e docs/cielo-verifica.md"),
+				FColor::Red);
+		}
+		if (!bStars)
+		{
+			Report(TEXT("M_GeoStars non fatto: niente stelle vere ne' pianeti (restano le stelle finte). Output Log (LogGeoWorld) e docs/cielo-verifica.md"),
 				FColor::Red);
 		}
 		if (!bStreetLight || !bStreetLamp)

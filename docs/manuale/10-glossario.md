@@ -68,6 +68,8 @@ per fare prima. Fa scontrare le funzioni omonime nei namespace anonimi. (1)
 
 **Circuito (dei lampioni)** — i lampioni accesi dalla stessa fotocellula: qui una cella di ~300 m. Una via si accende tutta insieme, quella accanto qualche minuto dopo. (19)
 
+**Catalogo di Yale** (*Bright Star Catalogue*) — le 9.110 stelle piu' luminose del cielo, tutte quelle a occhio nudo, con posizione, magnitudine e colore. Dominio pubblico; `geoworld build-stars` lo scarica e lo riduce a un file `.gst`. (18)
+
 **CDO** (*Class Default Object*) — l'oggetto "prototipo" che Unreal crea per ogni
 classe `UCLASS`, con i valori di default. I file `.ini` vengono applicati a lui. (1)
 
@@ -120,9 +122,13 @@ camera non è un attore. (1)
 
 **Elongazione** — l'angolo fra il sole e la luna (o un pianeta) visti dalla Terra. Dice la fase: 0° luna nuova, 180° piena. (18)
 
+**Elementi orbitali** — i sei numeri che descrivono l'ellisse di un pianeta attorno al sole: grandezza, schiacciamento, inclinazione, orientamento, dove sta il pianeta. Quelli approssimati del JPL valgono dal 1800 al 2050. (18)
+
 **Ellissoide** — la forma matematica della Terra: un'ellisse fatta ruotare. (2)
 
 **Estrusione** — alzare una sagoma piana fino a un'altezza: i lati diventano muri verticali, la sagoma in alto il tetto. (17)
+
+**Equazione di Keplero** — E − e sin E = M: dalla posizione "media" di un pianeta (M, che cresce uniforme col tempo) a quella vera sull'ellisse (E). Si risolve per tentativi (Newton). (18)
 
 **Equazione del tempo** — di quanto il sole vero anticipa (o ritarda) il sole "medio" degli orologi: fino a 16 minuti a novembre e −14 a febbraio. Per questo il mezzogiorno vero non è alle 12. (18)
 
@@ -166,6 +172,8 @@ va mai bloccato. (1)
 che nessuno usa più. Vede solo i riferimenti che conosce. (1)
 
 **GDAL** — la libreria standard per leggere e trasformare dati geografici. (3)
+
+**Indice di colore (B−V)** — quanto una stella e' piu' luminosa nel blu che nel giallo: 0 bianco-azzurra (Vega), 0,65 il sole, 1,85 arancione (Betelgeuse). Ne viene la temperatura e il colore. (18)
 
 **Gelicidio** — pioggia che arriva liquida su un suolo sotto zero e gela al contatto, coprendolo di vetrato. Nel modello: pioggia imposta con il gelo. (15)
 
@@ -218,6 +226,8 @@ più tempo. (4)
 materiali la posizione nel mondo è LWC (due float): un nodo Custom la vuole come
 float normale, e per questo passa da un nodo `TruncateLWC`. (1, 2, 13)
 
+**Magnitudine** — quanto e' luminoso un astro: piu' piccola, piu' luminoso; una magnitudine in meno e' 2,512 volte la luce. Sirio −1,46, la Polare 2,02, le piu' deboli a occhio nudo 6. La **magnitudine limite** e' quella delle piu' deboli che si vedono adesso: scende nel crepuscolo e con la luna. (18)
+
 **Manifest** — il file `manifest.json` che descrive un dataset. (3)
 
 **Mappa meteo** — la texture di 256 × 256 texel (160 km attorno alla camera) con le nubi di pioggia, calcolata dal C++ su un thread di lavoro ogni 8 s e spostata dallo shader con il vento fra un ricalcolo e l'altro. (15)
@@ -243,6 +253,8 @@ modificabili a runtime. (1, 7)
 
 **Monumento (della libreria)** — un edificio di OSM sostituito da un modello: Project Settings → Plugins → GeoWorld - Edifici, una voce per id (Wikidata `Q…` o OSM `way/…`). Il modello va sul baricentro della sagoma, girato come il lato lungo. (17)
 
+**Massa d'aria** — quanta atmosfera attraversa la luce di un astro, 1 allo zenit, ~40 all'orizzonte. Ogni massa d'aria in piu' toglie ~0,25 magnitudini (l'estinzione): le stelle basse sono deboli. (18)
+
 **MPSC** (*multiple producers, single consumer*) — una coda in cui molti thread
 aggiungono e uno solo toglie. (4)
 
@@ -265,6 +277,8 @@ e +52 m. (3)
 edifici, boschi, acqua. Licenza ODbL, da citare. Fonte della Fase 8 e delle successive. (12)
 
 **Nube-suolo** — il fulmine che arriva a terra, circa uno su tre; gli altri restano dentro la nube e si vedono solo come il cielo che si illumina. (15)
+
+**Opposizione e congiunzione** — un pianeta e' in opposizione quando sta dalla parte opposta del sole (si vede tutta la notte, al suo massimo: Marte il 13 ottobre 2020); due astri sono in congiunzione quando sembrano vicini nel cielo (Giove e Saturno, 21 dicembre 2020, a un decimo di grado). (18)
 
 **Ora legale** — in Europa, dall'ultima domenica di marzo all'ultima di ottobre (alle 01:00 UT) gli orologi vanno un'ora avanti: in Italia UT+2 (CEST) invece di UT+1 (CET). (18)
 
@@ -290,6 +304,8 @@ sua coordinata. (7)
 **Post** — un punto di campionamento di una griglia di quote. (3)
 
 **Post riempito** — un post del terreno dove il sorgente non aveva dati, scritto dalla pipeline con il livello del mare. Per l'acqua non è terreno: si riconosce perché vale esattamente il geoide. (13)
+
+**Precessione** — l'asse della Terra gira come una trottola, un giro in 26.000 anni: il cielo scivola di 50" l'anno. Le posizioni di un catalogo del 2000 vanno portate alla data. (18)
 
 **Previsione del moto** — stima della velocità della camera dalle sue posizioni (`FMotionPredictor`) e proiezione in avanti su una retta. (11)
 
@@ -329,6 +345,8 @@ quote) o un'area (i pixel). Decide se il bordo è condiviso. (3, 7)
 **Rombo** (del tuono) — il tuono che dura secondi: ogni pezzo del canale fa il botto nello stesso istante, ma i pezzi sono a distanze diverse da chi ascolta, e il suono ci mette tre secondi per chilometro. (15)
 
 **Riscaldamento** — dopo un salto, qualche decimo di secondo in cui si costruiscono più mesh per frame (24 invece di 4): il frame rallenta, il terreno arriva tutto insieme. (11)
+
+**Scintillazione** — il tremolio delle stelle, dall'aria in movimento; piu' forte vicino all'orizzonte. I pianeti, che sono dischetti e non punti, non scintillano. (18)
 
 **Rugosità** (`z0`) — quanto il suolo è ruvido per il vento, in metri: 0,2 mm il mare, 3 cm un prato, 1 m una città. Decide quanto lo strato limite frena il vento al suolo e quanto è rafficato. (14)
 
@@ -543,6 +561,7 @@ il primo comando da provare quando non si vede niente. (6)
 | `Public/Buildings/BuildingMesh.h`, `BuildingShader.inl` | gli edifici (puro): pulizia, triangolazione, muri, tetti; il materiale (HLSL e C++) |
 | `Public/Buildings/GeoBuildingsSubsystem.h`, `GeoBuildingSettings.h` | il subsystem degli edifici in Unreal, la libreria dei monumenti (Project Settings) |
 | `Public/Sky/Astronomy.h`, `DayLight.h`, `NightSkyShader.inl` | il cielo (puro): sole, luna, ora locale, luce del giorno e della notte; stelle e luna (HLSL e C++) |
+| `Public/Sky/Stars.h`, `StarShader.inl` | le stelle vere (catalogo, precessione, cielo specchiato, colore, magnitudine limite) e i pianeti (puro); il punto di una stella (HLSL e C++) |
 | `Public/Sky/GeoSkySubsystem.h`, `GeoSkySettings.h` | il giorno e la notte in Unreal: il sole del livello, la luna, l'esposizione, la nebbia, le stelle; le impostazioni |
 | `Public/Roads/StreetLights.h`, `StreetLightShader.inl` | i lampioni (puro): quali strade, dove, quando si accendono, le forme; lo shader dei punti luce e del vetro (HLSL e C++) |
 | `Public/Roads/GeoStreetLightsSubsystem.h` | i lampioni in Unreal: celle, punti luce, pali, luci vere |
@@ -557,7 +576,7 @@ il primo comando da provare quando non si vede niente. (6)
 | `GeoWorldEditor.Build.cs` | `MaterialEditor`, `AssetTools` |
 | `Private/GeoWorldEditorModule.cpp` | il modulo |
 | `Private/GeoVegetationModelFactory.cpp` | `geo.Vegetation.CreateModels`: i modelli Nanite degli alberi |
-| `Private/GeoTerrainMaterialFactory.cpp` | `geo.Imagery.CreateMaterial`: `M_GeoTerrain`, `M_GeoRoad`, `M_GeoWater`, `MPC_GeoWater`, `MPC_GeoWeather`, `M_GeoPrecipitation`, `M_GeoLightning`, `M_GeoClouds`, `M_GeoVegetation`, `M_GeoBuilding`, `M_GeoNightSky`, `M_GeoStreetLight`, `M_GeoStreetLamp` |
+| `Private/GeoTerrainMaterialFactory.cpp` | `geo.Imagery.CreateMaterial`: `M_GeoTerrain`, `M_GeoRoad`, `M_GeoWater`, `MPC_GeoWater`, `MPC_GeoWeather`, `M_GeoPrecipitation`, `M_GeoLightning`, `M_GeoClouds`, `M_GeoVegetation`, `M_GeoBuilding`, `M_GeoNightSky`, `M_GeoStars`, `M_GeoStreetLight`, `M_GeoStreetLamp` |
 
 ### Strumenti
 

@@ -218,6 +218,20 @@ lavora a blocchi di ~20 km: interrotto, riparte da dove era (`--force` rifà
 tutto). Dati (c) contributori di OpenStreetMap, ODbL. Le decisioni sono in
 `docs/edifici-design.md`.
 
+
+### Le stelle vere (Fase 12)
+
+```bat
+geoworld build-stars -o dataset/stars.gst
+geoworld build-stars -o dataset/stars.gst --catalog catalog.gz     :: un catalogo gia' scaricato
+```
+
+Il **Bright Star Catalogue** di Yale (5a edizione, 9.110 stelle fino alla
+magnitudine 6,5, dominio pubblico), scaricato una volta dal CDS di Strasburgo
+(catalogo V/50, ~0,4 MB, accanto al file di uscita), ridotto a un file `.gst`
+di 109 KB: posizione J2000, magnitudine e indice di colore, dalla stella piu'
+luminosa (`geoworld/starbuild.py`). In Unreal: `geo.Sky.Catalog <il file>`.
+
 ## Stadi
 
 | # | Stadio | Produce |

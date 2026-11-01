@@ -178,4 +178,5 @@ add_test(NAME geovegetation COMMAND geovegetation_tests
 	${CMAKE_CURRENT_SOURCE_DIR}/../../Source/GeoTiles/TestData/vegetation_fixture.gvg)
 add_test(NAME geobuildings COMMAND geobuildings_tests
 	${CMAKE_CURRENT_SOURCE_DIR}/../../Source/GeoTiles/TestData/buildings_fixture.gbd)
-add_test(NAME geosky COMMAND geosky_tests)
+add_test(NAME geosky COMMAND geosky_tests
+	${CMAKE_CURRENT_SOURCE_DIR}/../../Source/GeoTiles/TestData/stars_fixture.gst)

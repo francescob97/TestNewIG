@@ -26,6 +26,21 @@
    primo quarto (il lato verso il sole), di giorno pallida, dietro le nuvole
    no.
 
+E le stelle vere e i pianeti (sezioni 7, 8, 9 dello stesso `geosky_tests`):
+il file della pipeline (`stars_fixture.gst`) e i file rovinati; la
+precessione di Meeus 21.b identica al libro; il polo celeste spostato di
+0,15° e il punto vernale di 0,37° dal 2000; il cielo specchiato è una
+rotazione vera e dà lo stesso cielo della formula di sempre (18 stelle, meno
+di un milionesimo di grado); la Polare a 45° verso nord a ogni ora; Sirio
+che passa a 28°, Vega a 84°; i colori (Vega azzurrina, Betelgeuse arancione);
+la magnitudine limite; Venere di Meeus 33.a, la grande congiunzione del 2020,
+le opposizioni di Marte, Giove e Saturno del 2020 (posizione e magnitudine),
+la massima elongazione di Venere, gli anelli di Saturno di taglio nel 2025;
+lo shader delle stelle (la grandezza del punto, 2,512 volte per magnitudine,
+l'orizzonte, la scintillazione che i pianeti non hanno). In Python
+(`tests/test_stars.py`): il catalogo letto a colonne fisse, il file `.gst`,
+il comando senza rete.
+
 Più due test negli edifici (`geobuildings_tests`): di notte metà delle
 finestre accese, mai fra una e l'altra, né sui tetti, né sotto il suolo; a
 notte fonda poche, tutte fra quelle della sera.
@@ -84,6 +99,33 @@ giorno in poco meno di 5 minuti), con l'overlay. Atteso:
 | n | `geo.Sky.Enable 0` | il sole del livello torna dov'era, la luna e le stelle spariscono | |
 | o | `geo.Sky.Now` | l'ora vera, il tempo che corre come l'orologio | |
 
+## 3b. Le stelle vere e i pianeti
+
+1. Il catalogo, una volta (serve la rete: lo scarica dal CDS di Strasburgo,
+   0,4 MB):
+   ```
+   geoworld build-stars -o D:/GeoData/stars.gst
+   ```
+   Atteso: "Stelle: 9096 fino alla magnitudine 6.5" (più o meno: qualche voce
+   del catalogo non ha la posizione), "la più luminosa: magnitudine -1.46".
+2. In Unreal: `geo.Imagery.CreateMaterial` (crea `M_GeoStars`, aggiunge
+   `SkyStars` a `MPC_GeoWeather`, rifà `M_GeoNightSky`), poi
+   `geo.Sky.Catalog D:/GeoData/stars.gst`. Per averlo a ogni avvio: Project
+   Settings → Plugins → GeoWorld - Cielo → Star Catalog.
+
+| # | Prova | Atteso | Se no |
+|---|---|---|---|
+| a | `geo.Sky.Time 22:00 2026-01-15`, guarda a sud | Orione: le tre stelle della cintura in fila, Betelgeuse arancione in alto a sinistra, Rigel azzurrina in basso a destra; Sirio sotto, la più luminosa | stelle a caso: il catalogo non è caricato (`geo.Sky.Stats` dice "finte") |
+| b | `geo.Sky.LookAt polare` | la Polare a 45° (a Torino) verso nord; il Grande Carro attorno | la Polare altrove: segnalalo con l'overlay acceso |
+| c | `geo.Sky.Speed 600` | il cielo gira attorno alla Polare, che resta ferma | |
+| d | `geo.Sky.Time 19:00 2026-03-01` (o una sera in cui Venere è della sera), `geo.Sky.Planets` | la tabella dei pianeti; quelli alti si vedono, Venere la più luminosa dopo la luna | |
+| e | `geo.Sky.LookAt venere` all'imbrunire | Venere compare prima delle stelle (a −1° di sole già si vede) | |
+| f | `geo.Sky.Time 23:00 2020-12-21` e `geo.Sky.LookAt giove` | Giove e Saturno quasi attaccati (un decimo di grado): la grande congiunzione | |
+| g | Una notte di luna piena | meno stelle (la magnitudine limite scende a ~4,8) | |
+| h | Guarda verso l'orizzonte | le stelle basse più deboli e tremolanti; i pianeti fermi | |
+| i | `geo.Sky.Catalog off` | tornano le stelle finte; i pianeti restano | |
+| j | `geo.Sky.StarBrightness 3` | stelle più luminose | |
+
 ## 4. Se qualcosa non va
 
 **La notte è nera.** L'esposizione automatica del progetto non scende
@@ -110,6 +152,18 @@ te.
 un pixel: l'antialiasing temporale le confonde. In `M_GeoNightSky`
 "Responsive AA" acceso (la factory lo fa).
 
+**Le stelle vere non si vedono.** `geo.Sky.Stats`: se dice "finte", il
+catalogo non è aperto (`geo.Sky.Catalog`). Se l'overlay (`geo.Sky.Debug 1`)
+ha una riga rossa "mancano M_GeoStars o SkyStars", rilancia
+`geo.Imagery.CreateMaterial`. Se la magnitudine limite è sotto zero è ancora
+giorno per le stelle (o c'è la luna piena alta).
+
+**Le stelle sono quadrati, o grosse come la luna.** Il materiale non riceve
+`SkyStars` (MPC vecchia): `geo.Imagery.CreateMaterial`.
+
+**Le stelle spariscono quando giri la camera.** I bounds del quadratino non
+sono stati allargati (sezione 5, `SetPositiveBoundsExtension`).
+
 **Il sole del livello resta fermo.** `geo.Sky.Stats`: se dice "in attesa
 della camera", il cielo non sa dove sei; se il sole è "--" nell'overlay, non
 c'è una luce direzionale e il cielo ne ha creata una ("GeoWorld Sole").
@@ -126,10 +180,14 @@ c'è una luce direzionale e il cielo ne ha creata una ("GeoWorld Sole").
 | idem | `FDateTime::GetJulianDay` | `FDateTime::UtcNow().GetTicks()`: (ticks / 864e9) + 1721425,5 |
 | `GeoTerrainMaterialFactory.cpp` | `UMaterialExpressionCameraVectorWS` | nell'editor è "CameraVector" |
 | idem | i flag per nome `bUseTranslucencyVertexFog`, `bApplyCloudFogging`, `bEnableResponsiveAA` | se il nome non c'è la factory lo dice in giallo: cercali a mano in Details |
+| `GeoSkyStars.cpp` | `UStaticMesh::SetPositiveBoundsExtension`, `SetNegativeBoundsExtension`, `CalculateExtendedBounds` | i campi pubblici `PositiveBoundsExtension`/`NegativeBoundsExtension`; o `Field->SetBoundsScale(20000.0f)` |
+| idem | `UInstancedStaticMeshComponent::UpdateInstanceTransform`, `SetCustomDataValue` | i pianeti restano dove erano all'avvio del cielo: togli le righe |
+| `GeoSkySettings.h` | `FFilePath` con `FilePathFilter` | togli il `meta` |
 
 Se `M_GeoNightSky` non si costruisce, a mano: Unlit, Additive, Two Sided,
 "Apply Fogging" spento; un nodo Custom (uscita Float 3) con il testo di
 `NightSkyShader.inl` fra le parentesi della macro, gli ingressi `View`
 (CameraVector), `EqX`, `EqY`, `EqZ`, `Moon`, `Sun`, `Night` (i parametri
-`SkyEquatorX/Y/Z`, `SkyMoon`, `SkySun`, `SkyNight` di MPC_GeoWeather), uscita
+`SkyEquatorX/Y/Z`, `SkyMoon`, `SkySun`, `SkyNight` di MPC_GeoWeather; `Catalog`
+= `SkyStars`), uscita
 all'Emissive.

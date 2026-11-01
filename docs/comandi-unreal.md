@@ -4,7 +4,7 @@
 > Non modificarlo a mano: i controlli statici (`CheckSourceDiscipline.sh`, regola 7)
 > dicono quando e' indietro. In Unreal lo stesso elenco lo da' `geo.Help`.
 
-**152 comandi** in 13 gruppi.
+**156 comandi** in 13 gruppi.
 
 ## Come si usano
 
@@ -53,7 +53,7 @@
 - [Il meteo](#il-meteo) — `geo.Weather.*`, 26 comandi
 - [La vegetazione](#la-vegetazione) — `geo.Vegetation.*`, 12 comandi
 - [Gli edifici](#gli-edifici) — `geo.Buildings.*`, 9 comandi
-- [Il cielo](#il-cielo) — `geo.Sky.*`, 14 comandi
+- [Il cielo](#il-cielo) — `geo.Sky.*`, 18 comandi
 - [La camera di volo](#la-camera-di-volo) — `geo.Fly.*`, 2 comandi
 - [Lights](#lights) — `geo.Lights.*`, 11 comandi
 
@@ -152,7 +152,7 @@ Le foto sul terreno, e i materiali di tutto il progetto (Fase 6).
 | `geo.Imagery.Budget <N>` | texture create per frame (default 4). |
 | `geo.Imagery.Stats` | Statistiche del drappeggio e dello streaming delle ortofoto. |
 | `geo.Imagery.Demo <cartella_terreno> <cartella_ortofoto>` | apre tutto e accende. |
-| `geo.Imagery.CreateMaterial` | Costruisce (o RIFA') in /GeoWorld/Materials: M_GeoTerrain (foto e strade dipinte), M_GeoRoad (strade 3D), M_GeoWater e MPC_GeoWater (acqua), MPC_GeoWeather, M_GeoPrecipitation, M_GeoLightning e M_GeoClouds (meteo), M_GeoVegetation (alberi), M_GeoBuilding (edifici), M_GeoNightSky (stelle e luna), M_GeoStreetLight e M_GeoStreetLamp (lampioni). *(solo nell'editor)* |
+| `geo.Imagery.CreateMaterial` | Costruisce (o RIFA') in /GeoWorld/Materials: M_GeoTerrain (foto e strade dipinte), M_GeoRoad (strade 3D), M_GeoWater e MPC_GeoWater (acqua), MPC_GeoWeather, M_GeoPrecipitation, M_GeoLightning e M_GeoClouds (meteo), M_GeoVegetation (alberi), M_GeoBuilding (edifici), M_GeoNightSky (stelle e luna), M_GeoStars (stelle vere e pianeti), M_GeoStreetLight e M_GeoStreetLamp (lampioni). *(solo nell'editor)* |
 
 ## Strade, ferrovie, piste
 
@@ -272,6 +272,10 @@ Il giorno e la notte: il sole all'ora giusta, la luna con le fasi, le stelle (Fa
 | `geo.Sky.Debug <0\|1>` | overlay del cielo: ora, sole e luna (altezza, levate, tramonti, fase), luce, la scena. |
 | `geo.Sky.Stats` | Dove sono il sole e la luna, e che ora e'. |
 | `geo.Sky.Demo [velocita']` | un giorno intero di corsa: da prima dell'alba, 300 volte piu' veloce (un giorno in poco meno di 5 minuti), con l'overlay. |
+| `geo.Sky.Catalog <file .gst\|off>` | le stelle vere del catalogo di Yale (geoworld build-stars) al posto di quelle finte; off: si torna a quelle finte. |
+| `geo.Sky.Planets [0\|1]` | i pianeti a occhio nudo (Mercurio, Venere, Marte, Giove, Saturno); senza argomenti dice dove sono e quanto brillano. |
+| `geo.Sky.StarBrightness <x>` | quanta luce fanno le stelle vere e i pianeti (1: una stella di magnitudine 0 come 1/50 del sole del livello). |
+| `geo.Sky.LookAt <astro>` | gira la camera verso un astro: sole, luna, polare, mercurio, venere, marte, giove, saturno (nel Play). |
 
 ## La camera di volo
 
@@ -317,7 +321,7 @@ Non sono di GeoWorld, ma la documentazione li usa spesso.
 | File | Comandi |
 |---|---|
 | `Plugins/GeoWorld/Source/GeoCore/Private/GeoCoreModule.cpp` | 10 |
-| `Plugins/GeoWorld/Source/GeoRender/Private/GeoRenderModule.cpp` | 130 |
+| `Plugins/GeoWorld/Source/GeoRender/Private/GeoRenderModule.cpp` | 134 |
 | `Plugins/GeoWorld/Source/GeoTiles/Private/GeoTilesModule.cpp` | 10 |
 | `Plugins/GeoWorld/Source/GeoWorldEditor/Private/GeoTerrainMaterialFactory.cpp` | 1 |
 | `Plugins/GeoWorld/Source/GeoWorldEditor/Private/GeoVegetationModelFactory.cpp` | 1 |

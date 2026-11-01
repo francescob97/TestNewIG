@@ -34,6 +34,7 @@ import time
 # dentro le funzioni che le usano davvero.
 
 from . import __version__, tiling, tileformat, geoid, environment, fetch as fetch_module, manifest as manifest_module
+from . import starbuild
 from . import (fetchimagery, imagecut, imageformat, imagerybuild,
                imagerymanifest)
 # Fase 8: le linee (strade, ferrovie, piste). Moduli che importano GDAL e
@@ -909,6 +910,16 @@ def command_verify_buildings(args: argparse.Namespace) -> int:
     return 0 if problems == 0 else 1
 
 
+def command_build_stars(args: argparse.Namespace) -> int:
+    try:
+        starbuild.build(output=args.output, catalog=args.catalog, max_magnitude=args.max_magnitude, report=log)
+    except (FileNotFoundError, RuntimeError, ValueError, OSError) as error:
+        log(f"ERRORE: {error}")
+        return 1
+    log("In Unreal: geo.Sky.Catalog <il file> (o Project Settings -> GeoWorld - Cielo -> Catalogo delle stelle)")
+    return 0
+
+
 def command_inspect_buildings(args: argparse.Namespace) -> int:
     from collections import Counter
     tile = bldformat.read_tile(args.tile)
@@ -1197,6 +1208,15 @@ def build_parser() -> argparse.ArgumentParser:
     verify_bld = subparsers.add_parser("verify-buildings", help="controlla un dataset di edifici")
     verify_bld.add_argument("-o", "--output", required=True)
     verify_bld.set_defaults(func=command_verify_buildings)
+
+    build_stars = subparsers.add_parser(
+        "build-stars", help="le stelle vere: dal catalogo di Yale (9.110 stelle, scaricato dal CDS) a un file .gst")
+    build_stars.add_argument("-o", "--output", required=True,
+                             help="il file delle stelle (es. D:/GeoData/stars.gst) o una cartella (ci mette stars.gst)")
+    build_stars.add_argument("--catalog", help="il catalogo V/50 gia' scaricato (catalog.gz): senza, si scarica")
+    build_stars.add_argument("--max-magnitude", type=float, default=starbuild.DEFAULT_MAX_MAGNITUDE,
+                             help=f"fin dove (default {starbuild.DEFAULT_MAX_MAGNITUDE}: tutte quelle a occhio nudo)")
+    build_stars.set_defaults(func=command_build_stars)
 
     inspect_bld = subparsers.add_parser("inspect-buildings", help="stampa il contenuto di una tile di edifici")
     inspect_bld.add_argument("tile")

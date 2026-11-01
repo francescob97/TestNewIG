@@ -25,6 +25,7 @@
 #include "Materials/MaterialParameterCollection.h"
 #include "Materials/MaterialParameterCollectionInstance.h"
 #include "Misc/DateTime.h"
+#include "Misc/Paths.h"
 #include "UObject/UObjectIterator.h"
 
 using namespace GeoWorld;
@@ -32,6 +33,9 @@ using namespace GeoWorld;
 namespace
 {
 	const TCHAR* NightSkyMaterialPath = TEXT("/GeoWorld/Materials/M_GeoNightSky.M_GeoNightSky");
+	const TCHAR* StarsMaterialPath = TEXT("/GeoWorld/Materials/M_GeoStars.M_GeoStars");
+	/** Le stelle: la magnitudine 0 brilla come 1/50 del sole del livello (prima di StarBrightness). */
+	constexpr double SkyStarLuxShare = 0.02;
 	const TCHAR* SkyCollectionPath = TEXT("/GeoWorld/Materials/MPC_GeoWeather.MPC_GeoWeather");
 	const TCHAR* SkySpherePath = TEXT("/Engine/BasicShapes/Sphere.Sphere");
 	/** La sfera delle stelle: 100 km di raggio (la sfera del motore ne ha 50 cm). */
@@ -115,6 +119,15 @@ void UGeoSkySubsystem::Initialize(FSubsystemCollectionBase& Collection)
 	bCityLights = Settings->bCityLights;
 	ConfiguredLux = Settings->SunIlluminanceLux;
 	ShadowDistanceM = Settings->ShadowDistanceM;
+	bPlanets = Settings->bPlanets;
+	if (!Settings->StarCatalog.FilePath.IsEmpty())
+	{
+		FString Error;
+		if (!LoadStarCatalog(Settings->StarCatalog.FilePath, Error))
+		{
+			UE_LOG(LogGeoWorld, Warning, TEXT("[GeoSky] catalogo delle stelle: %s; restano le stelle finte"), *Error);
+		}
+	}
 
 	// Si comincia da adesso, o da oggi all'ora scelta (ora locale).
 	const double Now = FDateTime::UtcNow().GetJulianDay();
@@ -134,6 +147,9 @@ void UGeoSkySubsystem::Deinitialize()
 {
 	Restore();
 	NightSkyMaterial.Reset();
+	StarMaterial.Reset();
+	StarQuad.Reset();
+	StarCatalog.reset();
 	WeatherCollection.Reset();
 	SphereMesh.Reset();
 	Super::Deinitialize();
@@ -234,11 +250,16 @@ void UGeoSkySubsystem::Tick(float DeltaTime)
 	ApplyExposure();
 	ApplyParameters(LocalToWorld);
 	ApplyNightSky(Camera);
+	ApplyStars(Camera, LocalToWorld);
 	bApplied = true;
 	Problem = (bNightSky && !NightSkyMaterial.IsValid())
 		? FString(TEXT("manca M_GeoNightSky: niente stelle ne' luna con le fasi. Crealo con geo.Imagery.CreateMaterial"))
 		: (bParametersMissing ? FString(TEXT("MPC_GeoWeather e' di prima del cielo (manca SkySun): rilancia geo.Imagery.CreateMaterial"))
 		                      : FString());
+	if (Problem.IsEmpty() && bNightSky && (StarCatalog || bPlanets) && (!StarMaterial.IsValid() || bStarParametersMissing))
+	{
+		Problem = TEXT("mancano M_GeoStars o SkyStars in MPC_GeoWeather: niente stelle vere ne' pianeti. Rilancia geo.Imagery.CreateMaterial");
+	}
 	if (bShowDebugOverlay) { DrawDebugOverlay(); }
 }
 
@@ -286,7 +307,7 @@ void UGeoSkySubsystem::UpdateDayEvents(double LatDeg, double LonDeg)
 void UGeoSkySubsystem::EnsureAssets()
 {
 	const double Now = FPlatformTime::Seconds();
-	if (NightSkyMaterial.IsValid() && WeatherCollection.IsValid() && SphereMesh.IsValid()) { return; }
+	if (NightSkyMaterial.IsValid() && WeatherCollection.IsValid() && SphereMesh.IsValid() && StarMaterial.IsValid()) { return; }
 	if (Now - LastAssetLookup < 2.0) { return; }
 	LastAssetLookup = Now;
 	if (!WeatherCollection.IsValid())
@@ -300,6 +321,10 @@ void UGeoSkySubsystem::EnsureAssets()
 	if (!SphereMesh.IsValid())
 	{
 		SphereMesh.Reset(LoadObject<UStaticMesh>(nullptr, SkySpherePath, nullptr, LOAD_NoWarn | LOAD_Quiet));
+	}
+	if (!StarMaterial.IsValid())
+	{
+		StarMaterial.Reset(LoadObject<UMaterialInterface>(nullptr, StarsMaterialPath, nullptr, LOAD_NoWarn | LOAD_Quiet));
 	}
 }
 
@@ -595,6 +620,14 @@ void UGeoSkySubsystem::ApplyParameters(const FQuat& LocalToWorld)
 	bSet = Parameters->SetVectorParameterValue(TEXT("SkyNight"),
 		FLinearColor(static_cast<float>(Stars), static_cast<float>(DayLux), static_cast<float>(Windows), static_cast<float>(Clear))) && bSet;
 	bParametersMissing = !bSet;
+
+	// Le stelle vere e i pianeti: quante se ne vedono (il crepuscolo, la luna alta), quanta luce, un pixel.
+	const double MoonUp = FMath::Clamp(FMath::Sin(State.Bodies.Moon.AltitudeDeg * Core::DegToRad) * 3.0, 0.0, 1.0);
+	LimitingMag = Sky::LimitingMagnitude(State.Bodies.Sun.AltitudeDeg, Sky::MoonPhaseBrightness(State.Bodies.MoonPhaseAngleDeg) * MoonUp);
+	// Prima di sapere se il parametro c'e' (StarFieldMode lo guarda), si prova a scriverlo.
+	const double Mode = (bNightSky && StarMaterial.IsValid()) ? ((StarCatalog && !StarCatalog->empty()) ? 2.0 : (bPlanets ? 1.0 : 0.0)) : 0.0;
+	bStarParametersMissing = !Parameters->SetVectorParameterValue(TEXT("SkyStars"), FLinearColor(static_cast<float>(Mode),
+		static_cast<float>(LimitingMag), static_cast<float>(SkyStarLuxShare * DayLux * Clear * StarBrightness), static_cast<float>(ViewPixelAngle())));
 }
 
 void UGeoSkySubsystem::ApplyNightSky(const FVector& CameraLocation)
@@ -662,8 +695,9 @@ void UGeoSkySubsystem::Restore()
 	{
 		if (UMaterialParameterCollectionInstance* Parameters = WeatherCollection.IsValid() ? World->GetParameterCollectionInstance(WeatherCollection.Get()) : nullptr)
 		{
-			// Niente finestre accese, niente stelle.
+			// Niente finestre accese, niente stelle (ne' finte ne' vere).
 			Parameters->SetVectorParameterValue(TEXT("SkyNight"), FLinearColor(0.0f, static_cast<float>(DayLux), 0.0f, 1.0f));
+			Parameters->SetVectorParameterValue(TEXT("SkyStars"), FLinearColor(0.0f, 6.0f, 0.0f, 0.001f));
 		}
 	}
 	// Quello che il cielo ha creato (transient: non finisce mai nel livello salvato).
@@ -672,6 +706,7 @@ void UGeoSkySubsystem::Restore()
 	Created.Add(MoonLight.Get());
 	Created.Add(Exposure.Get());
 	Created.Add(Dome.Get());
+	DestroyStarField();
 	for (AActor* Actor : Created)
 	{
 		if (Actor) { Actor->Destroy(); }
@@ -728,6 +763,13 @@ void UGeoSkySubsystem::DrawDebugOverlay() const
 		bHasAtmosphere ? TEXT("con SkyAtmosphere") : TEXT("senza SkyAtmosphere"),
 		MoonLight.IsValid() ? TEXT("accesa") : TEXT("spenta"),
 		SkyUsesVirtualShadowMaps() ? TEXT("Virtual Shadow Maps") : *FString::Printf(TEXT("a cascata fino a %.0f m"), ShadowDistanceM)));
+	Line(FColor::White, FString::Printf(TEXT("Stelle     : %s; magnitudine limite %.1f; luce x%.2f"),
+		StarCatalog ? *FString::Printf(TEXT("%d dal catalogo (%s)"), GetCatalogStarCount(), *FPaths::GetCleanFilename(StarCatalogPath))
+		            : TEXT("finte (geo.Sky.Catalog <file .gst> per quelle vere)"),
+		LimitingMag, StarBrightness));
+	const FString Visible = DescribeVisiblePlanets();
+	Line(FColor::White, FString::Printf(TEXT("Pianeti    : %s"), !bPlanets ? TEXT("spenti (geo.Sky.Planets 1)")
+		: (Visible.IsEmpty() ? TEXT("nessuno in vista") : *Visible)));
 	if (!Problem.IsEmpty()) { Line(FColor::Red, Problem); }
 	if (!Advice.IsEmpty()) { Line(FColor::Yellow, Advice); }
 }

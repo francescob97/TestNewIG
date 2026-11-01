@@ -93,7 +93,14 @@ Il progetto `TestNewIG` e' un guscio vuoto: tutto il codice vive in
       notte; sodio o LED per comune. A schermo i punti luce fino a 8 km, i pali
       fino a 700 m, 48 luci vere sui piu' vicini *(`docs/lampioni-design.md`,
       prova: `docs/lampioni-verifica.md`, per chi impara: `docs/manuale/19-lampioni.md`)*
-- [ ] Fase 12, il resto — le stelle vere da un catalogo
+- [x] **Fase 12, quarto pezzo: le stelle vere e i pianeti** — le 9.110 stelle
+      del catalogo di Yale (`geoworld build-stars`, dominio pubblico) al posto
+      di quelle finte, portate alla data dalla precessione, con il loro colore
+      e la magnitudine limite del crepuscolo e della luna; Mercurio, Venere,
+      Marte, Giove e Saturno dagli elementi orbitali del JPL, con la loro
+      magnitudine (gli anelli di Saturno compresi); `geo.Sky.LookAt venere`
+      *(`docs/cielo-design.md` 5.6, prova: `docs/cielo-verifica.md` 3b, per
+      chi impara: `docs/manuale/18-cielo.md` 18.7)*
       *(il perché di quest'ordine: `docs/fase8-design.md`, sezione 0)*
 
 ## Formato dei dati
@@ -143,7 +150,7 @@ cmake --build build
                              # 34 test  -- vegetazione: formato .gvg, griglia, chi cresce dove, forme (anche Nanite), materiale (colore, neve, vento), celle e bande
 ./build/geobuildings_tests Plugins/GeoWorld/Source/GeoTiles/TestData/buildings_fixture.gbd
                              # 26 test  -- edifici: formato .gbd, triangolazione con i cortili, muri e tetti, una tile intera, monumenti (anche a parti), materiale (finestre, neve, bagnato, finestre accese di notte)
-./build/geosky_tests         # 33 test  -- cielo: giorni giuliani, tempo siderale, ora legale, sole e luna (gli esempi di Meeus, l'eclisse del 2024), levate e tramonti, luce del giorno e della notte, stelle e luna (lo shader compilato come C++)
+./build/geosky_tests         # 60 test  -- cielo: giorni giuliani, tempo siderale, ora legale, sole e luna (gli esempi di Meeus, l'eclisse del 2024), levate e tramonti, luce del giorno e della notte, stelle e luna (lo shader compilato come C++), le stelle vere (catalogo, precessione), i pianeti, lo shader delle stelle
 
 ./Plugins/GeoWorld/Tools/CheckSourceDiscipline.sh
 python3 Plugins/GeoWorld/Tools/CheckShadowedParameters.py
@@ -157,7 +164,7 @@ le classi di errore di compilazione gia' incontrate su Windows -- shadowing,
 simboli non esportati fra moduli, tipi di comando console inesistenti,
 collisioni da build unity, metodi inesistenti chiamati sulle nostre classi.
 
-660 test C++ in totale, piu' 232 test Python della pipeline.
+687 test C++ in totale, piu' 243 test Python della pipeline.
 
 **Dopo la prima prova su Torino** (materiale, scene Sentinel, prestazioni): `docs/prova-torino.md`.
 **Dopo la seconda** (troppi triangoli, RAM): `docs/prova-torino-2.md`.
@@ -201,7 +208,10 @@ costruisci-edifici                             :: chiede terreno ed estratto OSM
 geoworld build-buildings --osm dati/osm/nord-ovest-latest.osm.pbf --terrain dataset/terreno -o dataset/edifici
 geoworld verify-buildings -o dataset/edifici
 
-geoworld test                                      :: 232 test, sorgente sintetico
+:: le stelle vere (Fase 12): il catalogo di Yale, dalla rete, una volta sola
+geoworld build-stars -o dataset/stars.gst          :: in Unreal: geo.Sky.Catalog <il file>
+
+geoworld test                                      :: 243 test, sorgente sintetico
 ```
 
 Installazione, opzioni e conda a mano (se lo preferisci): `Pipeline/README.md`.

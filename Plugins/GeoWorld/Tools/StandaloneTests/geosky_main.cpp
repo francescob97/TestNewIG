@@ -8,9 +8,13 @@
 #include "HlslShim.h"
 #include "Sky/Astronomy.h"
 #include "Sky/DayLight.h"
+#include "Sky/Stars.h"
 
+#include <algorithm>
 #include <cmath>
 #include <cstdio>
+#include <fstream>
+#include <iterator>
 #include <string>
 #include <vector>
 
@@ -278,7 +282,7 @@ static void TestLight()
 #define GEO_NIGHT_SKY(...) __VA_ARGS__
 static HlslShim::float3 RunNightSky(const HlslShim::float3& View, const HlslShim::float4& EqX, const HlslShim::float4& EqY,
                                     const HlslShim::float4& EqZ, const HlslShim::float4& Moon, const HlslShim::float4& Sun,
-                                    const HlslShim::float4& Night)
+                                    const HlslShim::float4& Night, const HlslShim::float4& Catalog = HlslShim::float4(0.0, 0.0, 0.0, 0.0))
 {
 	using namespace HlslShim;
 #include "Sky/NightSkyShader.inl"
@@ -355,6 +359,15 @@ static void TestShader()
 	Check(Milky.x > 10.0f * std::max(Above.x, 1e-9f) && Milky.x > 0.0f, "la Via Lattea verso il Sagittario, buio verso il polo della galassia",
 		Fmt("%.2e contro %.2e", Milky.x, Above.x));
 
+	// Con le stelle del catalogo accese (M_GeoStars) quelle finte si spengono; la Via Lattea resta.
+	const float4 Catalog(2.0, 6.0, 1.0, 0.001), PlanetsOnly(1.0, 6.0, 1.0, 0.001);
+	const float3 StarOff = RunNightSky(ViewOf(WorldFromEquatorial(Sky, Found)), Sky.EqX, Sky.EqY, Sky.EqZ, MoonDown, SunDown, Dark, Catalog);
+	const float3 MilkyOn = RunNightSky(ViewOf(WorldFromEquatorial(Sky, Centre)), Sky.EqX, Sky.EqY, Sky.EqZ, MoonDown, SunDown, Dark, Catalog);
+	const float3 StarKept = RunNightSky(ViewOf(WorldFromEquatorial(Sky, Found)), Sky.EqX, Sky.EqY, Sky.EqZ, MoonDown, SunDown, Dark, PlanetsOnly);
+	Check(StarOff.x < 0.2 * Brightest && std::fabs(MilkyOn.x - Milky.x) < 1e-9f && std::fabs(StarKept.x - Brightest) < 1e-6 * Brightest,
+		"con il catalogo le stelle finte si spengono, la Via Lattea no; con i soli pianeti restano",
+		Fmt("%.2e invece di %.2e", StarOff.x, Brightest));
+
 	// La luna, a 40 gradi d'altezza verso sud. Piena: il sole dall'altra parte.
 	const float3 MoonDir(-std::cos(40.0 * DegToRad), 0.0, std::sin(40.0 * DegToRad));
 	const float4 Moon(MoonDir.x, MoonDir.y, MoonDir.z, 0.0045);
@@ -377,8 +390,290 @@ static void TestShader()
 	Check(DayMoon.x > 0.5f * FullCentre.x && Cloudy.x < 1e-6f, "di giorno la luna si vede lo stesso (pallida sul cielo); dietro le nuvole no");
 }
 
-int main()
+
+// ===========================================================================
+//  7. Le stelle vere: il catalogo, la precessione, il cielo da girare
+// ===========================================================================
+
+/** L'angolo fra due versori, gradi. */
+static double AngleBetween(const double A[3], const double B[3])
 {
+	const double Dot = A[0] * B[0] + A[1] * B[1] + A[2] * B[2];
+	return std::acos(std::max(-1.0, std::min(1.0, Dot))) * RadToDeg;
+}
+
+/** Dove sta una stella J2000 nel cielo locale, con la rotazione che usa Unreal (cielo specchiato). */
+static FHorizontal ThroughSkyField(double RaDeg, double DecDeg, double JdUt, double LatDeg, double LonDeg)
+{
+	double Rotation[3][3], Mirrored[3], Local[3];
+	SkyFieldRotation(LatDeg, LocalSiderealTime(JdUt, LonDeg), TerrestrialTime(JdUt), Rotation);
+	MirroredUnit(RaDeg, DecDeg, Mirrored);
+	for (int Row = 0; Row < 3; ++Row) { Local[Row] = Rotation[Row][0] * Mirrored[0] + Rotation[Row][1] * Mirrored[1] + Rotation[Row][2] * Mirrored[2]; }
+	return HorizontalOf(Local);
+}
+
+static void TestStars(const std::string& FixturePath)
+{
+	Section("7. Le stelle vere: il catalogo, la precessione, il cielo da girare");
+
+	std::ifstream File(FixturePath, std::ios::binary);
+	const std::vector<uint8_t> Bytes((std::istreambuf_iterator<char>(File)), std::istreambuf_iterator<char>());
+	std::vector<FCatalogStar> Catalog;
+	const char* Error = nullptr;
+	const bool bRead = !Bytes.empty() && ParseStarCatalog(Bytes.data(), Bytes.size(), Catalog, Error);
+	bool bSorted = true;
+	for (size_t Index = 1; Index < Catalog.size(); ++Index) { bSorted = bSorted && Catalog[Index - 1].Magnitude <= Catalog[Index].Magnitude; }
+	Check(bRead && Catalog.size() == 18 && bSorted && std::fabs(Catalog[0].Magnitude + 1.46f) < 1e-4f && std::fabs(Catalog[0].RaDeg - 101.28715f) < 1e-4f,
+		"il file della pipeline (stars_fixture.gst): 18 stelle, dalla piu' luminosa (Sirio, -1,46)",
+		Error ? Error : FixturePath);
+
+	std::vector<FCatalogStar> Broken;
+	const char* Why = nullptr;
+	std::vector<uint8_t> Short(Bytes.begin(), Bytes.begin() + std::min<size_t>(Bytes.size(), 10));
+	std::vector<uint8_t> Cut(Bytes.begin(), Bytes.end() - (Bytes.empty() ? 0 : 1));
+	std::vector<uint8_t> Magic = Bytes;
+	if (!Magic.empty()) { Magic[0] = 'X'; }
+	Check(!ParseStarCatalog(Short.data(), Short.size(), Broken, Why) && !ParseStarCatalog(Cut.data(), Cut.size(), Broken, Why)
+		&& !ParseStarCatalog(Magic.data(), Magic.size(), Broken, Why) && Broken.empty(),
+		"file rovinati: corto, troncato, di un altro tipo -- errori chiari", Why ? Why : "");
+
+	// Meeus 21.b: theta Persei dal 2000 al 13,19 novembre 2028 (il moto proprio gia' aggiunto, come nel libro).
+	double Ra = 0.0, Dec = 0.0;
+	Precess(41.054063, 49.227750, 2462088.69, Ra, Dec);
+	Check(std::fabs(Ra - 41.547214) < 1e-4 && std::fabs(Dec - 49.348483) < 1e-4, "la precessione: Meeus 21.b (theta Persei nel 2028)",
+		Fmt("%.6f %.6f (libro 41,547214 49,348483)", Ra, Dec));
+	double P[3][3];
+	PrecessionMatrix(JulianDay(2026, 6, 21.0), P);
+	const double Pole[3] = { 0.0, 0.0, 1.0 }, Vernal[3] = { 1.0, 0.0, 0.0 };
+	const double Moved[3] = { P[0][2], P[1][2], P[2][2] }, Slid[3] = { P[0][0], P[1][0], P[2][0] };
+	Check(std::fabs(AngleBetween(Pole, Moved) - 0.1474) < 0.002 && std::fabs(AngleBetween(Vernal, Slid) - 0.3697) < 0.003,
+		"in 26 anni e mezzo il polo celeste si e' spostato di 0,15 gradi (20\" l'anno), il punto vernale di 0,37 (50\" l'anno)",
+		Fmt("%.4f e %.4f gradi", AngleBetween(Pole, Moved), AngleBetween(Vernal, Slid)));
+
+	// Il cielo specchiato: una rotazione vera, e la stessa posizione della strada di sempre.
+	double R[3][3];
+	const double Jd = UtAt(2026, 1, 15, 21.0);
+	SkyFieldRotation(TurinLat, LocalSiderealTime(Jd, TurinLon), TerrestrialTime(Jd), R);
+	const double Det = R[0][0] * (R[1][1] * R[2][2] - R[1][2] * R[2][1]) - R[0][1] * (R[1][0] * R[2][2] - R[1][2] * R[2][0])
+	                 + R[0][2] * (R[1][0] * R[2][1] - R[1][1] * R[2][0]);
+	Check(std::fabs(Det - 1.0) < 1e-9, "dal cielo specchiato al cielo locale: una rotazione (determinante +1, un quaternione la sa fare)",
+		Fmt("det %.12f", Det));
+	double Worst = 0.0;
+	for (const FCatalogStar& Star : Catalog)
+	{
+		double DateRa = 0.0, DateDec = 0.0;
+		Precess(Star.RaDeg, Star.DecDeg, TerrestrialTime(Jd), DateRa, DateDec);
+		const FHorizontal Direct = EquatorialToHorizontal(DateRa, DateDec, LocalSiderealTime(Jd, TurinLon), TurinLat);
+		Worst = std::max(Worst, Separation(Direct, ThroughSkyField(Star.RaDeg, Star.DecDeg, Jd, TurinLat, TurinLon)));
+	}
+	Check(Worst < 1e-6, "le 18 stelle: la rotazione del componente e la formula di sempre danno lo stesso cielo", Fmt("%.2e gradi", Worst));
+
+	// La Polare: all'altezza della latitudine, verso nord, a ogni ora.
+	double PolarisWorst = 0.0, PolarisAzimuth = 0.0;
+	for (int Hour = 0; Hour < 24; Hour += 3)
+	{
+		const FHorizontal Polaris = ThroughSkyField(37.95454, 89.26411, UtAt(2026, 3, 1, Hour), TurinLat, TurinLon);
+		PolarisWorst = std::max(PolarisWorst, std::fabs(Polaris.AltitudeDeg - TurinLat));
+		PolarisAzimuth = std::max(PolarisAzimuth, std::fabs(AstronomyDetail::Wrap180(Polaris.AzimuthDeg)));
+	}
+	Check(PolarisWorst < 0.9 && PolarisAzimuth < 1.3, "la Polare a Torino: alta 45 gradi, verso nord, a ogni ora",
+		Fmt("al piu' %.2f gradi dalla latitudine, %.2f dal nord", PolarisWorst, PolarisAzimuth));
+
+	// Sirio e Vega: l'altezza massima in un giorno.
+	double SiriusTop = -90.0, VegaTop = -90.0;
+	for (int Minute = 0; Minute < 1440; Minute += 2)
+	{
+		const double When = UtAt(2026, 1, 15, Minute / 60.0);
+		SiriusTop = std::max(SiriusTop, ThroughSkyField(101.28715, -16.71612, When, TurinLat, TurinLon).AltitudeDeg);
+		VegaTop = std::max(VegaTop, ThroughSkyField(279.23473, 38.78369, When, TurinLat, TurinLon).AltitudeDeg);
+	}
+	Check(std::fabs(SiriusTop - 28.2) < 0.3 && std::fabs(VegaTop - 83.7) < 0.3, "Sirio passa a sud alto 28 gradi, Vega quasi allo zenit (84)",
+		Fmt("%.2f e %.2f gradi", SiriusTop, VegaTop));
+
+	// Il colore.
+	float Vega[3], Sun[3], Betelgeuse[3];
+	StarColour(0.00, Vega);
+	StarColour(0.65, Sun);
+	StarColour(1.85, Betelgeuse);
+	auto Luminance = [](const float C[3]) { return 0.2126 * C[0] + 0.7152 * C[1] + 0.0722 * C[2]; };
+	Check(std::fabs(ColourTemperature(0.0) - 10125.0) < 50.0 && std::fabs(ColourTemperature(0.65) - 5780.0) < 150.0
+		&& std::fabs(ColourTemperature(1.85) - 3330.0) < 100.0, "la temperatura dal B-V: Vega 10.000 K, il sole 5.800, Betelgeuse 3.300",
+		Fmt("%.0f, %.0f, %.0f K", ColourTemperature(0.0), ColourTemperature(0.65), ColourTemperature(1.85)));
+	Check(Vega[2] > Vega[0] && Betelgeuse[0] > Betelgeuse[1] && Betelgeuse[1] > Betelgeuse[2]
+		&& std::max({ Sun[0], Sun[1], Sun[2] }) / std::min({ Sun[0], Sun[1], Sun[2] }) < 1.3
+		&& std::fabs(Luminance(Vega) - 1.0) < 1e-5 && std::fabs(Luminance(Betelgeuse) - 1.0) < 1e-5,
+		"Vega azzurrina, Betelgeuse arancione, il sole quasi bianco; tutte con la stessa luminanza");
+
+	// Quante se ne vedono.
+	Check(LimitingMagnitude(20.0, 0.0) == -6.0 && LimitingMagnitude(0.0, 0.0) == -4.5 && LimitingMagnitude(-6.0, 0.0) == 1.5
+		&& LimitingMagnitude(-12.0, 0.0) == 4.5 && LimitingMagnitude(-30.0, 0.0) == 6.0 && std::fabs(LimitingMagnitude(-30.0, 1.0) - 4.8) < 1e-12,
+		"la magnitudine limite: di giorno nessuna, al tramonto Venere, a fine crepuscolo civile la prima grandezza, di notte 6, con la luna piena 4,8");
+	bool bMonotonic = true;
+	for (double Altitude = 5.0; Altitude > -25.0; Altitude -= 0.5) { bMonotonic = bMonotonic && LimitingMagnitude(Altitude - 0.5, 0.0) >= LimitingMagnitude(Altitude, 0.0); }
+	Check(bMonotonic && LimitingMagnitude(-3.5, 0.0) > -1.46, "piu' scende il sole piu' stelle; Sirio si vede un quarto d'ora dopo il tramonto");
+
+	std::vector<FStarInstance> Instances;
+	BuildStarInstances(Catalog, 150000.0, 1.0, Instances);
+	bool bRadius = !Instances.empty();
+	for (const FStarInstance& Star : Instances)
+	{
+		bRadius = bRadius && std::fabs(std::sqrt(Star.Position[0] * Star.Position[0] + Star.Position[1] * Star.Position[1] + Star.Position[2] * Star.Position[2]) - 150000.0) < 0.1
+			&& Star.Seed >= 0.0f && Star.Seed <= 1.0f;
+	}
+	double Mirrored[3];
+	MirroredUnit(90.0, 0.0, Mirrored);
+	Check(bRadius && Instances.size() == 12 && Mirrored[1] < -0.999, "le istanze: fino alla magnitudine 1 (12 stelle), a 150 km, nel cielo specchiato (y al contrario)",
+		Fmt("%.0f stelle", static_cast<double>(Instances.size())));
+}
+
+// ===========================================================================
+//  8. I pianeti (gli elementi del JPL) e la loro luce
+// ===========================================================================
+
+static double PlanetSeparation(const FPlanet& A, const FPlanet& B)
+{
+	double U[3], V[3];
+	EquatorialUnit(A.RaDeg, A.DecDeg, U);
+	EquatorialUnit(B.RaDeg, B.DecDeg, V);
+	return AngleBetween(U, V);
+}
+
+static void TestPlanets()
+{
+	Section("8. I pianeti: dove sono, quanto brillano");
+
+	// Meeus 33.a: Venere il 20 dicembre 1992 a 0h TD, posizione apparente 21h04m41,454s, -18 53' 16,84".
+	const double Jd = 2448976.5;
+	const FPlanet Venus = ObservePlanet(EPlanet::Venus, Jd);
+	double Ra = 0.0, Dec = 0.0;
+	Precess(Venus.RaDeg, Venus.DecDeg, Jd, Ra, Dec);
+	Check(std::fabs(Ra - 316.172725) < 0.05 && std::fabs(Dec + 18.888011) < 0.05 && std::fabs(Venus.DistanceAu - 0.91084) < 0.003,
+		"Venere, Meeus 33.a: entro 3 primi d'arco (elementi approssimati del JPL), distanza 0,911 UA",
+		Fmt("%.4f %.4f gradi, %.5f UA", Ra, Dec, Venus.DistanceAu));
+
+	// La grande congiunzione di Giove e Saturno: il 21 dicembre 2020 a un decimo di grado.
+	const double Conjunction = PlanetSeparation(ObservePlanet(EPlanet::Jupiter, TerrestrialTime(UtAt(2020, 12, 21, 18.0))),
+		ObservePlanet(EPlanet::Saturn, TerrestrialTime(UtAt(2020, 12, 21, 18.0))));
+	const double Before = PlanetSeparation(ObservePlanet(EPlanet::Jupiter, TerrestrialTime(UtAt(2020, 12, 1, 0.0))),
+		ObservePlanet(EPlanet::Saturn, TerrestrialTime(UtAt(2020, 12, 1, 0.0))));
+	Check(Conjunction < 0.2 && Before > 1.5, "Giove e Saturno: la grande congiunzione del 21 dicembre 2020 (0,1 gradi)",
+		Fmt("%.3f gradi il 21, %.2f il primo dicembre", Conjunction, Before));
+
+	const FPlanet Mars = ObservePlanet(EPlanet::Mars, TerrestrialTime(UtAt(2020, 10, 13, 23.0)));
+	Check(Mars.ElongationDeg > 175.0 && std::fabs(Mars.Magnitude + 2.6) < 0.25 && Mars.DistanceAu > 0.40 && Mars.DistanceAu < 0.45,
+		"Marte all'opposizione del 13 ottobre 2020: opposto al sole, magnitudine -2,6, a 0,42 UA",
+		Fmt("elongazione %.1f, magnitudine %.2f, %.3f UA", Mars.ElongationDeg, Mars.Magnitude, Mars.DistanceAu));
+
+	const FPlanet Evening = ObservePlanet(EPlanet::Venus, TerrestrialTime(UtAt(2020, 3, 24, 22.0)));
+	Check(Evening.ElongationDeg > 45.6 && Evening.ElongationDeg < 46.6 && std::fabs(Evening.Magnitude + 4.4) < 0.3,
+		"Venere alla massima elongazione della sera (24 marzo 2020): 46 gradi dal sole, magnitudine -4,4",
+		Fmt("%.2f gradi, magnitudine %.2f", Evening.ElongationDeg, Evening.Magnitude));
+
+	const FPlanet Jupiter = ObservePlanet(EPlanet::Jupiter, TerrestrialTime(UtAt(2020, 7, 14, 8.0)));
+	Check(Jupiter.ElongationDeg > 175.0 && std::fabs(Jupiter.Magnitude + 2.75) < 0.25, "Giove all'opposizione del 14 luglio 2020: magnitudine -2,75",
+		Fmt("elongazione %.1f, magnitudine %.2f", Jupiter.ElongationDeg, Jupiter.Magnitude));
+
+	const FPlanet Saturn = ObservePlanet(EPlanet::Saturn, TerrestrialTime(UtAt(2020, 7, 20, 22.0)));
+	const FPlanet Edge = ObservePlanet(EPlanet::Saturn, TerrestrialTime(UtAt(2025, 3, 23, 12.0)));
+	Check(std::fabs(Saturn.Magnitude - 0.1) < 0.35 && std::fabs(Saturn.RingTiltDeg) > 19.0 && std::fabs(Saturn.RingTiltDeg) < 23.0
+		&& std::fabs(Edge.RingTiltDeg) < 1.0,
+		"Saturno: all'opposizione del 2020 anelli aperti 21 gradi (magnitudine +0,1); di taglio il 23 marzo 2025",
+		Fmt("magnitudine %.2f, anelli %.1f gradi; nel 2025 %.2f gradi", Saturn.Magnitude, Saturn.RingTiltDeg, Edge.RingTiltDeg));
+
+	double Brightest = 99.0, Faintest = -99.0;
+	for (int Day = 0; Day < 366; Day += 3)
+	{
+		const FPlanet Mercury = ObservePlanet(EPlanet::Mercury, TerrestrialTime(UtAt(2026, 1, 1 + Day, 0.0)));
+		if (Mercury.ElongationDeg < 10.0) { continue; }          // vicino al sole non si vede: la formula non serve
+		Brightest = std::min(Brightest, Mercury.Magnitude);
+		Faintest = std::max(Faintest, Mercury.Magnitude);
+	}
+	Check(Brightest > -2.5 && Faintest < 3.5 && Brightest < 0.0, "Mercurio lontano dal sole: fra -2 e +3",
+		Fmt("da %.2f a %.2f", Brightest, Faintest));
+
+	const FStarInstance Planet = PlanetInstance(EPlanet::Mars, Mars, 150000.0);
+	float Red[3];
+	PlanetColour(EPlanet::Mars, Red);
+	Check(Planet.Seed < 0.0f && std::fabs(Planet.Magnitude - static_cast<float>(Mars.Magnitude)) < 1e-4f && Red[0] > Red[2],
+		"un pianeta come istanza: non scintilla, la sua magnitudine, Marte rosso");
+}
+
+// ===========================================================================
+//  9. Lo shader delle stelle (M_GeoStars)
+// ===========================================================================
+
+#define GEO_STAR_SPRITE(...) __VA_ARGS__
+#define GEO_STAR_GLOW(...)
+static HlslShim::float3 RunStarSprite(const HlslShim::float3& Pos, const HlslShim::float3& Cam, const HlslShim::float4& Corner,
+                                      const HlslShim::float4& Stars, float Mag, float UuPerMetre)
+{
+	using namespace HlslShim;
+#include "Sky/StarShader.inl"
+}
+#undef GEO_STAR_SPRITE
+#undef GEO_STAR_GLOW
+#define GEO_STAR_SPRITE(...)
+#define GEO_STAR_GLOW(...) __VA_ARGS__
+static HlslShim::float3 RunStarGlow(const HlslShim::float4& Corner, const HlslShim::float3& Pos, const HlslShim::float3& Cam,
+                                    const HlslShim::float3& Tint, float Mag, float Seed, const HlslShim::float4& Stars, float Clock)
+{
+	using namespace HlslShim;
+#include "Sky/StarShader.inl"
+}
+#undef GEO_STAR_SPRITE
+#undef GEO_STAR_GLOW
+
+static void TestStarShader()
+{
+	Section("9. Lo shader delle stelle (lo stesso testo del materiale, compilato come C++)");
+	using HlslShim::float3;
+	using HlslShim::float4;
+	const float Uu = 100.0f;
+	const float3 Cam(0.0, 0.0, 0.0), Zenith(0.0, 0.0, 15000000.0);
+	const float4 Night(1.0, 6.0, 1.0, 0.001);
+	auto Side = [&](float Mag, const float4& Stars)
+	{
+		const float3 A = RunStarSprite(Zenith, Cam, float4(0, 0, 0, 0), Stars, Mag, Uu);
+		const float3 B = RunStarSprite(Zenith, Cam, float4(1, 0, 0, 0), Stars, Mag, Uu);
+		return std::sqrt((A.x - B.x) * (A.x - B.x) + (A.y - B.y) * (A.y - B.y) + (A.z - B.z) * (A.z - B.z)) / Uu;
+	};
+	Check(std::fabs(Side(0.0f, Night) - 660.0) < 1.0 && std::fabs(Side(6.4f, Night) - 150000.0 * 0.001 * 1.84) < 1.0
+		&& std::fabs(Side(-4.4f, Night) - 924.0) < 1.0 && std::fabs(Side(-12.0f, Night) - 1050.0) < 1.0,
+		"il punto: 4,4 pixel per una stella di magnitudine 0, 1,8 per le piu' deboli, 6,2 per Venere, mai piu' di 7 (anche visto dritto in alto)",
+		Fmt("%.0f, %.0f, %.0f m", Side(0.0f, Night), Side(6.4f, Night), Side(-4.4f, Night)));
+
+	const float3 White(1.0, 1.0, 1.0);
+	const float4 Centre(0.5, 0.5, 0, 0);
+	auto Glow = [&](const float3& Pos, float Mag, float Seed, const float4& Stars, float Clock)
+	{
+		return RunStarGlow(Centre, Pos, Cam, White, Mag, Seed, Stars, Clock).x;
+	};
+	const double Bright = Glow(Zenith, 0.0f, 0.3f, Night, 0.0f), Dimmer = Glow(Zenith, 1.0f, 0.3f, Night, 0.0f);
+	Check(Bright > 0.0 && std::fabs(Bright / Dimmer - 2.512) < 0.01, "una magnitudine in meno: 2,512 volte la luce", Fmt("%.4f", Bright / Dimmer));
+	const float3 Low(15000000.0 * std::cos(2.0 * DegToRad), 0.0, 15000000.0 * std::sin(2.0 * DegToRad));
+	const float3 Under(15000000.0, 0.0, -1500000.0);
+	Check(Glow(Low, 0.0f, 0.3f, Night, 0.0f) < 0.05 * Bright && Glow(Under, 0.0f, 0.3f, Night, 0.0f) == 0.0,
+		"a 2 gradi sull'orizzonte l'aria la spegne quasi del tutto; sotto l'orizzonte niente");
+	Check(Glow(Zenith, 3.0f, 0.3f, float4(1.0, 1.5, 1.0, 0.001), 0.0f) == 0.0 && Glow(Zenith, 0.0f, 0.3f, float4(0.0, 6.0, 1.0, 0.001), 0.0f) == 0.0,
+		"oltre la magnitudine limite non si vede; con le stelle spente nemmeno");
+	const float3 Horizon(15000000.0 * std::cos(15.0 * DegToRad), 0.0, 15000000.0 * std::sin(15.0 * DegToRad));
+	double Least = 1e9, Most = 0.0, PlanetLeast = 1e9, PlanetMost = 0.0, ZenithLeast = 1e9, ZenithMost = 0.0;
+	for (int Step = 0; Step < 50; ++Step)
+	{
+		const float Clock = Step * 0.05f;
+		const double Star = Glow(Horizon, 0.0f, 0.3f, Night, Clock), Planet = Glow(Horizon, 0.0f, -1.0f, Night, Clock);
+		const double High = Glow(Zenith, 0.0f, 0.3f, Night, Clock);
+		Least = std::min(Least, Star); Most = std::max(Most, Star);
+		PlanetLeast = std::min(PlanetLeast, Planet); PlanetMost = std::max(PlanetMost, Planet);
+		ZenithLeast = std::min(ZenithLeast, High); ZenithMost = std::max(ZenithMost, High);
+	}
+	Check(Most > 1.3 * Least && PlanetMost == PlanetLeast && ZenithMost == ZenithLeast,
+		"vicino all'orizzonte le stelle scintillano, i pianeti no, allo zenit nemmeno le stelle", Fmt("%.2f volte", Most / Least));
+}
+
+int main(int ArgCount, char** Arguments)
+{
+	const std::string StarFixture = (ArgCount > 1) ? Arguments[1] : "Plugins/GeoWorld/Source/GeoTiles/TestData/stars_fixture.gst";
 	std::printf("=====================================================\n");
 	std::printf(" GeoSky -- il sole, la luna, il giorno e la notte\n");
 	std::printf("=====================================================\n");
@@ -388,6 +683,9 @@ int main()
 	TestRotation();
 	TestLight();
 	TestShader();
+	TestStars(StarFixture);
+	TestPlanets();
+	TestStarShader();
 	std::printf("\n=====================================================\n");
 	std::printf(" RISULTATO: %d passati, %d falliti\n", GPassed, GFailed);
 	std::printf("=====================================================\n");

@@ -2997,6 +2997,11 @@ namespace GeoSkyConsole
 		GeoTerrainConsole::Report(FString::Printf(TEXT("Luna: %s %.0f%%, altezza %.1f gradi; sorge %s, tramonta %s"),
 			Bodies.bMoonWaxing ? TEXT("crescente") : TEXT("calante"), 100.0 * Bodies.MoonIllumination,   /* percentuale, non-unita */
 			Bodies.Moon.AltitudeDeg, *State.Moonrise, *State.Moonset));
+		const FString Planets = Sky->DescribeVisiblePlanets();
+		if (!Planets.IsEmpty()) { GeoTerrainConsole::Report(FString::Printf(TEXT("Pianeti in vista: %s"), *Planets)); }
+		GeoTerrainConsole::Report(FString::Printf(TEXT("Stelle: %s, fino alla magnitudine %.1f"),
+			Sky->GetCatalogStarCount() > 0 ? *FString::Printf(TEXT("%d vere"), Sky->GetCatalogStarCount()) : TEXT("finte (geo.Sky.Catalog)"),
+			Sky->GetLimitingMagnitude()));
 		if (!Sky->GetProblem().IsEmpty()) { GeoTerrainConsole::Report(Sky->GetProblem(), FColor::Red); }
 		if (!Sky->GetAdvice().IsEmpty()) { GeoTerrainConsole::Report(Sky->GetAdvice(), FColor::Yellow); }
 	}
@@ -3235,6 +3240,107 @@ static FAutoConsoleCommandWithWorldAndArgs GeoSkyDemoCommand(
 		GeoTerrainConsole::Report(TEXT("Un giorno di corsa: l'alba, il sole che gira (e le ombre con lui), il tramonto, la notte con la luna e le finestre accese."));
 		GeoTerrainConsole::Report(TEXT("Fermarsi: geo.Sky.Speed 0. Un'ora precisa: geo.Sky.Time 18:30. Le ombre delle montagne: geo.Terrain.Shadows 1"));
 		GeoSkyConsole::ReportState(Sky);
+	}));
+
+// ============================================================================
+//  Le stelle vere e i pianeti (Sky/Stars.h, GeoSkyStars.cpp)
+// ============================================================================
+
+static FAutoConsoleCommandWithWorldAndArgs GeoSkyCatalogCommand(
+	TEXT("geo.Sky.Catalog"),
+	TEXT("geo.Sky.Catalog <file .gst|off> - le stelle vere del catalogo di Yale (geoworld build-stars) al posto di quelle finte; off: si torna a quelle finte."),
+	FConsoleCommandWithWorldAndArgsDelegate::CreateStatic(
+		[](const TArray<FString>& RawArgs, UWorld* World)
+	{
+		UGeoSkySubsystem* Sky = GeoSkyConsole::Get(World);
+		if (!Sky) { return; }
+		const TArray<FString> Args = GeoWorld::Console::QuotedArgs(RawArgs);
+		if (Args.Num() >= 1 && Args[0].Equals(TEXT("off"), ESearchCase::IgnoreCase))
+		{
+			Sky->CloseStarCatalog();
+		}
+		else if (Args.Num() >= 1)
+		{
+			FString Error;
+			if (!Sky->LoadStarCatalog(Args[0], Error))
+			{
+				GeoTerrainConsole::Report(FString::Printf(TEXT("Stelle: %s"), *Error), FColor::Red);
+				return;
+			}
+		}
+		if (Sky->GetCatalogStarCount() > 0)
+		{
+			GeoTerrainConsole::Report(FString::Printf(TEXT("Stelle: %d vere, da %s (per tenerle: Project Settings -> GeoWorld - Cielo -> Star Catalog)"),
+				Sky->GetCatalogStarCount(), *Sky->GetStarCatalogPath()));
+		}
+		else
+		{
+			GeoTerrainConsole::Report(TEXT("Stelle: quelle finte (geo.Sky.Catalog <file .gst>, il file di geoworld build-stars)"));
+		}
+	}));
+
+static FAutoConsoleCommandWithWorldAndArgs GeoSkyPlanetsCommand(
+	TEXT("geo.Sky.Planets"),
+	TEXT("geo.Sky.Planets [0|1] - i pianeti a occhio nudo (Mercurio, Venere, Marte, Giove, Saturno); senza argomenti dice dove sono e quanto brillano."),
+	FConsoleCommandWithWorldAndArgsDelegate::CreateStatic(
+		[](const TArray<FString>& Args, UWorld* World)
+	{
+		UGeoSkySubsystem* Sky = GeoSkyConsole::Get(World);
+		if (!Sky) { return; }
+		if (Args.Num() >= 1) { Sky->SetPlanetsEnabled(FCString::Atoi(*Args[0]) != 0); }
+		GeoTerrainConsole::Report(FString::Printf(TEXT("Pianeti: %s; si vedono fino alla magnitudine %.1f"),
+			Sky->ArePlanetsEnabled() ? TEXT("si'") : TEXT("no"), Sky->GetLimitingMagnitude()));
+		for (int32 Index = 0; Index < GeoWorld::Sky::PlanetCount; ++Index)
+		{
+			const GeoWorld::Sky::EPlanet Planet = static_cast<GeoWorld::Sky::EPlanet>(Index);
+			const GeoWorld::Sky::FPlanet& Seen = Sky->GetPlanet(Planet);
+			const GeoWorld::Sky::FHorizontal Where = Sky->PlanetHorizontal(Planet);
+			GeoTerrainConsole::Report(FString::Printf(TEXT("  %-9s magnitudine %+5.1f, azimut %5.1f, altezza %+5.1f gradi; %.0f gradi dal sole, a %.2f UA"),
+				UTF8_TO_TCHAR(GeoWorld::Sky::PlanetName(Planet)), Seen.Magnitude, Where.AzimuthDeg, Where.AltitudeDeg, Seen.ElongationDeg, Seen.DistanceAu));
+		}
+	}));
+
+static FAutoConsoleCommandWithWorldAndArgs GeoSkyStarBrightnessCommand(
+	TEXT("geo.Sky.StarBrightness"),
+	TEXT("geo.Sky.StarBrightness <x> - quanta luce fanno le stelle vere e i pianeti (1: una stella di magnitudine 0 come 1/50 del sole del livello)."),
+	FConsoleCommandWithWorldAndArgsDelegate::CreateStatic(
+		[](const TArray<FString>& Args, UWorld* World)
+	{
+		UGeoSkySubsystem* Sky = GeoSkyConsole::Get(World);
+		if (!Sky) { return; }
+		if (Args.Num() >= 1) { Sky->SetStarBrightness(FCString::Atod(*Args[0])); }
+		GeoTerrainConsole::Report(FString::Printf(TEXT("Stelle: luce x%.2f"), Sky->GetStarBrightness()));
+	}));
+
+static FAutoConsoleCommandWithWorldAndArgs GeoSkyLookAtCommand(
+	TEXT("geo.Sky.LookAt"),
+	TEXT("geo.Sky.LookAt <astro> - gira la camera verso un astro: sole, luna, polare, mercurio, venere, marte, giove, saturno (nel Play)."),
+	FConsoleCommandWithWorldAndArgsDelegate::CreateStatic(
+		[](const TArray<FString>& Args, UWorld* World)
+	{
+		UGeoSkySubsystem* Sky = GeoSkyConsole::Get(World);
+		if (!Sky) { return; }
+		if (Args.Num() < 1)
+		{
+			GeoTerrainConsole::Report(TEXT("Uso: geo.Sky.LookAt <sole|luna|polare|mercurio|venere|marte|giove|saturno>"), FColor::Red);
+			return;
+		}
+		FVector Direction = FVector::ZeroVector;
+		if (!Sky->WorldDirectionOf(Args[0], Direction))
+		{
+			GeoTerrainConsole::Report(FString::Printf(TEXT("Non conosco '%s' (o il cielo aspetta la camera)"), *Args[0]), FColor::Red);
+			return;
+		}
+		APlayerController* Player = World ? World->GetFirstPlayerController() : nullptr;
+		if (!Player)
+		{
+			GeoTerrainConsole::Report(TEXT("Serve il Play: nell'editor la camera la muovi tu"), FColor::Yellow);
+			return;
+		}
+		Player->SetControlRotation(Direction.Rotation());
+		const double Altitude = FMath::RadiansToDegrees(FMath::Asin(FMath::Clamp(Direction.Z, -1.0, 1.0)));
+		GeoTerrainConsole::Report(FString::Printf(TEXT("Guardo %s: alto %.1f gradi%s"), *Args[0], Altitude,
+			Altitude < 0.0 ? TEXT(" (sotto l'orizzonte: la Terra lo copre)") : TEXT("")));
 	}));
 
 // ============================================================================

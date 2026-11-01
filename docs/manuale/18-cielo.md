@@ -168,6 +168,61 @@ La soluzione dei giochi, qui come scelta dichiarata:
 
 ---
 
+## 18.7 Le stelle vere e i pianeti
+
+Le stelle di 18.6 sono finte: una griglia sul cielo con una stella a caso in
+qualche cella. La statistica è giusta (tre volte più stelle a ogni
+magnitudine in più), ma Orione non c'è.
+
+**Il catalogo.** Le stelle vere vengono dal **catalogo di Yale** (Bright Star
+Catalogue): le 9.110 stelle più luminose del cielo, tutte quelle che si
+vedono a occhio nudo. Di ognuna servono quattro numeri: dove sta (ascensione
+retta e declinazione, le "longitudine e latitudine" del cielo), quanto è
+luminosa (la **magnitudine**: più piccola, più luminosa; ogni magnitudine in
+meno è 2,512 volte la luce) e di che colore è (l'**indice B−V**: quanto è più
+luminosa nel blu che nel giallo). Il catalogo non sta nel progetto: lo
+scarica la pipeline (`geoworld build-stars`) e lo riduce a 109 KB.
+
+**La precessione.** L'asse della Terra gira come una trottola: un giro in
+26.000 anni. Il catalogo dà le posizioni del 2000; nel 2026 il cielo è
+scivolato di più di un terzo di grado, quasi la larghezza della luna. La
+formula è nel libro di Meeus (capitolo 21), e il test la confronta con il suo
+esempio fino alla sesta cifra.
+
+**Il cielo specchiato.** Le 9.000 stelle stanno ferme in un componente di
+Unreal attorno alla camera, a 150 km; a ogni frame si gira il componente.
+Qui c'era una trappola.
+
+> ⚠️ **Trappola: la mano del cielo.** Il cielo degli astronomi è
+> **destrorso** (x verso il punto vernale, y a 90°, z verso il polo); il
+> mondo di Unreal (nord, est, alto) è **sinistrorso**. Passare dall'uno
+> all'altro non è una rotazione ma una rotazione più uno **specchio**, e un
+> quaternione non sa specchiare: il componente non si può girare così. La
+> soluzione: mettere le stelle in un cielo già specchiato (la y cambiata di
+> segno). Due specchi fanno una rotazione vera, e il test controlla che il
+> determinante sia +1.
+
+**Quante se ne vedono.** La **magnitudine limite**: di notte 6, alla fine del
+crepuscolo civile 1,5 (solo le più luminose), al tramonto −4,5 (solo
+Venere). La luna piena alta ne toglie più di una. Vicino all'orizzonte l'aria
+le attenua (la **massa d'aria**) e le fa **scintillare**; i pianeti, che sono
+dischetti e non punti, no.
+
+**I pianeti.** Non servono dati: si calcolano. Ogni pianeta gira attorno al
+sole su un'ellisse, descritta da sei numeri (gli **elementi orbitali**: quanto
+è grande, quanto è schiacciata, quanto è inclinata, dove sta il pianeta). Il
+JPL ne pubblica una versione approssimata, valida dal 1800 al 2050. Da lì
+l'**equazione di Keplero** dà la posizione sull'ellisse; togliendo quella
+della Terra si ha la direzione vista da qui.
+
+> 💡 **Esempio.** Il 21 dicembre 2020 Giove e Saturno si sono avvicinati a un
+> decimo di grado: non succedeva così da vicino dal 1623. Il test calcola i
+> due pianeti quella sera e misura 0,112°. Lo stesso test trova Marte opposto
+> al sole il 13 ottobre 2020, a magnitudine −2,6, e gli anelli di Saturno di
+> taglio il 23 marzo 2025, come sono stati.
+
+---
+
 ## Alternative considerate
 
 | Idea | Perché no |
@@ -176,7 +231,8 @@ La soluzione dei giochi, qui come scelta dichiarata:
 | Ruotare il sole di 15° all'ora | sbagliato fuori dall'equatore e dagli equinozi: d'estate a Torino il sole sorge a nord-est |
 | Spegnere il sole al tramonto | il crepuscolo sparirebbe di colpo |
 | La luna fisica | 18 stop: notte nera |
-| Le stelle di un catalogo | un passo futuro, sopra questo: la griglia e la rotazione ci sono già |
+| Le stelle del catalogo dipinte in una texture | un punto di un pixel in una texture diventa sfocato o sfarfalla: un quadratino per stella resta nitido |
+| I pianeti con la teoria completa (VSOP87) | migliaia di termini per qualche secondo d'arco; gli elementi del JPL sbagliano di qualche primo, meno di quanto l'occhio distingua |
 
 ---
 
@@ -214,6 +270,14 @@ dentro; senza nebbia ("Apply Fogging" spento), se no a 100 km le stelle
 sparirebbero; "Responsive AA" perché l'antialiasing temporale non le
 cancelli (sono grandi come un pixel). Si sposta con la camera a ogni frame.
 
+### Una rotazione, non uno specchio
+
+Un `FQuat` (e un `FRotator`) rappresenta solo **rotazioni vere**:
+trasformazioni che non cambiano la "mano" degli assi. Una matrice che porta
+un sistema destrorso in uno sinistrorso ha determinante −1: costruirci un
+quaternione dà un risultato sbagliato, senza errori. Prima di passare una
+matrice al motore conviene controllare il determinante (qui lo fa un test).
+
 ### Una luce creata da codice
 
 La luna è un `ADirectionalLight` creato con `SpawnActor` e la bandiera
@@ -229,10 +293,14 @@ copiata nel Play. Lo stesso per la sfera e il volume dell'esposizione.
 | `GeoRender/Public/Sky/Astronomy.h` | giorni giuliani, tempo siderale, nutazione, sole, luna, orizzonte, parallasse, fase, levate e tramonti (puro) |
 | `GeoRender/Public/Sky/DayLight.h` | l'ora locale (ora legale), la luce del giorno e della notte, le finestre (puro) |
 | `GeoRender/Public/Sky/NightSkyShader.inl` | stelle, Via Lattea, luna: HLSL e C++ |
+| `GeoRender/Public/Sky/Stars.h` | le stelle vere (il catalogo, la precessione, il cielo specchiato, il colore, la magnitudine limite) e i pianeti (puro) |
+| `GeoRender/Public/Sky/StarShader.inl` | il punto di una stella o di un pianeta: HLSL e C++ |
+| `GeoRender/Private/Sky/GeoSkyStars.cpp` | le stelle vere e i pianeti in Unreal: il componente, i comandi `geo.Sky.Catalog`, `Planets`, `LookAt` |
+| `Pipeline/geoworld/starbuild.py` | `geoworld build-stars`: dal catalogo di Yale al file `.gst` |
 | `GeoRender/Public/Buildings/BuildingShader.inl` | `GEO_BUILDING_LIGHTS`: le finestre accese |
 | `GeoRender/Public/Sky/GeoSkySubsystem.h` | Unreal: l'orologio, il sole, la luna, l'esposizione, la nebbia, la sfera delle stelle |
 | `GeoRender/Public/Sky/GeoSkySettings.h` | Project Settings → Plugins → GeoWorld - Cielo |
-| `GeoWorldEditor/Private/GeoTerrainMaterialFactory.cpp` | i parametri `Sky*` di `MPC_GeoWeather`, `M_GeoNightSky`, le luci di `M_GeoBuilding` |
+| `GeoWorldEditor/Private/GeoTerrainMaterialFactory.cpp` | i parametri `Sky*` di `MPC_GeoWeather`, `M_GeoNightSky`, `M_GeoStars`, le luci di `M_GeoBuilding` |
 | `Tools/StandaloneTests/geosky_main.cpp` | i test (gli esempi di Meeus, l'eclisse del 2024) |
 
 ---
@@ -253,3 +321,9 @@ copiata nel Play. Lo stesso per la sfera e il volume dell'esposizione.
   e quello che non è illuminato (pioggia, nebbia) scalato a mano.
 - **Stelle, Via Lattea, luna con le fasi**: un trasparente additivo su una
   sfera di 100 km; **finestre accese** dall'ora e dal buio.
+- Le **stelle vere** dal catalogo di Yale (`geoworld build-stars`), portate
+  alla data dalla **precessione**, in un componente girato con il cielo: un
+  cielo **specchiato**, perché un quaternione non sa specchiare. Quante se ne
+  vedono lo dice la **magnitudine limite**.
+- I **pianeti** dagli elementi orbitali del JPL e dall'equazione di Keplero:
+  la grande congiunzione del 2020 a un decimo di grado.

@@ -188,14 +188,56 @@ fredda; ~1/250 del sole del livello.
 - **i fulmini** si misuravano sulla luce del sole del livello: ora su quella
   che c'è (mai meno di 1/50 del giorno: di notte accecano).
 
+### 5.6 Le stelle vere e i pianeti
+
+Le stelle finte di 5.3 hanno la statistica giusta ma non le costellazioni.
+Quelle **vere** vengono dal **catalogo di Yale** (Bright Star Catalogue, 5a
+edizione: 9.110 stelle fino alla magnitudine 6,5, tutte quelle a occhio nudo;
+dominio pubblico, distribuito dal CDS di Strasburgo). Il catalogo non sta nel
+progetto: lo scarica la pipeline, una volta,
+
+```
+geoworld build-stars -o D:/GeoData/stars.gst
+```
+
+e lo riduce a un file di 109 KB (`.gst`: posizione J2000, magnitudine, B-V;
+dalla più luminosa, `Pipeline/geoworld/starbuild.py`). In Unreal
+`geo.Sky.Catalog D:/GeoData/stars.gst`, o Project Settings → GeoWorld - Cielo
+→ Star Catalog per averlo a ogni avvio. Senza, restano le stelle finte.
+
+| | |
+|---|---|
+| Dove sono | il catalogo è del 2000: la **precessione** (Meeus 21, rigorosa) le porta alla data. In 26 anni il punto vernale è scivolato di 0,37°, il polo di 0,15° |
+| Come girano | le istanze stanno ferme in un componente attorno alla camera, a 150 km; si gira il componente (`SkyFieldRotation`: precessione, tempo siderale, latitudine, poi il mondo) |
+| La trappola | il cielo equatoriale è destrorso, quello di Unreal (nord, est, alto) sinistrorso: il passaggio è una **riflessione**, che un quaternione non sa fare. Le stelle stanno in un cielo **specchiato** (y cambiata di segno): da lì al mondo è una rotazione vera (determinante +1, provato) |
+| Quanto brillano | 2,512 volte per magnitudine; un punto di 1,5–7 pixel, più grande per le più luminose; la magnitudine 0 come 1/50 del sole del livello (`geo.Sky.StarBrightness`) |
+| Quante | la **magnitudine limite**: 6 di notte, 4,5 a −12°, 1,5 alla fine del crepuscolo civile, −4,5 al tramonto (Venere); la luna piena alta toglie 1,2 |
+| Il colore | dal B-V la temperatura (Ballesteros: Vega 10.100 K, il sole 5.800, Betelgeuse 3.300), poi il corpo nero, smorzato a metà verso il bianco |
+| L'aria | 0,25 magnitudini per massa d'aria: a 2° sull'orizzonte quasi spente; la **scintillazione** vicino all'orizzonte (i pianeti no) |
+
+**I pianeti** (Mercurio, Venere, Marte, Giove, Saturno) non hanno bisogno di
+dati: si calcolano dagli **elementi orbitali approssimati del JPL**
+(Standish, validi dal 1800 al 2050: pochi primi d'arco), con l'equazione di
+Keplero, il tempo della luce, la magnitudine dell'Astronomical Almanac (Meeus
+41) e, per Saturno, l'apertura degli anelli (Meeus 45). Provati su Venere di
+Meeus 33.a (a 0,0003°), la grande congiunzione di Giove e Saturno del 21 dicembre
+2020 (0,11°, vera 0,10), l'opposizione di Marte del 2020 (−2,6), Saturno con
+gli anelli di taglio il 23 marzo 2025. Si rifanno ogni ora di cielo; ci sono
+anche senza il catalogo (`geo.Sky.Planets`).
+
+`MPC_GeoWeather` **SkyStars**: x 2 stelle vere e pianeti (le finte si
+spengono), 1 solo i pianeti, 0 niente; y la magnitudine limite; z la luce;
+w l'angolo di un pixel. `geo.Sky.LookAt venere` gira la camera verso un
+astro.
+
 ## 6. Cosa tocca del livello, e come lo rimette
 
 | Cosa | Come | Al ritorno (`geo.Sky.Enable 0`, fine del Play) |
 |---|---|---|
 | la luce del sole | rotazione, intensità, ombre, "Atmosphere Sun Light", distanza delle ombre, mobilità | tutto com'era |
 | la nebbia | il colore | com'era |
-| la luna, la sfera delle stelle, il volume dell'esposizione | creati (transient) | distrutti |
-| MPC_GeoWeather | SkyNight | niente stelle né finestre |
+| la luna, la sfera delle stelle, le stelle vere e i pianeti, il volume dell'esposizione | creati (transient) | distrutti |
+| MPC_GeoWeather | SkyNight, SkyStars | niente stelle né finestre |
 
 Nell'**editor** (fuori dal Play) il cielo lavora lo stesso: il sole del
 livello si muove. Se si salva il livello, si salva la rotazione del momento
@@ -203,13 +245,15 @@ livello si muove. Se si salva il livello, si salva la rotazione del momento
 
 ## 7. Limiti
 
-- Le stelle non sono quelle vere (niente catalogo, niente costellazioni):
-  solo la Via Lattea è al suo posto.
+- Le stelle vere ci sono con il catalogo (5.6); senza, restano quelle finte.
+  Niente nutazione né aberrazione per le stelle e i pianeti (meno di 40″),
+  niente moti propri (al più 2′ in 26 anni, per poche stelle).
+- Niente Urano e Nettuno (al limite dell'occhio), niente comete né asteroidi;
+  la luna non copre le stelle (le occultazioni).
 - La luna è una sfera con dei "mari" finti, non la sua faccia.
 - La sfera delle stelle sta davanti alle nuvole (un trasparente additivo):
   le stelle si spengono con la copertura delle nuvole, non nuvola per nuvola.
-- Niente pianeti, niente eclissi a schermo (la geometria c'è: i test la
-  provano).
+- Niente eclissi a schermo (la geometria c'è: i test la provano).
 - Le luci delle strade sono arrivate (`docs/lampioni-design.md`); quelle delle
   auto no.
 - Le brezze (di mare e di terra, di pendio, di valle) sono arrivate "con il
@@ -224,5 +268,7 @@ livello si muove. Se si salva il livello, si salva la rotazione del momento
 | Ruotare la luce a velocità costante (15° all'ora) | il sole non sorge a est ovunque e sempre: l'altezza a mezzogiorno cambia con le stagioni e la latitudine |
 | Spegnere il sole al tramonto | il cielo del crepuscolo sparirebbe di colpo |
 | Luna fisica (1/400.000) | 18 stop: l'esposizione automatica non ci arriva, notte nera |
-| Stelle da catalogo (Yale Bright Star, ~9.000) | un file di dati in più e una texture: un passo futuro, sopra questo |
+| Le stelle del catalogo dipinte in una texture del cielo | a una texture manca la risoluzione: un punto di un pixel diventa sfocato o sfarfalla; un quadratino per stella (come i punti luce dei lampioni) resta nitido |
+| Le stelle del catalogo nel progetto | 109 KB di dati in più da tenere in pari; la pipeline lo scarica in un secondo |
+| I pianeti con VSOP87 (secondi d'arco) | migliaia di termini; gli elementi del JPL sbagliano di qualche primo, meno di un pixel di un pianeta visto a occhio |
 | Stelle e luna con "Is Sky" sulla SkyAtmosphere | il comportamento cambia fra le versioni del motore; un trasparente additivo è prevedibile |

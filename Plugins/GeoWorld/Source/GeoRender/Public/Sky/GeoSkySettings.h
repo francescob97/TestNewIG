@@ -11,6 +11,7 @@
 
 #include "CoreMinimal.h"
 #include "Engine/DeveloperSettings.h"
+#include "Engine/EngineTypes.h"
 
 #include "GeoSkySettings.generated.h"
 
@@ -68,6 +69,18 @@ public:
 	/** Le finestre degli edifici accese di notte. */
 	UPROPERTY(Config, EditAnywhere, Category = "Notte")
 	bool bCityLights = true;
+
+	/**
+	 * Il catalogo delle stelle vere: il file .gst di `geoworld build-stars`
+	 * (9.110 stelle, il catalogo di Yale). Vuoto: le stelle finte disegnate da
+	 * M_GeoNightSky. Un percorso relativo e' dalla cartella del progetto.
+	 */
+	UPROPERTY(Config, EditAnywhere, Category = "Notte", meta = (FilePathFilter = "gst"))
+	FFilePath StarCatalog;
+
+	/** I pianeti a occhio nudo: Mercurio, Venere, Marte, Giove, Saturno. */
+	UPROPERTY(Config, EditAnywhere, Category = "Notte")
+	bool bPlanets = true;
 
 	/**
 	 * Senza le Virtual Shadow Maps, fin dove arrivano le ombre del sole (m):
