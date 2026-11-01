@@ -24,5 +24,10 @@ public class GeoEntities : ModuleRules
 			// Project Settings -> GeoWorld - Entita'.
 			"DeveloperSettings",
 		});
+
+		// I modelli da file (docs/modelli-design.md): le mesh costruite a
+		// runtime (FMeshDescription con gli attributi delle static mesh) e le
+		// texture decodificate da Unreal (PNG, JPEG, BMP, TGA...).
+		PrivateDependencyModuleNames.AddRange(new string[] { "MeshDescription", "StaticMeshDescription", "ImageWrapper" });
 	}
 }

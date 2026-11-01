@@ -11,6 +11,7 @@
 
 #include "Engine/Engine.h"
 #include "Engine/World.h"
+#include "HAL/FileManager.h"
 #include "HAL/IConsoleManager.h"
 
 namespace GeoEntitiesConsole
@@ -155,6 +156,7 @@ static FAutoConsoleCommandWithWorldAndArgs GeoEntitiesModelsCommand(
 			GeoEntitiesConsole::Report(FString::Printf(TEXT("  %-20s %s%s"), UTF8_TO_TCHAR(Rule.PatternText().c_str()),
 				UTF8_TO_TCHAR(Rule.Model.Text.c_str()), Rule.bBuiltIn ? TEXT("   (di serie)") : TEXT("")), FColor::White);
 		}
+		for (const FString& Line : Entities->DescribeFileModels()) { GeoEntitiesConsole::Report(Line, FColor::White); }
 		for (const FString& Missing : Entities->GetMissingAssets())
 		{
 			GeoEntitiesConsole::Report(FString::Printf(TEXT("  l'asset %s non si carica: al suo posto una scatola"), *Missing), FColor::Red);
@@ -209,6 +211,112 @@ static FAutoConsoleCommandWithWorldAndArgs GeoEntitiesDebugCommand(
 		if (!Entities) { return; }
 		Entities->SetDebugOverlayEnabled(Args.Num() >= 1 ? FCString::Atoi(*Args[0]) != 0 : !Entities->IsDebugOverlayEnabled());
 		GeoEntitiesConsole::Report(FString::Printf(TEXT("Entita': diagnostica %s"), Entities->IsDebugOverlayEnabled() ? TEXT("accesa") : TEXT("spenta")));
+	}));
+
+// ============================================================================
+//  I modelli da file (docs/modelli-design.md)
+// ============================================================================
+
+// --- geo.Entities.ModelFolder ---------------------------------------------------
+static FAutoConsoleCommandWithWorldAndArgs GeoEntitiesModelFolderCommand(
+	TEXT("geo.Entities.ModelFolder"),
+	TEXT("geo.Entities.ModelFolder [cartella] - la cartella dei modelli (anche fuori dal progetto): le regole 'file' della tabella partono da qui, le texture si cercano qui per nome. I modelli si rileggono."),
+	FConsoleCommandWithWorldAndArgsDelegate::CreateStatic([](const TArray<FString>& RawArgs, UWorld* World)
+	{
+		UGeoEntitySubsystem* Entities = GeoEntitiesConsole::Get(World);
+		if (!Entities) { return; }
+		const TArray<FString> Args = GeoWorld::Console::QuotedArgs(RawArgs);
+		if (Args.Num() >= 1) { Entities->SetModelFolder(Args[0]); }
+		const FString Folder = Entities->GetModelFolder();
+		GeoEntitiesConsole::Report(Folder.IsEmpty()
+			? FString(TEXT("Modelli: nessuna cartella (le regole 'file' vogliono percorsi assoluti)"))
+			: FString::Printf(TEXT("Modelli: la cartella e' %s%s"), *Folder,
+				IFileManager::Get().DirectoryExists(*Folder) ? TEXT("") : TEXT(" (NON ESISTE)")));
+		const FString Problem = Entities->GetModelMaterialProblem();
+		if (!Problem.IsEmpty()) { GeoEntitiesConsole::Report(Problem, FColor::Red); }
+	}));
+
+// --- geo.Entities.ModelInfo -----------------------------------------------------
+static FAutoConsoleCommandWithWorldAndArgs GeoEntitiesModelInfoCommand(
+	TEXT("geo.Entities.ModelInfo"),
+	TEXT("geo.Entities.ModelInfo <file> - legge un modello (.flt, .obj) e dice cosa c'e': misure, DOF e loro limiti, switch, texture trovate e no, avvisi. Senza argomenti, i modelli gia' letti."),
+	FConsoleCommandWithWorldAndArgsDelegate::CreateStatic([](const TArray<FString>& RawArgs, UWorld* World)
+	{
+		UGeoEntitySubsystem* Entities = GeoEntitiesConsole::Get(World);
+		if (!Entities) { return; }
+		const TArray<FString> Args = GeoWorld::Console::QuotedArgs(RawArgs);
+		TArray<FString> Lines;
+		if (Args.Num() < 1)
+		{
+			Lines = Entities->DescribeFileModels();
+			GeoEntitiesConsole::Report(FString::Printf(TEXT("Modelli da file: %d (cartella: %s)"), Lines.Num(),
+				Entities->GetModelFolder().IsEmpty() ? TEXT("nessuna") : *Entities->GetModelFolder()));
+		}
+		else if (!Entities->InspectModelFile(Args[0], Lines))
+		{
+			for (const FString& Line : Lines) { GeoEntitiesConsole::Report(Line, FColor::Red); }
+			return;
+		}
+		for (const FString& Line : Lines) { GeoEntitiesConsole::Report(Line, FColor::White); }
+	}));
+
+// --- geo.Entities.ReloadModels --------------------------------------------------
+static FAutoConsoleCommandWithWorld GeoEntitiesReloadModelsCommand(
+	TEXT("geo.Entities.ReloadModels"),
+	TEXT("Rilegge dal disco tutti i modelli da file (dopo averli cambiati), e rifa' gli attori."),
+	FConsoleCommandWithWorldDelegate::CreateStatic([](UWorld* World)
+	{
+		UGeoEntitySubsystem* Entities = GeoEntitiesConsole::Get(World);
+		if (!Entities) { return; }
+		Entities->ReloadModels();
+		GeoEntitiesConsole::Report(TEXT("Modelli: si rileggono."));
+	}));
+
+// --- geo.Entities.Dof -------------------------------------------------------------
+static FAutoConsoleCommandWithWorldAndArgs GeoEntitiesDofCommand(
+	TEXT("geo.Entities.Dof"),
+	TEXT("geo.Entities.Dof <entita'> [dof] [imbardata] [beccheggio] [rollio] [x y z] - muove una parte del modello (gradi di OpenFlight: imbardata positiva a SINISTRA; metri), nei limiti del modello. Senza dof: l'elenco di DOF e switch."),
+	FConsoleCommandWithWorldAndArgsDelegate::CreateStatic([](const TArray<FString>& RawArgs, UWorld* World)
+	{
+		UGeoEntitySubsystem* Entities = GeoEntitiesConsole::Get(World);
+		if (!Entities) { return; }
+		const TArray<FString> Args = GeoWorld::Console::QuotedArgs(RawArgs);
+		if (Args.Num() < 1)
+		{
+			GeoEntitiesConsole::Report(TEXT("Uso: geo.Entities.Dof <entita'> [dof] [imbardata] [beccheggio] [rollio] [x y z]"), FColor::Red);
+			return;
+		}
+		if (Args.Num() < 2)
+		{
+			TArray<FString> Lines;
+			const bool bOk = Entities->DescribeEntityRig(Args[0], Lines);
+			for (const FString& Line : Lines) { GeoEntitiesConsole::Report(Line, bOk ? FColor::White : FColor::Red); }
+			return;
+		}
+		TArray<double> Values;
+		for (int32 Index = 2; Index < Args.Num(); ++Index) { Values.Add(FCString::Atod(*Args[Index])); }
+		FString Message;
+		const bool bOk = Entities->SetEntityDof(Args[0], Args[1], Values, Message);
+		GeoEntitiesConsole::Report(Message, bOk ? FColor::Cyan : FColor::Red);
+	}));
+
+// --- geo.Entities.Switch ----------------------------------------------------------
+static FAutoConsoleCommandWithWorldAndArgs GeoEntitiesSwitchCommand(
+	TEXT("geo.Entities.Switch"),
+	TEXT("geo.Entities.Switch <entita'> <switch> <maschera> - sceglie la maschera di uno switch del modello (es. il danno: 0 intatto, 1 distrutto; dipende dal modello)."),
+	FConsoleCommandWithWorldAndArgsDelegate::CreateStatic([](const TArray<FString>& RawArgs, UWorld* World)
+	{
+		UGeoEntitySubsystem* Entities = GeoEntitiesConsole::Get(World);
+		if (!Entities) { return; }
+		const TArray<FString> Args = GeoWorld::Console::QuotedArgs(RawArgs);
+		if (Args.Num() < 3)
+		{
+			GeoEntitiesConsole::Report(TEXT("Uso: geo.Entities.Switch <entita'> <switch> <maschera> (geo.Entities.Dof <entita'> per i nomi)"), FColor::Red);
+			return;
+		}
+		FString Message;
+		const bool bOk = Entities->SetEntitySwitch(Args[0], Args[1], FCString::Atoi(*Args[2]), Message);
+		GeoEntitiesConsole::Report(Message, bOk ? FColor::Cyan : FColor::Red);
 	}));
 
 // ============================================================================

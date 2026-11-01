@@ -2398,9 +2398,110 @@ namespace
 	}
 }
 
+// ============================================================================
+//  LE ENTITA': M_GeoEntity (opaco), M_GeoEntityMasked (tagliato, due facce),
+//  M_GeoEntityTranslucent (trasparente, due facce). docs/modelli-design.md.
+// ============================================================================
+
+namespace
+{
+	const TCHAR* EntityMaterialPackagePaths[3] = {
+		TEXT("/GeoWorld/Materials/M_GeoEntity"), TEXT("/GeoWorld/Materials/M_GeoEntityMasked"), TEXT("/GeoWorld/Materials/M_GeoEntityTranslucent") };
+	const TCHAR* EntityMaterialAssetNames[3] = { TEXT("M_GeoEntity"), TEXT("M_GeoEntityMasked"), TEXT("M_GeoEntityTranslucent") };
+
+	/**
+	 * I modelli letti dai file (Models/*.h): il colore e' nei vertici (la
+	 * faccia, il vertice, il diffuso del materiale), la texture sopra.
+	 *
+	 *   VertexColor.RGB al quadrato (sRGB -> lineare) * BaseTexture.RGB * Tint.RGB --> Base Color
+	 *   Emissive.RGB * BaseTexture.RGB                                       --> Emissive
+	 *   VertexColor.A * BaseTexture.A          --> Opacity Mask (Masked) o Opacity (Translucent)
+	 *
+	 * BaseTexture di partenza e' il bianco del motore: senza texture resta il
+	 * colore dei vertici. Tint serve dopo (il danno annerisce, la selezione
+	 * evidenzia).
+	 */
+	bool BuildEntityGraph(UMaterial* Material, int32 Mode)
+	{
+		UTexture2D* White = LoadObject<UTexture2D>(nullptr, TEXT("/Engine/EngineResources/WhiteSquareTexture.WhiteSquareTexture"), nullptr,
+			LOAD_NoWarn | LOAD_Quiet);
+		if (!White)
+		{
+			Report(TEXT("M_GeoEntity: manca /Engine/EngineResources/WhiteSquareTexture."), FColor::Red);
+			return false;
+		}
+		Material->MaterialDomain = MD_Surface;
+		Material->SetShadingModel(MSM_DefaultLit);
+		Material->BlendMode = Mode == 0 ? BLEND_Opaque : (Mode == 1 ? BLEND_Masked : BLEND_Translucent);
+		Material->TwoSided = Mode != 0;
+		if (Mode == 1) { Material->OpacityMaskClipValue = 0.5f; }
+
+		FGraph G{ Material };
+		UMaterialExpressionVertexColor* Paint = G.Make<UMaterialExpressionVertexColor>(-1200, -300);
+		UMaterialExpressionTextureCoordinate* Coordinates = G.Make<UMaterialExpressionTextureCoordinate>(-1400, 50);
+		UMaterialExpressionTextureSampleParameter2D* Texture = G.Make<UMaterialExpressionTextureSampleParameter2D>(-1200, 50);
+		UMaterialExpressionVectorParameter* Tint = G.Make<UMaterialExpressionVectorParameter>(-1200, 400);
+		UMaterialExpressionVectorParameter* Glow = G.Make<UMaterialExpressionVectorParameter>(-1200, 600);
+		UMaterialExpressionMultiply* PaintLinear = G.Make<UMaterialExpressionMultiply>(-900, -300);
+		UMaterialExpressionMultiply* PaintTexture = G.Make<UMaterialExpressionMultiply>(-700, -150);
+		UMaterialExpressionMultiply* Coloured = G.Make<UMaterialExpressionMultiply>(-500, 0);
+		UMaterialExpressionMultiply* Emissive = G.Make<UMaterialExpressionMultiply>(-500, 550);
+		UMaterialExpressionMultiply* Alpha = G.Make<UMaterialExpressionMultiply>(-500, 300);
+		UMaterialExpressionConstant* Roughness = G.Make<UMaterialExpressionConstant>(-500, 200);
+		if (!G.bOk) { return false; }
+
+		Texture->ParameterName = TEXT("BaseTexture");
+		Texture->Texture = White;
+		Texture->SamplerType = SAMPLERTYPE_Color;
+		Tint->ParameterName = TEXT("Tint");
+		Tint->DefaultValue = FLinearColor::White;
+		Glow->ParameterName = TEXT("Emissive");
+		Glow->DefaultValue = FLinearColor::Black;
+		Roughness->R = 0.6f;
+		G.Connect(Coordinates, TEXT(""), Texture, TEXT("UVs"));
+
+		const int32 PaintRgb = FindOutputByChannels(Paint, true, true, true, false);
+		const int32 PaintA = FindOutputByChannels(Paint, false, false, false, true);
+		const int32 TextureRgb = FindOutputByChannels(Texture, true, true, true, false);
+		const int32 TextureA = FindOutputByChannels(Texture, false, false, false, true);
+		const int32 TintRgb = FindOutputByChannels(Tint, true, true, true, false);
+		const int32 GlowRgb = FindOutputByChannels(Glow, true, true, true, false);
+		if (PaintRgb == INDEX_NONE || PaintA == INDEX_NONE || TextureRgb == INDEX_NONE || TextureA == INDEX_NONE
+			|| TintRgb == INDEX_NONE || GlowRgb == INDEX_NONE)
+		{
+			Report(TEXT("M_GeoEntity: un'uscita dei nodi non si trova."), FColor::Red);
+			return false;
+		}
+		// I colori dei vertici arrivano sRGB: al quadrato sono (quasi) lineari, come per i lampioni.
+		PaintLinear->A.Connect(PaintRgb, Paint);
+		PaintLinear->B.Connect(PaintRgb, Paint);
+		PaintTexture->A.Connect(0, PaintLinear);
+		PaintTexture->B.Connect(TextureRgb, Texture);
+		Coloured->A.Connect(0, PaintTexture);
+		Coloured->B.Connect(TintRgb, Tint);
+		Emissive->A.Connect(GlowRgb, Glow);
+		Emissive->B.Connect(TextureRgb, Texture);
+		Alpha->A.Connect(PaintA, Paint);
+		Alpha->B.Connect(TextureA, Texture);
+
+		G.Connect(Coloured, TEXT(""), MP_BaseColor);
+		G.Connect(Emissive, TEXT(""), MP_EmissiveColor);
+		G.Connect(Roughness, TEXT(""), MP_Roughness);
+		if (Mode == 1) { G.Connect(Alpha, TEXT(""), MP_OpacityMask); }
+		if (Mode == 2) { G.Connect(Alpha, TEXT(""), MP_Opacity); }
+		if (!G.bOk) { return false; }
+		UMaterialEditingLibrary::RecompileMaterial(Material);
+		return true;
+	}
+
+	bool BuildEntityOpaqueGraph(UMaterial* Material) { return BuildEntityGraph(Material, 0); }
+	bool BuildEntityMaskedGraph(UMaterial* Material) { return BuildEntityGraph(Material, 1); }
+	bool BuildEntityTranslucentGraph(UMaterial* Material) { return BuildEntityGraph(Material, 2); }
+}
+
 static FAutoConsoleCommand GeoImageryCreateMaterialCommand(
 	TEXT("geo.Imagery.CreateMaterial"),
-	TEXT("Costruisce (o RIFA') in /GeoWorld/Materials: M_GeoTerrain (foto e strade dipinte), M_GeoRoad (strade 3D), M_GeoWater e MPC_GeoWater (acqua), MPC_GeoWeather, M_GeoPrecipitation, M_GeoLightning e M_GeoClouds (meteo), M_GeoVegetation (alberi), M_GeoBuilding (edifici), M_GeoNightSky (stelle e luna), M_GeoStars (stelle vere e pianeti), M_GeoStreetLight e M_GeoStreetLamp (lampioni)."),
+	TEXT("Costruisce (o RIFA') in /GeoWorld/Materials: M_GeoTerrain (foto e strade dipinte), M_GeoRoad (strade 3D), M_GeoWater e MPC_GeoWater (acqua), MPC_GeoWeather, M_GeoPrecipitation, M_GeoLightning e M_GeoClouds (meteo), M_GeoVegetation (alberi), M_GeoBuilding (edifici), M_GeoNightSky (stelle e luna), M_GeoStars (stelle vere e pianeti), M_GeoStreetLight e M_GeoStreetLamp (lampioni), M_GeoEntity, M_GeoEntityMasked e M_GeoEntityTranslucent (i modelli delle entita')."),
 	FConsoleCommandDelegate::CreateStatic([]()
 	{
 		// Il meteo per primo: terreno e strade leggono MPC_GeoWeather (suolo
@@ -2434,9 +2535,13 @@ static FAutoConsoleCommand GeoImageryCreateMaterialCommand(
 			&& CreateOrRebuildMaterial(StreetLampMaterialPackagePath, StreetLampMaterialAssetName, &BuildStreetLampGraph);
 		const bool bStars = bWeatherCollection
 			&& CreateOrRebuildMaterial(StarsMaterialPackagePath, StarsMaterialAssetName, &BuildStarsGraph);
+		// I modelli delle entita': non leggono il meteo, si fanno sempre.
+		const bool bEntities = CreateOrRebuildMaterial(EntityMaterialPackagePaths[0], EntityMaterialAssetNames[0], &BuildEntityOpaqueGraph)
+			&& CreateOrRebuildMaterial(EntityMaterialPackagePaths[1], EntityMaterialAssetNames[1], &BuildEntityMaskedGraph)
+			&& CreateOrRebuildMaterial(EntityMaterialPackagePaths[2], EntityMaterialAssetNames[2], &BuildEntityTranslucentGraph);
 
 		if (bTerrain && bRoad && bWater && bPrecipitation && bLightning && bClouds && bVegetation && bBuildings && bNightSky
-			&& bStreetLight && bStreetLamp && bStars)
+			&& bStreetLight && bStreetLamp && bStars && bEntities)
 		{
 			Report(TEXT("Materiali pronti. Riavvia il Play (o rilancia geo.Roads.Demo / geo.Water.Demo)."));
 		}
@@ -2472,6 +2577,11 @@ static FAutoConsoleCommand GeoImageryCreateMaterialCommand(
 		if (!bStreetLight || !bStreetLamp)
 		{
 			Report(TEXT("M_GeoStreetLight o M_GeoStreetLamp non fatti: di notte niente punti luce (o pali grigi). Output Log (LogGeoWorld) e docs/lampioni-verifica.md"),
+				FColor::Red);
+		}
+		if (!bEntities)
+		{
+			Report(TEXT("M_GeoEntity (o Masked, Translucent) non fatto: i modelli delle entita' restano grigi, senza texture. Output Log (LogGeoWorld) e docs/modelli-verifica.md"),
 				FColor::Red);
 		}
 		if (!bBuildings)

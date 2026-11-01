@@ -30,6 +30,15 @@ public:
 	FString SharedMemoryName = TEXT("GeoWorldEntities");
 
 	/**
+	 * La cartella dei modelli (fuori dal progetto va benissimo): i file delle
+	 * regole della tabella (F16/f16.flt) partono da qui, e le texture che un
+	 * modello nomina con il percorso di un'altra macchina si cercano qui per
+	 * nome. Come geo.Entities.ModelFolder.
+	 */
+	UPROPERTY(Config, EditAnywhere, Category = "Modelli")
+	FDirectoryPath ModelFolder;
+
+	/**
 	 * La tabella dei modelli (Entities/EntityModels.h): una regola per riga,
 	 * "1.2.*.21  heli 12 11 3.5". Vuota: le forme di serie, una per dominio.
 	 * Un percorso relativo e' dalla cartella del progetto.

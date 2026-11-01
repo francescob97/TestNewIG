@@ -426,6 +426,8 @@ volta per tutte, più `bListenOnStart`.
   (pubblicare le entità nostre), con un'interfaccia sua, separata.
 - **HLA**: per ultimo, in un modulo **opzionale**: vuole un RTI di terze
   parti, e nessuno deve aver bisogno di un RTI per compilare GeoWorld.
+- **I modelli veri** al posto delle scatole: il capitolo 21 (il primo pezzo
+  c'è: OpenFlight e OBJ da una cartella qualsiasi, con le parti mobili).
 
 ---
 

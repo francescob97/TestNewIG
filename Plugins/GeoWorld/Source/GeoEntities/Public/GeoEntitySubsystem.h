@@ -43,16 +43,20 @@
 
 #include "Entities/EntityModels.h"
 #include "Entities/EntityRegistry.h"
+#include "Models/ModelRig.h"
 #include "Sources/GeoEntitySource.h"
 
 #include "GeoEntitySubsystem.generated.h"
 
 class AActor;
 class APlayerController;
+class FGeoModelLibrary;
 class UCanvas;
 class UMaterialInstanceDynamic;
 class UMaterialInterface;
+class USceneComponent;
 class UStaticMesh;
+struct FGeoLoadedModel;
 
 USTRUCT()
 struct FGeoEntityStats
@@ -122,6 +126,26 @@ public:
 	/** Gli asset della tabella che non si caricano. */
 	const TArray<FString>& GetMissingAssets() const { return MissingAssets; }
 
+	// --- Modelli da file (docs/modelli-design.md) --------------------------
+
+	/** La cartella dei modelli (geo.Entities.ModelFolder): i modelli gia' letti si rileggono. */
+	void SetModelFolder(const FString& Folder);
+	FString GetModelFolder() const;
+	/** Rilegge tutti i modelli da file (dopo averli cambiati sul disco). */
+	void ReloadModels();
+	/** Una riga per modello da file: pronto, in lettura, errore; parti, triangoli, texture mancanti. */
+	TArray<FString> DescribeFileModels() const;
+	/** Legge un modello adesso (sul game thread) e lo descrive: per geo.Entities.ModelInfo. */
+	bool InspectModelFile(const FString& File, TArray<FString>& OutLines) const;
+	/** Le parti mobili e gli switch del modello di un'entita' (per nome o numero). */
+	bool DescribeEntityRig(const FString& Who, TArray<FString>& OutLines) const;
+	/** Muove un DOF del modello di un'entita': rotazione (gradi: imbardata, beccheggio, rollio) e, se ci sono, traslazione (m). */
+	bool SetEntityDof(const FString& Who, const FString& Dof, const TArray<double>& Values, FString& OutMessage);
+	/** Sceglie la maschera di uno switch del modello di un'entita'. */
+	bool SetEntitySwitch(const FString& Who, const FString& Switch, int32 Mask, FString& OutMessage);
+	/** Vuota se i materiali dei modelli ci sono. */
+	FString GetModelMaterialProblem() const;
+
 	// --- Seguire -----------------------------------------------------------
 
 	/** Segue un'entita' (il nome, o il numero) con la camera del Play. False se non la trova. */
@@ -156,6 +180,14 @@ private:
 		bool bHasGround = false;
 		/** La generazione della tabella dei modelli con cui e' stato fatto l'attore. */
 		uint32 ModelGeneration = 0;
+		/** Il modello da file (se la regola ne nomina uno), condiviso con le altre entita'. */
+		TSharedPtr<FGeoLoadedModel> FileModel;
+		/** Si aspetta che il modello sia letto: intanto c'e' la forma di serie. */
+		bool bWaitingModel = false;
+		/** Un componente per parte del rig (vuoto senza modello da file). */
+		TArray<TWeakObjectPtr<USceneComponent>> Parts;
+		/** I DOF e gli switch di questa entita'. */
+		GeoWorld::Models::FRigState RigState;
 	};
 
 	struct FCandidate
@@ -177,6 +209,13 @@ private:
 		FVector& OutLocation, FQuat& OutRotation, GeoWorld::Core::FGeodetic& OutGeodetic) const;
 
 	AActor* SpawnActorFor(const GeoWorld::Entities::FEntityRecord& Record, FVisual& Visual);
+	/** Le parti di un modello da file sotto la radice dell'attore. */
+	void BuildModelParts(AActor* Actor, USceneComponent* Root, const FGeoLoadedModel& Model, FVisual& Visual);
+	/** Le trasformazioni dei DOF e la visibilita' (switch, LOD) delle parti. */
+	void ApplyRig(FVisual& Visual, const FVector& Camera, bool bHaveCamera) const;
+	/** L'entita' con questo nome (o numero) che ha un attore. */
+	FVisual* FindVisual(const FString& Who, FString& OutLabel);
+	const FVisual* FindVisual(const FString& Who, FString& OutLabel) const;
 	void DestroyVisual(const FEntityKey& Key);
 	void DestroyAllVisuals();
 	UMaterialInterface* MaterialFor(GeoWorld::Entities::EForce Force, bool bFallback);
@@ -202,6 +241,8 @@ private:
 	/** Un materiale per fazione (0..3) e uno per i ripieghi (4). */
 	TStrongObjectPtr<UMaterialInstanceDynamic> ForceMaterials[5];
 	TMap<FString, TStrongObjectPtr<UStaticMesh>> AssetMeshes;
+	/** I modelli da file (Private/ModelLibrary/GeoModelLibrary.h). */
+	TSharedPtr<FGeoModelLibrary> Library;
 
 	double TimeoutSeconds = 5.0;
 	double ActorRadiusM = 30000.0;

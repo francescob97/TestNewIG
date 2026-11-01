@@ -16,6 +16,7 @@ Ultimo aggiornamento: 2026-10-31. Branch: `claude/charming-goodall-xd2r3g`.
 | 5 | Mesh, gonne, terreno a schermo | **codice completo, mai compilato in UE** |
 | 6 | Ortofoto drappeggiate | **codice completo, mai compilato in UE** |
 | 7 | **Entità, primo pezzo: la memoria condivisa**. Lo strato puro (`GeoEntities/Public/Entities`): lo stato canonico (ECEF, quaternione dal corpo FRD, velocità angolari nel corpo), le tre trappole in un file (NED/NEU, angoli CIGI locali e DIS in ECEF, Z del corpo giù e dell'attore su), l'estrapolazione dei nove algoritmi di DIS in una funzione (negli assi del corpo con il teorema del trasporto), il rientro morbido con `3u²−2u³`, l'ora di DIS e l'orologio della simulazione, il registro (chiave sorgente + numero, disordine, riavvii, silenzi, geoide), la tabella dei modelli (tipo DIS o `cigi N` → forme di scatole o asset, ripiego dichiarato); la memoria condivisa `GeoWorldEntities` (fotografia di 64 + 128·N byte, seqlock) e il generatore finto `geoworld demo-entities` (due aerei in virata coordinata, un elicottero, quattro auto al suolo sopra Torino; `--crowd N`); il modulo Unreal `GeoEntities`: il thread che legge, la coda MPSC, `UGeoEntitySubsystem` (attori solo per le più vicine, terreno disegnato sotto le auto, nomi sul Canvas, camera che segue), `geo.Entities.*`, riga "Entita'" nelle stampe | **da compilare e provare** (nessun materiale nuovo) — `docs/fase7-design.md` (sezione 13), `docs/fase7-verifica.md`, `docs/manuale/20-entita.md`. Poi CIGI, DIS, HLA |
+| 7 | **Modelli dai file, primo pezzo (M1)**. Lo strato puro (`GeoEntities/Public/Models`): OpenFlight 15.x/16.x (record, palette, gerarchia, DOF con i limiti, switch, LOD, sequenze, istanze, riferimenti esterni, mesh, punti luce e codici IR tenuti da parte), OBJ con MTL, immagini SGI, la ricerca delle texture nominate con i percorsi di un'altra macchina, il rig (assi, mano, unità, UV in un punto solo; parti solo per DOF, switch, LOD); le regole `file` della tabella con `scale`, `yaw`, `offset`, `up`, `forward`; `geomodel_info`. In Unreal: la cartella dei modelli (anche fuori dal progetto), la lettura su un thread di lavoro, mesh/texture/materiali condivisi (`M_GeoEntity`, `Masked`, `Translucent`), un attore con le parti, LOD dalla camera, `geo.Entities.ModelFolder`, `ModelInfo`, `ReloadModels`, `Dof`, `Switch`. FBX e IVE: il messaggio dice come convertirli | **da compilare e provare**, anche con i `.flt` veri del database (i test usano file scritti dalla specifica); rilanciare `geo.Imagery.CreateMaterial` — `docs/modelli-design.md` (sezione 12), `docs/modelli-verifica.md`, `docs/manuale/21-modelli.md`. Poi M2 glTF e conversione, M3 articolazioni, M4 termica, M5 collisioni, M6 danno, M7 luci |
 | 8 | **Strade, ferrovie, piste** da OpenStreetMap: dipinte sul terreno, **3D da vicino** | dipinte provate dall'utente (si vedono); strade 3D provate ("manca la tridimensionalita'"), **rifatte: carreggiata in piano, scarpate, marciapiedi, guardrail, ponti con parapetti e pile — da compilare e provare** — `docs/fase8-design.md`, `docs/fase8-verifica.md`, `docs/strade-3d.md` |
 | dopo | **Flash quando la geometria si affina**: le figlie sostituivano il padre in un frame | **geomorphing e dissolvenza, da compilare e provare** — `docs/strade-3d.md`, sezione 2 |
 | dopo | **Flash del rebase**: l'origine del mondo stava alla quota della camera, e a ogni rebase cielo e nebbia saltavano | **corretto, da riprovare** — `docs/strade-3d.md`, sezione 2 |
@@ -142,6 +143,8 @@ build\Debug\geovegetation_tests.exe Plugins\GeoWorld\Source\GeoTiles\TestData\ve
 build\Debug\geobuildings_tests.exe Plugins\GeoWorld\Source\GeoTiles\TestData\buildings_fixture.gbd    :: 26 test (gli edifici)
 build\Debug\geosky_tests.exe                       :: 60 test (il cielo: sole, luna, ora legale, notte, stelle vere, pianeti)
 build\Debug\geoentities_tests.exe Plugins\GeoWorld\Source\GeoTiles\TestData\entities_fixture.bin   :: 97 test (le entita': frame, estrapolazione, tempo, registro, modelli, memoria condivisa, la fixture di Python)
+build\Debug\geomodels_tests.exe                     :: 48 test (i modelli: OpenFlight, OBJ, SGI, texture, il rig)
+build\Debug\geomodel_info.exe D:\db\Models\x.flt D:\db\Models   :: cosa c'e' dentro un modello, senza Unreal
 Plugins\GeoWorld\Tools\CheckSourceDiscipline.sh      :: serve bash (Git Bash)
 ```
 
@@ -263,6 +266,9 @@ geo.Lights.Force <auto|on|off> la fotocellula, o sempre accesi/spenti; Count <n>
 geo.Entities.Listen [nome]     in ascolto della memoria condivisa (fuori: geoworld demo-entities); Stop: tutto via
 geo.Entities.List [n]          sorgenti ed entita' piu' vicine; Follow <nome|off>: la camera del Play le segue
 geo.Entities.Blend <s>         il rientro morbido (0,4); Models <file|default>: la tabella dei modelli a caldo
+geo.Entities.ModelFolder <dir> la cartella dei modelli (.flt, .obj), anche fuori dal progetto; ReloadModels: rilegge
+geo.Entities.ModelInfo <file>  cosa c'e' in un modello: misure, DOF, switch, texture trovate e no
+geo.Entities.Dof <entita'> ... muove una parte (senza dof: l'elenco); Switch <entita'> <switch> <maschera>
 ```
 
 Se hai un dataset e vuoi vedere subito qualcosa, il comando e'
@@ -339,10 +345,11 @@ Come distinguerli: se a fianco c'e' un `.hdr` e' un raster; altrimenti apri il
 file con un editor esadecimale e guarda i primi byte — OpenFlight comincia con
 un record di intestazione `db`.
 
-Se e' OpenFlight: sono edifici, alberi, oggetti di scena. Ne' GDAL ne' Unreal li
-leggono nativamente. Non servono per le Fasi 1-6, che riguardano il terreno.
-Diventeranno interessanti dopo, e richiederanno una conversione (Blender con
-plugin, o strumenti Presagis).
+Se e' OpenFlight: sono edifici, alberi, oggetti di scena, veicoli. Ne' GDAL ne'
+Unreal li leggono nativamente; **GeoWorld si'**, dal primo pezzo dei modelli
+(`docs/modelli-design.md`, `docs/modelli-verifica.md`): `geomodel_info` per
+guardarci dentro, `geo.Entities.ModelFolder` e le regole `file` della tabella
+dei modelli per darli alle entita'.
 
 ### SourceData `.shp` — utile, ma dopo
 
@@ -450,7 +457,10 @@ Plugins/GeoWorld/Source/
     Public/Entities/  C++ PURO: stato, frame (le tre trappole), estrapolazione e rientro,
                       tempo, registro, modelli, formato della memoria condivisa
     Public/Sources/   IGeoEntitySource e la coda MPSC; Private/Sources: la memoria e il thread
-    GeoEntitySubsystem, GeoEntitySettings   registro, attori, suolo, nomi, camera
+    Public/Models/    C++ PURO: il modello (ModelData), OpenFlight, OBJ, SGI, la ricerca
+                      delle texture, il rig (assi dell'attore, parti, DOF, switch, LOD)
+    Private/ModelLibrary/  i modelli letti su un thread di lavoro; mesh, texture, materiali
+    GeoEntitySubsystem, GeoEntitySettings   registro, attori (con le parti), suolo, nomi, camera
   GeoWorldEditor/ i materiali costruiti da codice (geo.Imagery.CreateMaterial)
 
   Tools/StandaloneTests/   test C++ senza Unreal (CMake)
@@ -619,6 +629,7 @@ Limitazioni note, lasciate aperte di proposito:
 | Verifica Fase 5, con la demo visiva | `docs/fase5-verifica.md` |
 | Verifica Fase 6, con la demo visiva | `docs/fase6-verifica.md` |
 | Design Fase 7 (entità, protocolli) | `docs/fase7-design.md` |
+| Design e verifica dei modelli dai file (OpenFlight, OBJ; la scaletta di articolazioni, termica, collisioni, danno) | `docs/modelli-design.md`, `docs/modelli-verifica.md` |
 | Design e motivazioni Fase 6 | `docs/fase6-design.md` |
 | Design e verifica Fase 8 (strade) | `docs/fase8-design.md`, `docs/fase8-verifica.md`, `docs/strade-3d.md` |
 | Design e verifica Fase 9 (acqua, mare aperto, stampe della posizione) | `docs/fase9-design.md`, `docs/fase9-verifica.md` |

@@ -32,12 +32,16 @@ diverso.
 | Fase 6 | un VRT elenca i file una volta per **banda**, non per file | "scartati −4 file" |
 | Fase 7 (design) | NED contro NEU, angoli DIS contro angoli CIGI | aerei che salgono mentre atterrano |
 | Fase 7 | accelerazione del mondo contro accelerazione nel corpo (la centripeta contata due volte) | aerei in virata che stringono il doppio: 5 m in un secondo, trovato dal test |
+| Modelli (M1) | gli angoli dei DOF di OpenFlight (matematici: imbardata positiva a **sinistra**) contro la bussola, DIS e CIGI (a destra) | torrette e timoni che girano al contrario; fissato da un test (a +90 la canna va a sinistra) |
+| Modelli (M1) | OpenFlight, OBJ e glTF destrorsi contro l'attore sinistrorso | modelli visti da dentro; i triangoli si girano in `BuildRig`, e il test guarda le coordinate, non le normali |
+| Modelli (M1) | dopo un Pop di OpenFlight "l'ultimo nodo letto" è di nuovo quello in cima alla pila | i figli del Push successivo attaccati al nodo sbagliato, trovato dal test delle istanze |
 
 **La difesa:**
 
 * **Ogni conversione di convenzione avviene in un punto solo.** Il numero 100 sta
   in `GeoUnits.h`; la riflessione NEU sta in `MakeNeuBasis()`; l'ondulazione del
-  geoide si somma in un passo esplicito.
+  geoide si somma in un passo esplicito. Le convenzioni dei formati dei modelli
+  (assi, mano, UV) si convertono solo in `BuildRig`.
 * **Le convenzioni si scrivono**: nel manifest (`"yAxis": "sud"`), nei commenti,
   nei nomi (`HeightM`, `LatRad`).
 * **Si rendono impossibili da confondere**, quando si può: `FGeodetic` non ha un

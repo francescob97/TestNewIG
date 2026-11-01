@@ -28,6 +28,8 @@ posizione. È fatto di componenti. (1)
 
 **Atmosphere Sun Light** — la casella di una luce direzionale che la fa usare dalla SkyAtmosphere: il cielo si colora con lei, e la sua luce si attenua attraversando l'aria e si spegne quando va sotto la Terra. Fino a due: indice 0 il sole, 1 la luna. (18)
 
+**Big-endian** — l'ordine dei byte con il più significativo per primo, quello di OpenFlight e delle SGI (nate su macchine che lo usavano). I PC sono little-endian: ogni numero del file va letto girando i byte. (21)
+
 **Ballpark** — la "trasformazione approssimata" di PROJ, che in mancanza della
 griglia geoidica non applica lo scostamento verticale, in silenzio. (3)
 
@@ -108,6 +110,8 @@ possano leggere pezzi via rete senza scaricarlo tutto. (7)
 
 **DIS** (*Distributed Interactive Simulation*, IEEE 1278.1) — il protocollo dove ogni simulatore possiede e annuncia le sue entità, in UDP. Posizione in ECEF, angoli rispetto agli assi ECEF, un timestamp che riparte ogni ora. (20)
 
+**DOF** (*degree of freedom*, nodo di OpenFlight) — una parte del modello che si muove, con il suo sistema di riferimento (il perno e gli assi) e i suoi limiti: una torretta, un tettuccio, un timone. Si muove con `Prima · Moto · Dopo`; i suoi angoli sono matematici (imbardata positiva a sinistra). (21)
+
 **Delegato** — un meccanismo di Unreal per "avvisami quando succede X".
 `OnGeoreferenceRebased` è un delegato. (2)
 
@@ -154,6 +158,8 @@ del LOD. Soglia di default: 8 pixel (era 4: vedi `docs/prova-torino-2.md`). (5)
 
 **Fotografia (della memoria condivisa)** — lo stato di tutte le entità vive in un istante: chi non c'è più nella fotografia se n'è andato. Il contrario di un flusso di messaggi. (20)
 
+**FBX** — il formato dei modelli di Autodesk: chiuso, con un SDK che non si può ridistribuire in un plugin. Non si legge a runtime: si converte verso glTF o OBJ, o si importa nell'editor come asset. (21)
+
 **FRD** (*Forward-Right-Down*) — gli assi del corpo in aeronautica: X avanti, Y a destra, Z in basso. Un attore di Unreal ha Z in alto: è la trappola 3. (20)
 
 **Fase (della luna)** — quanta parte del disco è illuminata. La luce che arriva cala molto più della parte illuminata: al primo quarto un decimo della piena (legge di Allen). (18)
@@ -161,6 +167,8 @@ del LOD. Soglia di default: 8 pixel (era 4: vedi `docs/prova-torino-2.md`). (5)
 **Fascia** (del piano di residenza) — un gruppo di tile del piano con la stessa urgenza: 0 = adesso, 1..3 = posizioni previste, l'ultima = anello di sicurezza. (11)
 
 **FDynamicMesh3** — la mesh "da lavoro" di Unreal (modulo GeometryCore): vertici e triangoli più gli overlay degli attributi (normali, UV, colori). Si prepara su un worker e si consegna a un `UDynamicMeshComponent` con uno spostamento. (6, 17)
+
+**glTF** — il formato aperto dei modelli 3D del Khronos Group ("il JPEG del 3D"): metri, +Y in alto, +Z avanti, materiali PBR, animazioni. Arriva con M2. (21)
 
 **Gimbal lock** — a beccheggio ±90° (il muso dritto in su o in giù) imbardata e rollio ruotano attorno allo stesso asse e non si distinguono più. Per questo dentro il motore l'orientamento è un quaternione. (20)
 
@@ -220,6 +228,8 @@ puro è così, per non dover esportare simboli dalle DLL. (0, 1)
 
 **Horizon culling** — scartare ciò che sta oltre la curvatura della Terra. Oggi sul rettangolo della tile nello spazio scalato. (5, 11)
 
+**IVE / OSGB** — i formati binari interni di OpenSceneGraph: cambiano con la versione della libreria. Si convertono con `osgconv modello.ive modello.flt`. (21)
+
 **Indice** (`index.bin`) — per ogni livello, l'elenco delle tile esistenti con
 quota minima e massima (quote) o copertura (immagini). (3)
 
@@ -237,6 +247,8 @@ quota minima e massima (quote) o copertura (immagini). (3)
 
 **LOD** (*Level Of Detail*) — usare versioni più semplici di ciò che è lontano. (5)
 
+**LOD (nodo di OpenFlight)** — un nodo con due distanze (*switch in*, *switch out*) e un centro: i suoi figli si vedono solo se la camera è fra le due distanze da quel centro. Un modello ne ha tre o quattro, dal più ricco al più povero. (21)
+
 **LRU** (*Least Recently Used*) — cache che butta per primo ciò che non si usa da
 più tempo. (4)
 
@@ -245,6 +257,8 @@ materiali la posizione nel mondo è LWC (due float): un nodo Custom la vuole com
 float normale, e per questo passa da un nodo `TruncateLWC`. (1, 2, 13)
 
 **Memoria condivisa** — una zona di memoria con un nome, che due programmi vedono insieme. Il trasporto più semplice per le entità: niente rete, niente protocollo (`Entities/SharedMemoryFormat.h`, nome `GeoWorldEntities`). (20)
+
+**Mano (di un sistema di assi)** — destrorso o sinistrorso: con la mano destra o sinistra, pollice su x, indice su y, il medio dà z. Passare dall'uno all'altro è una riflessione (determinante −1) e inverte il verso dei triangoli. Unreal è sinistrorso; OpenFlight, OBJ e glTF destrorsi. (21)
 
 **Magnitudine** — quanto e' luminoso un astro: piu' piccola, piu' luminoso; una magnitudine in meno e' 2,512 volte la luce. Sirio −1,46, la Polare 2,02, le piu' deboli a occhio nudo 6. La **magnitudine limite** e' quella delle piu' deboli che si vedono adesso: scende nel crepuscolo e con la luna. (18)
 
@@ -292,8 +306,12 @@ della Terra. (2)
 
 **Nucleo (di un rovescio)** — il centro di un rovescio, dove l'intensità sale al massimo. La grandine cade lì, mai ai margini. (15)
 
+**OBJ** (Wavefront) — un formato di modelli in testo: vertici, UV, normali, facce, e i materiali in un file `.mtl` accanto. Semplice, senza gerarchia né parti mobili; utile per le prove e per gli scambi. (21)
+
 **Ondulazione** (`N`) — la differenza fra geoide ed ellissoide. In Italia fra +42
 e +52 m. (3)
+
+**OpenFlight** (`.flt`) — il formato dei modelli della simulazione visiva da trent'anni: binario, big-endian, una sequenza di record con Push e Pop per la gerarchia, palette di colori, texture e materiali, e i nodi che servono a un IG (DOF, switch, LOD, sequenze, riferimenti esterni, punti luce, codici IR). (21)
 
 **OpenStreetMap (OSM)** — la mappa libera del mondo fatta dai volontari: strade, ferrovie,
 edifici, boschi, acqua. Licenza ODbL, da citare. Fonte della Fase 8 e delle successive. (12)
@@ -306,6 +324,10 @@ edifici, boschi, acqua. Licenza ODbL, da citare. Fonte della Fase 8 e delle succ
 
 **Ortofoto** — immagine aerea o satellitare raddrizzata, in cui ogni pixel sta alla
 sua coordinata. (7)
+
+**Palette** — in OpenFlight, le tabelle all'inizio del file (colori, texture, materiali, vertici) che le facce nominano per indice invece di ripetere. (21)
+
+**Parte (di un modello)** — un pezzo del rig che diventa un componente di Unreal: la radice, ogni DOF, ogni figlio di switch, LOD o sequenza. Il resto della gerarchia si cuoce nei vertici. (21)
 
 **Parte (di un edificio)** (`building:part`) — nello schema Simple 3D Buildings di OSM, un pezzo di un edificio con la sua altezza e il suo tetto (la navata, il campanile). Si disegnano le parti e non il contorno, che resta "solo contorno" per i monumenti. (17)
 
@@ -363,6 +385,10 @@ i numeri. (2)
 
 **Rientro** — quando un aggiornamento non coincide con l'estrapolazione, l'errore si smaltisce in una frazione di secondo con una curva morbida, invece di saltare (scatto) o ignorarlo (deriva). `geo.Entities.Blend`. (20)
 
+**Riferimento esterno** — in OpenFlight, un nodo che dice "qui va un altro file" (un pilota, un carico, un edificio intero): si legge e si attacca sotto il nodo. (21)
+
+**Rig** — il modello pronto da disegnare: negli assi dell'attore, in metri, con i triangoli girati dove serve e con poche parti (`Models/ModelRig.h`). Ogni entità ne ha uno **stato**: i valori dei DOF, le maschere degli switch. (21)
+
 **Registrazione sui nodi / sulle aree** — un campione rappresenta un punto (le
 quote) o un'area (i pixel). Decide se il bordo è condiviso. (3, 7)
 
@@ -375,6 +401,8 @@ quote) o un'area (i pixel). Decide se il bordo è condiviso. (3, 7)
 **Riscaldamento** — dopo un salto, qualche decimo di secondo in cui si costruiscono più mesh per frame (24 invece di 4): il frame rallenta, il terreno arriva tutto insieme. (11)
 
 **Seqlock** — un modo di leggere senza lock quello che un altro scrive: chi scrive porta una sequenza a un numero dispari prima e al pari dopo; chi legge la controlla prima e dopo la copia, e riprova se era dispari o è cambiata. (20)
+
+**SGI** (`.rgb`, `.rgba`, `.int`, `.inta`) — il formato d'immagine di Silicon Graphics, quello delle texture di OpenFlight: i canali uno dopo l'altro, le righe dal basso, grezzi o compressi a corse. Lo decodifica `Models/SgiImage.h`. (21)
 
 **Scintillazione** — il tremolio delle stelle, dall'aria in movimento; piu' forte vicino all'orizzonte. I pianeti, che sono dischetti e non punti, non scintillano. (18)
 
@@ -428,6 +456,8 @@ toccare il subsystem. (2)
 testabile e codice che usa il motore. (0)
 
 **Subsystem** — un "gestore" che Unreal crea e distrugge da solo. (1)
+
+**Switch (nodo di OpenFlight)** — un nodo con N figli e alcune maschere, ognuna dice quali figli sono accesi: intatto o distrutto, carrello su o giù. (21)
 
 **Tempo siderale** — quanto è girata la Terra rispetto alle stelle (un giro in 23 h 56 min). Con la longitudine dice quali stelle sono sul meridiano. (18)
 
@@ -606,28 +636,34 @@ il primo comando da provare quando non si vede niente. (6)
 | `GeoWorldEditor.Build.cs` | `MaterialEditor`, `AssetTools` |
 | `Private/GeoWorldEditorModule.cpp` | il modulo |
 | `Private/GeoVegetationModelFactory.cpp` | `geo.Vegetation.CreateModels`: i modelli Nanite degli alberi |
-| `Private/GeoTerrainMaterialFactory.cpp` | `geo.Imagery.CreateMaterial`: `M_GeoTerrain`, `M_GeoRoad`, `M_GeoWater`, `MPC_GeoWater`, `MPC_GeoWeather`, `M_GeoPrecipitation`, `M_GeoLightning`, `M_GeoClouds`, `M_GeoVegetation`, `M_GeoBuilding`, `M_GeoNightSky`, `M_GeoStars`, `M_GeoStreetLight`, `M_GeoStreetLamp` |
+| `Private/GeoTerrainMaterialFactory.cpp` | `geo.Imagery.CreateMaterial`: `M_GeoTerrain`, `M_GeoRoad`, `M_GeoWater`, `MPC_GeoWater`, `MPC_GeoWeather`, `M_GeoPrecipitation`, `M_GeoLightning`, `M_GeoClouds`, `M_GeoVegetation`, `M_GeoBuilding`, `M_GeoNightSky`, `M_GeoStars`, `M_GeoStreetLight`, `M_GeoStreetLamp`, `M_GeoEntity`, `M_GeoEntityMasked`, `M_GeoEntityTranslucent` |
 
 ### GeoEntities — le entità (Fase 7)
 
 | File | Contenuto |
 |---|---|
-| `GeoEntities.Build.cs` | dipende da GeoCore, GeoTiles, GeoRender |
+| `GeoEntities.Build.cs` | dipende da GeoCore, GeoTiles, GeoRender (e `MeshDescription`, `StaticMeshDescription`, `ImageWrapper` per i modelli) |
 | `Public/Entities/EntityState.h` | lo stato canonico, il quaternione, la chiave, il tipo di DIS (puro) |
 | `Public/Entities/EntityFrames.h` | le tre trappole: NED, Eulero, angoli CIGI e DIS, assi dell'attore (puro) |
 | `Public/Entities/DeadReckoning.h` | estrapolazione, rientro, l'ora di DIS, l'orologio della simulazione (puro) |
-| `Public/Entities/EntityRegistry.h`, `EntityModels.h` | il registro, la tabella dei modelli (puri) |
+| `Public/Entities/EntityRegistry.h`, `EntityModels.h` | il registro, la tabella dei modelli, con le regole `file` (puri) |
+| `Public/Models/ModelData.h` | il modello fedele al file: matrici, assi dei formati, materiali, nodi, DOF (puro) |
+| `Public/Models/ModelFiles.h`, `SgiImage.h` | percorsi e ricerca delle texture; le immagini SGI (puri) |
+| `Public/Models/OpenFlightReader.h`, `ObjReader.h`, `ModelLoader.h` | i lettori, e chi legge cosa (puri) |
+| `Public/Models/ModelRig.h` | il rig: assi dell'attore, parti, DOF, switch, LOD (puro) |
+| `Private/ModelLibrary/GeoModelLibrary.cpp` | i modelli letti su un thread di lavoro, mesh, texture e materiali sul game thread |
 | `Public/Entities/SharedMemoryFormat.h` | il formato della memoria condivisa e il seqlock (puro) |
 | `Public/Sources/GeoEntitySource.h` | l'interfaccia di una sorgente, la coda MPSC |
 | `Private/Sources/GeoSharedMemory*.cpp` | la memoria con il nome (Windows, Linux, macOS) e il thread che la legge |
-| `Public/GeoEntitySubsystem.h`, `GeoEntitySettings.h` | il subsystem (registro, attori, suolo, nomi, camera), le impostazioni |
+| `Public/GeoEntitySubsystem.h`, `GeoEntitySettings.h` | il subsystem (registro, attori con le parti dei modelli, suolo, nomi, camera), le impostazioni |
 | `Private/GeoEntitiesModule.cpp` | i comandi `geo.Entities.*`, la riga delle stampe |
 
 ### Strumenti
 
 | File | Contenuto |
 |---|---|
-| `Tools/StandaloneTests/*` | i dodici eseguibili di test senza Unreal |
+| `Tools/StandaloneTests/*` | i tredici eseguibili di test senza Unreal |
+| `Tools/StandaloneTests/geomodel_info.cpp` | `geomodel_info`: cosa c'è dentro un modello (`.flt`, `.obj`), senza Unreal |
 | `Tools/StandaloneTests/HlslShim.h` | quel tanto di HLSL che serve a compilare come C++ gli shader di nuvole, suolo, alberi, edifici e cielo |
 | `Tools/CheckSourceDiscipline.sh` | sette regole di disciplina |
 | `Tools/CheckShadowedParameters.py` | parametri che nascondono campi |
@@ -676,6 +712,8 @@ il primo comando da provare quando non si vede niente. (6)
 | `docs/faseN-verifica.md` | come verificare, fase per fase |
 | `docs/fase7-design.md` | entità e interoperabilità: le decisioni, e cosa c'è del primo pezzo |
 | `docs/fase7-verifica.md` | come provare le entità (memoria condivisa, generatore) |
+| `docs/modelli-design.md` | i modelli delle entità: formati, convenzioni, rig, e la scaletta (articolazioni, termica, collisioni, danno) |
+| `docs/modelli-verifica.md` | come provare i modelli dai file |
 | `docs/fase8-design.md` | strade, ferrovie, piste; il programma delle fasi 8–12 |
 | `docs/fase8-verifica.md` | come provare le strade |
 | `docs/strade-3d.md` | strade 3D da vicino, e il flash del rebase |

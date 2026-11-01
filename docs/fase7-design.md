@@ -456,3 +456,9 @@ tabella ha già `cigi N`), il ground clamp anche di assetto, le risposte
 all'host (Start of Frame, le interrogazioni di quota). Poi DIS, con il
 timestamp (`FHourUnwrapper` c'è), gli algoritmi (ci sono), le enumerazioni (la
 tabella c'è) e la direzione di uscita, con un'interfaccia sua.
+
+In parallelo, **i modelli veri** al posto delle scatole: letti da una
+cartella anche fuori dal progetto (OpenFlight, OBJ; glTF in arrivo), con le
+parti mobili, e poi termica, collisioni e danno. Il design e la scaletta sono
+in `docs/modelli-design.md`; il primo pezzo (M1) c'è (sezione 12 di quel
+documento).

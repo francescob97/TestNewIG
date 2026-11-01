@@ -7,6 +7,8 @@
 #include "Geo/GeoUnits.h"
 #include "Georeference/GeoPlaces.h"
 #include "Georeference/GeoreferenceSubsystem.h"
+#include "ModelLibrary/GeoModelLibrary.h"
+#include "Models/ModelLoader.h"
 #include "Sources/GeoSharedMemorySource.h"
 #include "Water/GeoWaterSubsystem.h"
 
@@ -67,6 +69,30 @@ namespace
 	FString ToFString(const std::string& Text) { return FString(UTF8_TO_TCHAR(Text.c_str())); }
 
 	FVector ToVector(const Core::FEcef& V) { return FVector(V.X, V.Y, V.Z); }
+
+	/**
+	 * Da una trasformazione del rig (colonne = immagini degli assi) a una
+	 * FTransform. NOTA UE: FMatrix e' "a vettore riga": le righe sono le
+	 * immagini degli assi e l'ultima la traslazione.
+	 */
+	FTransform AffineToTransform(const GeoWorld::Models::FAffine& A)
+	{
+		FMatrix M = FMatrix::Identity;
+		for (int32 Row = 0; Row < 3; ++Row)
+		{
+			for (int32 Column = 0; Column < 3; ++Column) { M.M[Row][Column] = A.M[Column][Row]; }
+			M.M[3][Row] = A.T[Row];
+		}
+		return FTransform(M);
+	}
+
+	/** La forma di serie del dominio (mentre il modello da file si legge, o se non si legge). */
+	std::vector<FBoxPart> DefaultShape(const FEntityKind& Kind)
+	{
+		static const FModelTable BuiltIns;
+		const FModelMatch Match = BuiltIns.Find(Kind);
+		return Match.Rule ? Match.Rule->Model.Parts : Shapes::Box(3.0, 3.0, 3.0);
+	}
 }
 
 // ============================================================================
@@ -95,6 +121,8 @@ void UGeoEntitySubsystem::Initialize(FSubsystemCollectionBase& Collection)
 	MaxActors = Settings->MaxActors;
 	bLabels = Settings->bLabels;
 	Registry.GeoidUndulation = [this](const Core::FGeodetic& Where) { return UndulationAt(Where); };
+	Library = MakeShared<FGeoModelLibrary>();
+	Library->SetFolder(Settings->ModelFolder.Path);
 
 	if (!Settings->ModelTable.FilePath.IsEmpty())
 	{
@@ -127,6 +155,7 @@ void UGeoEntitySubsystem::Deinitialize()
 	for (TUniquePtr<IGeoEntitySource>& Source : Sources) { Source->Close(); }
 	Sources.Empty();
 	DestroyAllVisuals();
+	Library.Reset();
 	Registry.Clear();
 	Registry.GeoidUndulation = nullptr;
 	Queue.Reset();
@@ -271,6 +300,8 @@ void UGeoEntitySubsystem::Tick(float DeltaTime)
 	const double Now = FPlatformTime::Seconds();
 
 	DrainQueue(Now);
+	// Un modello da file appena pronto: alla prossima scelta le entita' che lo aspettano lo ricevono.
+	if (Library.IsValid() && Library->Tick() > 0) { NextSelection = 0.0; }
 	if (Now >= NextExpire)
 	{
 		NextExpire = Now + EntityExpirePeriodS;
@@ -353,7 +384,9 @@ void UGeoEntitySubsystem::SelectActors(double Now)
 	for (const TPair<FEntityKey, FVisual>& Pair : Visuals)
 	{
 		// Via chi e' lontano, e chi e' stato fatto con una tabella dei modelli vecchia.
-		if (!Keep.Contains(Pair.Key) || Pair.Value.ModelGeneration != ModelGeneration || !Pair.Value.Actor.IsValid())
+		// E chi aspettava il suo modello da file, ora che e' pronto (o che non si legge).
+		const bool bModelArrived = Pair.Value.bWaitingModel && Pair.Value.FileModel.IsValid() && Pair.Value.FileModel->State != EGeoModelState::Loading;
+		if (!Keep.Contains(Pair.Key) || Pair.Value.ModelGeneration != ModelGeneration || !Pair.Value.Actor.IsValid() || bModelArrived)
 		{
 			Drop.Add(Pair.Key);
 		}
@@ -372,6 +405,12 @@ void UGeoEntitySubsystem::SelectActors(double Now)
 		if (!Record) { continue; }
 		FVisual& Visual = Visuals.Add(Candidate.Key);
 		if (!SpawnActorFor(*Record, Visual)) { Visuals.Remove(Candidate.Key); }
+	}
+
+	// I modelli da file: switch e LOD secondo la camera di adesso.
+	for (TPair<FEntityKey, FVisual>& Pair : Visuals)
+	{
+		if (Pair.Value.Parts.Num() > 0) { ApplyRig(Pair.Value, Camera, true); }
 	}
 }
 
@@ -471,6 +510,8 @@ FString UGeoEntitySubsystem::LabelText(const FEntityRecord& Record, const FVisua
 {
 	FString Text = Record.Label.empty() ? FString::Printf(TEXT("#%llu"), Record.Key.Native) : ToFString(Record.Label);
 	if (Visual.bFallback) { Text += FString::Printf(TEXT(" ? %s"), *ToFString(Record.Kind.Text())); }
+	if (Visual.bWaitingModel) { Text += TEXT(" (modello in lettura)"); }
+	else if (Visual.FileModel.IsValid() && Visual.FileModel->State == EGeoModelState::Failed) { Text += TEXT(" (modello non letto)"); }
 	return Text;
 }
 
@@ -512,6 +553,16 @@ AActor* UGeoEntitySubsystem::SpawnActorFor(const FEntityRecord& Record, FVisual&
 	Visual.ModelText = Spec ? ToFString(Spec->Text) : TEXT("box 3 3 3");
 	Visual.ModelGeneration = ModelGeneration;
 
+	// Un modello da file: lo chiede alla libreria (la chiave e' il file piu' le correzioni).
+	if (Spec && Spec->IsFile() && Library.IsValid())
+	{
+		const FString Path = Library->ResolvePath(ToFString(Spec->File));
+		Visual.FileModel = Library->Request(Path, Spec->FileOptions, Path + TEXT("|") + ToFString(Spec->Text));
+		Visual.bWaitingModel = Visual.FileModel->State == EGeoModelState::Loading;
+		// Non si legge: la forma di serie, in magenta, come un ripiego.
+		if (Visual.FileModel->State == EGeoModelState::Failed) { Visual.bFallback = true; }
+	}
+
 	FActorSpawnParameters SpawnParameters;
 	SpawnParameters.ObjectFlags |= RF_Transient;
 	AActor* Actor = World->SpawnActor<AActor>(AActor::StaticClass(), SpawnParameters);
@@ -539,7 +590,12 @@ AActor* UGeoEntitySubsystem::SpawnActorFor(const FEntityRecord& Record, FVisual&
 	};
 
 	bool bBuilt = false;
-	if (Spec && Spec->IsAsset())
+	if (Visual.FileModel.IsValid() && Visual.FileModel->State == EGeoModelState::Ready && Visual.FileModel->Rig.IsValid())
+	{
+		BuildModelParts(Actor, Root, *Visual.FileModel, Visual);
+		bBuilt = true;
+	}
+	else if (Spec && Spec->IsAsset())
 	{
 		const FString Path = ToFString(Spec->Asset);
 		TStrongObjectPtr<UStaticMesh>* Cached = AssetMeshes.Find(Path);
@@ -558,7 +614,7 @@ AActor* UGeoEntitySubsystem::SpawnActorFor(const FEntityRecord& Record, FVisual&
 	if (!bBuilt)
 	{
 		// Le scatole: il cubo del motore e' di 1 m, la scala e' la misura in metri.
-		std::vector<FBoxPart> Parts = Spec && !Spec->IsAsset() ? Spec->Parts : Shapes::Box(3.0, 3.0, 3.0);
+		std::vector<FBoxPart> Parts = Spec && !Spec->IsAsset() && !Spec->IsFile() ? Spec->Parts : DefaultShape(Record.Kind);
 		for (const FBoxPart& Part : Parts)
 		{
 			UStaticMeshComponent* Box = AddMesh(CubeMesh.Get(),
@@ -734,6 +790,8 @@ FString UGeoEntitySubsystem::DescribeForHud() const
 			: State == EGeoSourceState::Waiting ? TEXT("; aspetto la sorgente")
 			: State == EGeoSourceState::Error ? TEXT("; ERRORE (geo.Entities.List)") : TEXT("; ferma");
 	}
+	const int32 Loading = Library.IsValid() ? Library->NumLoading() : 0;
+	if (Loading > 0) { Text += FString::Printf(TEXT("; %d modelli in lettura"), Loading); }
 	return Text;
 }
 
@@ -746,4 +804,296 @@ FString UGeoEntitySubsystem::DescribeFollowed() const
 	const Core::FGeodetic Where = Core::EcefToGeodetic(Pose.Position);
 	return FString::Printf(TEXT("%s, %.0f m/s (%.0f km/h), quota %.0f m"), *FollowedLabel, Pose.Velocity.Length(),
 		Pose.Velocity.Length() * 3.6, Where.HeightM);
+}
+
+// ============================================================================
+//  I modelli da file (docs/modelli-design.md)
+// ============================================================================
+
+void UGeoEntitySubsystem::BuildModelParts(AActor* Actor, USceneComponent* Root, const FGeoLoadedModel& Model, FVisual& Visual)
+{
+	const GeoWorld::Models::FModelRig& Rig = *Model.Rig;
+	// Il rig e' in metri: un componente scalato di 100 sotto la radice, e sotto
+	// le parti con le loro trasformazioni in metri, come le da' il rig.
+	USceneComponent* ModelRoot = NewObject<USceneComponent>(Actor, TEXT("Modello"));
+	ModelRoot->SetMobility(EComponentMobility::Movable);
+	ModelRoot->SetupAttachment(Root);
+	ModelRoot->SetRelativeScale3D(FVector(Units::MetersToUu));
+	ModelRoot->RegisterComponent();
+
+	Visual.RigState = GeoWorld::Models::DefaultRigState(Rig);
+	Visual.Parts.Reset();
+	for (int32 Index = 0; Index < static_cast<int32>(Rig.Parts.size()); ++Index)
+	{
+		const GeoWorld::Models::FRigPart& Part = Rig.Parts[static_cast<size_t>(Index)];
+		// Le madri vengono sempre prima delle figlie (il rig e' in ordine di visita).
+		USceneComponent* Parent = ModelRoot;
+		if (Part.Parent >= 0 && Visual.Parts.IsValidIndex(Part.Parent) && Visual.Parts[Part.Parent].IsValid()) { Parent = Visual.Parts[Part.Parent].Get(); }
+		UStaticMesh* Mesh = Model.PartMeshes.IsValidIndex(Index) ? Model.PartMeshes[Index].Get() : nullptr;
+		USceneComponent* Component = nullptr;
+		if (Mesh)
+		{
+			UStaticMeshComponent* MeshComponent = NewObject<UStaticMeshComponent>(Actor);
+			MeshComponent->SetStaticMesh(Mesh);
+			MeshComponent->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+			Component = MeshComponent;
+		}
+		else
+		{
+			Component = NewObject<USceneComponent>(Actor);
+		}
+		Component->SetMobility(EComponentMobility::Movable);
+		Component->SetupAttachment(Parent);
+		Component->SetRelativeTransform(AffineToTransform(GeoWorld::Models::PartTransform(Part, Visual.RigState.Dofs[static_cast<size_t>(Index)])));
+		Component->RegisterComponent();
+		Visual.Parts.Add(Component);
+	}
+	Visual.ExtentM = Rig.Extent();
+	ApplyRig(Visual, FVector::ZeroVector, false);
+}
+
+void UGeoEntitySubsystem::ApplyRig(FVisual& Visual, const FVector& Camera, bool bHaveCamera) const
+{
+	const AActor* Actor = Visual.Actor.Get();
+	if (!Actor || !Visual.FileModel.IsValid() || !Visual.FileModel->Rig.IsValid()) { return; }
+	const GeoWorld::Models::FModelRig& Rig = *Visual.FileModel->Rig;
+	// La camera nel sistema della radice del modello (metri): la distanza dei LOD.
+	double CameraRoot[3] = { 0.0, 0.0, 0.0 };
+	if (bHaveCamera)
+	{
+		const FVector Local = Actor->GetActorTransform().InverseTransformPosition(Camera) * Units::UuToMeters;
+		CameraRoot[0] = Local.X; CameraRoot[1] = Local.Y; CameraRoot[2] = Local.Z;
+	}
+	for (int32 Index = 0; Index < Visual.Parts.Num() && Index < static_cast<int32>(Rig.Parts.size()); ++Index)
+	{
+		USceneComponent* Component = Visual.Parts[Index].Get();
+		if (!Component) { continue; }
+		const GeoWorld::Models::FRigPart& Part = Rig.Parts[static_cast<size_t>(Index)];
+		if (Part.Kind == GeoWorld::Models::EPartKind::Dof)
+		{
+			Component->SetRelativeTransform(AffineToTransform(GeoWorld::Models::PartTransform(Part, Visual.RigState.Dofs[static_cast<size_t>(Index)])));
+		}
+		if (!Part.Switches.empty() || !Part.Lods.empty())
+		{
+			// Senza camera i LOD si guardano da vicino (dall'origine del modello).
+			const bool bVisible = GeoWorld::Models::IsPartVisible(Rig, Part, Visual.RigState, CameraRoot);
+			if (Component->IsVisible() != bVisible) { Component->SetVisibility(bVisible, false); }
+		}
+	}
+}
+
+const UGeoEntitySubsystem::FVisual* UGeoEntitySubsystem::FindVisual(const FString& Who, FString& OutLabel) const
+{
+	const FString Wanted = Who.TrimStartAndEnd();
+	const bool bNumber = Wanted.IsNumeric();
+	const uint64 Number = bNumber ? FCString::Strtoui64(*Wanted, nullptr, 10) : 0;
+	const FVisual* Best = nullptr;
+	double BestDistance = TNumericLimits<double>::Max();
+	Registry.ForEach([&](const FEntityRecord& Record)
+	{
+		const FString Label = Record.Label.empty() ? FString::Printf(TEXT("#%llu"), Record.Key.Native) : ToFString(Record.Label);
+		const bool bMatch = bNumber ? Record.Key.Native == Number : Label.Equals(Wanted, ESearchCase::IgnoreCase);
+		const FVisual* Visual = bMatch ? Visuals.Find(Record.Key) : nullptr;
+		if (!Visual) { return; }
+		const double* Distance = Distances.Find(Record.Key);
+		const double D = Distance ? *Distance : 0.0;
+		if (!Best || D < BestDistance) { Best = Visual; BestDistance = D; OutLabel = Label; }
+	});
+	return Best;
+}
+
+UGeoEntitySubsystem::FVisual* UGeoEntitySubsystem::FindVisual(const FString& Who, FString& OutLabel)
+{
+	return const_cast<FVisual*>(static_cast<const UGeoEntitySubsystem*>(this)->FindVisual(Who, OutLabel));
+}
+
+void UGeoEntitySubsystem::SetModelFolder(const FString& Folder)
+{
+	if (!Library.IsValid()) { return; }
+	Library->SetFolder(Folder);
+	ReloadModels();
+}
+
+FString UGeoEntitySubsystem::GetModelFolder() const
+{
+	return Library.IsValid() ? Library->GetFolder() : FString();
+}
+
+void UGeoEntitySubsystem::ReloadModels()
+{
+	// Prima gli attori (tengono i modelli), poi la libreria.
+	DestroyAllVisuals();
+	if (Library.IsValid()) { Library->Clear(); }
+	NextSelection = 0.0;
+}
+
+FString UGeoEntitySubsystem::GetModelMaterialProblem() const
+{
+	return Library.IsValid() ? Library->GetMaterialProblem() : FString();
+}
+
+TArray<FString> UGeoEntitySubsystem::DescribeFileModels() const
+{
+	TArray<FString> Lines;
+	if (!Library.IsValid()) { return Lines; }
+	Library->ForEach([&Lines](const FGeoLoadedModel& Model)
+	{
+		if (Model.State == EGeoModelState::Loading)
+		{
+			Lines.Add(FString::Printf(TEXT("  %s: in lettura"), *Model.Path));
+		}
+		else if (Model.State == EGeoModelState::Failed)
+		{
+			Lines.Add(FString::Printf(TEXT("  %s: NON LETTO - %s"), *Model.Path, *Model.Error));
+		}
+		else
+		{
+			const GeoWorld::Models::FModelRig& Rig = *Model.Rig;
+			Lines.Add(FString::Printf(TEXT("  %s: %s, %d parti (%d DOF, %d switch), %d triangoli, lungo %.1f m, %d texture%s, %.2f s"),
+				*Model.Path, UTF8_TO_TCHAR(Rig.Format.c_str()), static_cast<int32>(Rig.Parts.size()), static_cast<int32>(Rig.DofCount()),
+				static_cast<int32>(Rig.Switches.size()), static_cast<int32>(Rig.TriangleCount()), Rig.Extent(), Model.Textures.Num(),
+				Model.MissingTextures > 0 ? *FString::Printf(TEXT(" (%d mancanti)"), Model.MissingTextures) : TEXT(""), Model.LoadSeconds));
+		}
+		for (const FString& Warning : Model.Warnings) { Lines.Add(TEXT("      avviso: ") + Warning); }
+	});
+	return Lines;
+}
+
+bool UGeoEntitySubsystem::InspectModelFile(const FString& File, TArray<FString>& OutLines) const
+{
+	if (!Library.IsValid()) { return false; }
+	const FString Path = Library->ResolvePath(File);
+	GeoWorld::Models::FLoadOptions Load;
+	Load.TextureIndex = Library->GetFolderIndex();
+	GeoWorld::Models::FModel Model;
+	std::string Error;
+	if (!GeoWorld::Models::LoadModelFile(std::string(TCHAR_TO_UTF8(*Path)), FGeoModelLibrary::FileAccess(), Model, Error, Load))
+	{
+		OutLines.Add(FString::Printf(TEXT("%s: %s"), *Path, *ToFString(Error)));
+		return false;
+	}
+	const GeoWorld::Models::FModelRig Rig = GeoWorld::Models::BuildRig(Model);
+	OutLines.Add(FString::Printf(TEXT("%s: %s, %d nodi, %d triangoli, %d materiali, %d punti luce"), *Path, *ToFString(Model.Format),
+		static_cast<int32>(Model.Nodes.size()), static_cast<int32>(Model.TriangleCount()), static_cast<int32>(Model.Materials.size()),
+		static_cast<int32>(Model.LightPoints.size())));
+	OutLines.Add(FString::Printf(TEXT("  misure (avanti, destra, alto): %.2f x %.2f x %.2f m; %d parti, %d DOF, %d switch/sequenze"),
+		Rig.BoundsMax[0] - Rig.BoundsMin[0], Rig.BoundsMax[1] - Rig.BoundsMin[1], Rig.BoundsMax[2] - Rig.BoundsMin[2],
+		static_cast<int32>(Rig.Parts.size()), static_cast<int32>(Rig.DofCount()), static_cast<int32>(Rig.Switches.size())));
+	for (const GeoWorld::Models::FRigPart& Part : Rig.Parts)
+	{
+		if (Part.Kind != GeoWorld::Models::EPartKind::Dof) { continue; }
+		const GeoWorld::Models::FDof& D = Part.Dof;
+		OutLines.Add(FString::Printf(TEXT("  DOF '%s': imbardata %.0f..%.0f, beccheggio %.0f..%.0f, rollio %.0f..%.0f"), *ToFString(Part.Name),
+			D.Rotate[2].Min, D.Rotate[2].Max, D.Rotate[0].Min, D.Rotate[0].Max, D.Rotate[1].Min, D.Rotate[1].Max));
+	}
+	for (const GeoWorld::Models::FRigSwitch& Switch : Rig.Switches)
+	{
+		OutLines.Add(FString::Printf(TEXT("  %s '%s': %d figli, %d maschere"), Switch.bSequence ? TEXT("sequenza") : TEXT("switch"),
+			*ToFString(Switch.Name), Switch.ChildCount, Switch.MaskCount()));
+	}
+	for (const GeoWorld::Models::FModelTexture& Texture : Model.Textures)
+	{
+		OutLines.Add(FString::Printf(TEXT("  texture %s: %s"), *ToFString(Texture.Path),
+			Texture.Resolved.empty() ? TEXT("NON TROVATA") : *ToFString(Texture.Resolved)));
+	}
+	for (const std::string& Warning : Model.Warnings) { OutLines.Add(TEXT("  avviso: ") + ToFString(Warning)); }
+	return true;
+}
+
+bool UGeoEntitySubsystem::DescribeEntityRig(const FString& Who, TArray<FString>& OutLines) const
+{
+	FString Label;
+	const FVisual* Visual = FindVisual(Who, Label);
+	if (!Visual) { OutLines.Add(FString::Printf(TEXT("'%s': nessuna entita' a schermo con questo nome"), *Who)); return false; }
+	if (!Visual->FileModel.IsValid() || !Visual->FileModel->Rig.IsValid())
+	{
+		OutLines.Add(FString::Printf(TEXT("%s: non ha un modello da file (%s)"), *Label, *Visual->ModelText));
+		return false;
+	}
+	const GeoWorld::Models::FModelRig& Rig = *Visual->FileModel->Rig;
+	OutLines.Add(FString::Printf(TEXT("%s: %s"), *Label, *Visual->FileModel->Path));
+	for (size_t Index = 0; Index < Rig.Parts.size(); ++Index)
+	{
+		const GeoWorld::Models::FRigPart& Part = Rig.Parts[Index];
+		if (Part.Kind != GeoWorld::Models::EPartKind::Dof || Index >= Visual->RigState.Dofs.size()) { continue; }
+		const GeoWorld::Models::FDofValues& V = Visual->RigState.Dofs[Index];
+		const GeoWorld::Models::FDof& D = Part.Dof;
+		OutLines.Add(FString::Printf(TEXT("  DOF '%s': imbardata %.1f (%.0f..%.0f), beccheggio %.1f (%.0f..%.0f), rollio %.1f (%.0f..%.0f)"),
+			*ToFString(Part.Name), V.Rotate[2], D.Rotate[2].Min, D.Rotate[2].Max, V.Rotate[0], D.Rotate[0].Min, D.Rotate[0].Max,
+			V.Rotate[1], D.Rotate[1].Min, D.Rotate[1].Max));
+	}
+	for (size_t Index = 0; Index < Rig.Switches.size(); ++Index)
+	{
+		const GeoWorld::Models::FRigSwitch& Switch = Rig.Switches[Index];
+		const int32 Mask = Index < Visual->RigState.Masks.size() ? Visual->RigState.Masks[Index] : 0;
+		OutLines.Add(FString::Printf(TEXT("  %s '%s': maschera %d di %d"), Switch.bSequence ? TEXT("sequenza") : TEXT("switch"),
+			*ToFString(Switch.Name), Mask, Switch.MaskCount()));
+	}
+	return true;
+}
+
+bool UGeoEntitySubsystem::SetEntityDof(const FString& Who, const FString& Dof, const TArray<double>& Values, FString& OutMessage)
+{
+	FString Label;
+	FVisual* Visual = FindVisual(Who, Label);
+	if (!Visual || !Visual->FileModel.IsValid() || !Visual->FileModel->Rig.IsValid())
+	{
+		OutMessage = FString::Printf(TEXT("'%s': nessuna entita' a schermo con un modello da file"), *Who);
+		return false;
+	}
+	const GeoWorld::Models::FModelRig& Rig = *Visual->FileModel->Rig;
+	int32 Found = -1;
+	for (size_t Index = 0; Index < Rig.Parts.size(); ++Index)
+	{
+		if (Rig.Parts[Index].Kind == GeoWorld::Models::EPartKind::Dof && ToFString(Rig.Parts[Index].Name).Equals(Dof, ESearchCase::IgnoreCase))
+		{
+			Found = static_cast<int32>(Index);
+			break;
+		}
+	}
+	if (Found < 0 || static_cast<size_t>(Found) >= Visual->RigState.Dofs.size())
+	{
+		OutMessage = FString::Printf(TEXT("%s: nessun DOF '%s' (geo.Entities.Dof %s per l'elenco)"), *Label, *Dof, *Who);
+		return false;
+	}
+	GeoWorld::Models::FDofValues V = Visual->RigState.Dofs[static_cast<size_t>(Found)];
+	// L'ordine dei valori: imbardata, beccheggio, rollio (gradi), poi x, y, z (m) nel sistema del DOF.
+	if (Values.Num() >= 1) { V.Rotate[2] = Values[0]; }
+	if (Values.Num() >= 2) { V.Rotate[0] = Values[1]; }
+	if (Values.Num() >= 3) { V.Rotate[1] = Values[2]; }
+	for (int32 Axis = 0; Axis < 3; ++Axis) { if (Values.Num() >= 4 + Axis) { V.Translate[Axis] = Values[3 + Axis]; } }
+	const GeoWorld::Models::FRigPart& Part = Rig.Parts[static_cast<size_t>(Found)];
+	V = GeoWorld::Models::ClampDof(Part.Dof, V);
+	Visual->RigState.Dofs[static_cast<size_t>(Found)] = V;
+	ApplyRig(*Visual, FVector::ZeroVector, false);
+	OutMessage = FString::Printf(TEXT("%s, DOF '%s': imbardata %.1f, beccheggio %.1f, rollio %.1f (dentro i limiti del modello)"),
+		*Label, *ToFString(Part.Name), V.Rotate[2], V.Rotate[0], V.Rotate[1]);
+	return true;
+}
+
+bool UGeoEntitySubsystem::SetEntitySwitch(const FString& Who, const FString& Switch, int32 Mask, FString& OutMessage)
+{
+	FString Label;
+	FVisual* Visual = FindVisual(Who, Label);
+	if (!Visual || !Visual->FileModel.IsValid() || !Visual->FileModel->Rig.IsValid())
+	{
+		OutMessage = FString::Printf(TEXT("'%s': nessuna entita' a schermo con un modello da file"), *Who);
+		return false;
+	}
+	const GeoWorld::Models::FModelRig& Rig = *Visual->FileModel->Rig;
+	for (size_t Index = 0; Index < Rig.Switches.size() && Index < Visual->RigState.Masks.size(); ++Index)
+	{
+		if (!ToFString(Rig.Switches[Index].Name).Equals(Switch, ESearchCase::IgnoreCase)) { continue; }
+		const int32 Count = Rig.Switches[Index].MaskCount();
+		Visual->RigState.Masks[Index] = FMath::Clamp(Mask, 0, FMath::Max(0, Count - 1));
+		UWorld* World = GetWorld();
+		const UGeoreferenceSubsystem* Georeference = World ? World->GetSubsystem<UGeoreferenceSubsystem>() : nullptr;
+		FVector Camera = FVector::ZeroVector;
+		const bool bHaveCamera = Georeference && Georeference->GetActiveViewLocation(Camera);
+		ApplyRig(*Visual, Camera, bHaveCamera);
+		OutMessage = FString::Printf(TEXT("%s, switch '%s': maschera %d di %d"), *Label, *Switch, Visual->RigState.Masks[Index], Count);
+		return true;
+	}
+	OutMessage = FString::Printf(TEXT("%s: nessuno switch '%s' (geo.Entities.Dof %s per l'elenco)"), *Label, *Switch, *Who);
+	return false;
 }

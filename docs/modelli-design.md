@@ -360,6 +360,140 @@ sensori, che useranno M4.
 
 ---
 
-## 12. Il primo pezzo (M1): cosa c'è
+## 12. Il primo pezzo (M1): cosa c'è, e cosa si è deciso scrivendolo
 
-*(La sezione si riempie quando il pezzo è finito: vedi in fondo al documento.)*
+### 12.1 Dove sta
+
+| | |
+|---|---|
+| `GeoEntities/Public/Models/ModelData.h` | il modello fedele al file: `FAffine`, gli assi dei formati, materiali, texture, mesh, nodi (gruppo, oggetto, DOF, LOD, switch, sequenza, riferimento esterno), punti luce; `AddPolygon` (normale di Newell, ventaglio) |
+| `.../Models/ModelFiles.h` | i percorsi (`\` e `/`, maiuscole) e **dove si cerca una texture** (`ResolveReferencedFile`) |
+| `.../Models/SgiImage.h` | le immagini SGI (`.rgb`, `.rgba`, `.int`, `.inta`, `.sgi`, `.bw`) di OpenFlight, grezze e RLE |
+| `.../Models/ObjReader.h` | OBJ + MTL |
+| `.../Models/OpenFlightReader.h` | OpenFlight (15.x e 16.x): record, palette, gerarchia, DOF, LOD, switch, sequenze, istanze, riferimenti esterni, mesh, punti luce |
+| `.../Models/ModelRig.h` | **il rig**: assi dell'attore, metri, parti, condizioni di visibilità, il movimento dei DOF |
+| `.../Models/ModelLoader.h` | quale lettore per quale estensione, e cosa dire per i formati da convertire |
+| `.../Entities/EntityModels.h` | le regole `file` della tabella dei modelli, con `scale`, `yaw`, `offset`, `up`, `forward` |
+| `GeoEntities/Private/ModelLibrary/GeoModelLibrary.{h,cpp}` | la libreria: un thread di lavoro per leggere, il game thread per mesh, texture e materiali |
+| `GeoEntities/Public/GeoEntitySubsystem.h` | gli attori con le parti, `geo.Entities.Dof`, `geo.Entities.Switch`, LOD dalla camera |
+| `GeoWorldEditor/Private/GeoTerrainMaterialFactory.cpp` | `M_GeoEntity`, `M_GeoEntityMasked`, `M_GeoEntityTranslucent` (`geo.Imagery.CreateMaterial`) |
+| `Tools/StandaloneTests/geomodels_main.cpp` | 48 test, con un OpenFlight scritto byte per byte |
+| `Tools/StandaloneTests/geomodel_info.cpp` | `geomodel_info <modello> [cartella]`: dentro un modello senza Unreal |
+
+Lo strato puro (`Models/`) è header-only e senza Unreal; i controlli statici
+lo sanno. La cartella privata si chiama `ModelLibrary`, non `Models`: un nome
+uguale a una cartella pura farebbe pensare ai controlli che sia pura.
+
+### 12.2 Decisioni prese scrivendo
+
+**Un punto solo di conversione.** I lettori riempiono `FModel` nelle
+convenzioni del formato e in metri (le unità di OpenFlight si convertono
+subito, sono un fatto del file); `BuildRig` porta tutto negli assi
+dell'attore, gira i triangoli, gira le V delle UV. Il test di ogni formato
+guarda **nell'attore**: l'alto del file è +Z, l'avanti è +X, i triangoli
+guardano fuori (calcolato con le coordinate, non con le normali, che
+potrebbero sbagliare nello stesso modo).
+
+**Le correzioni della regola si applicano dopo gli assi**: prima il formato
+diventa attore, poi `scale`, `yaw` (positiva a destra, come la bussola: è il
+verso degli utenti, non quello di OpenFlight), `offset`. `up` e `forward`
+sostituiscono gli assi del formato quando il modello non li rispetta.
+
+**Le parti nascono solo dove servono** (sezione 5). Il carro dei test, fatto di
+gruppi, oggetti, matrici, una torretta, uno switch del danno, un LOD e una
+sequenza, diventa 8 parti: la radice e solo i nodi che si muovono o si
+spengono. Le parti
+vuote (un DOF senza geometria sotto e senza figli) si tolgono.
+
+**Il DOF è `Prima · Moto · Dopo`**, con Prima = (trasformazioni sopra) ·
+Frame e Dopo = Frame⁻¹ · (trasformazioni sopra)⁻¹: il moto avviene negli assi
+del DOF (origine, asse x, piano xy del record), ma la parte resta nel
+sistema della madre. Il moto è T · Rz(imbardata) · Rx(beccheggio) ·
+Ry(rollio) · S, con i limiti del file (`ClampDof`). I valori sono **quelli di
+OpenFlight**: imbardata positiva a **sinistra**. Il test lo fissa con una
+canna che, a +90, va a sinistra.
+
+**Le texture nominate con il percorso di un'altra macchina** sono la regola,
+non l'eccezione (`D:\Progetti\db\tex\carro.rgb`). L'ordine: com'è
+scritto; relativo al modello; il nome accanto al modello; nelle cartelle
+`textures`, `Textures`, `tex`; nella cartella sopra; **per nome** in tutta la
+cartella dei modelli (un indice fatto una volta, sul thread di lavoro, al
+primo modello). Le maiuscole non contano. Quelle che mancano si contano e si
+dicono; la faccia resta del suo colore.
+
+**Le SGI con il decodificatore nostro**, le altre (PNG, JPEG, BMP, TGA,
+TIFF...) con l'`ImageWrapper` di Unreal, tutte in BGRA, con le
+mipmap fatte da noi (`Tiles::BuildMipChain`, come l'ortofoto); oltre 4096
+pixel di lato si parte dalla prima mip che ci sta. Le texture si ripetono
+(wrap) in U e V: i modelli le usano così.
+
+**Tre materiali, non uno**: opaco (a una faccia), **tagliato** (a due facce,
+con la maschera dall'alfa: alberi, reti, cavi), **trasparente** (vetri). La
+scelta è per materiale del file (`MaterialMode`): trasparente se il
+materiale lo dice, tagliato se è a due facce o la texture ha l'alfa, opaco
+altrimenti. Il colore è il colore del vertice (OpenFlight lo mette sulla
+faccia) per la texture per una tinta; i colori dei vertici sono sRGB, si
+elevano al quadrato nel materiale per tornare lineari. Se i materiali non ci
+sono, il materiale di base del motore e una frase rossa che dice cosa
+lanciare.
+
+**Il lavoro diviso in due**: sul thread di lavoro (UE::Tasks) il file, i
+riferimenti esterni, il rig, le texture decodificate e le loro mip; sul game
+thread **un modello per frame**: le `UTexture2D`, le istanze dei materiali, una
+`UStaticMesh` per parte con `BuildFromMeshDescriptions` e `bFastBuild` (come
+gli alberi, funziona anche nel gioco impacchettato). Il primo F-16 non deve
+fermare il frame per leggere un file da 20 MB.
+
+**Un modello si legge una volta**, con chiave = file + testo della regola:
+lo stesso file con due correzioni sono due rig. Mesh, texture e materiali
+sono condivisi fra tutte le entità con quella regola; ogni entità ha il suo
+**stato del rig** (valori dei DOF, maschere degli switch).
+
+**Mentre il modello arriva**, l'entità ha le scatole del suo dominio; quando
+è pronto l'attore si rifà, al quarto di secondo dopo. Un modello che non si
+legge lascia le scatole in **magenta** e il nome dice "(modello non letto)";
+`geo.Entities.Models` dice perché.
+
+**L'attore**: la radice (la posizione e l'assetto della Fase 7), sotto un
+componente "Modello" scalato di 100 (il rig è in metri, Unreal in
+centimetri), sotto le parti in metri. Senza collisioni (M5).
+
+**I LOD** si scelgono con la distanza della camera **dal centro del LOD**
+(nel sistema del modello), quattro volte al secondo, insieme alla scelta
+degli attori. Gli **switch** partono dalla maschera del file. Le
+**sequenze** mostrano il fotogramma 0: farle girare è M3.
+
+**OpenFlight, i dettagli che contano** (tutti con un test): i bit dei flag si
+contano dal più significativo; i record di continuazione si attaccano al
+precedente; il record di matrice è a vettore riga (la traslazione nell'ultima
+riga); la mesh è la faccia spostata di 4 byte; le istanze si clonano dove
+sono usate; i riferimenti esterni si leggono ricorsivamente (fino a 8 livelli)
+e si attaccano sotto il loro nodo; un record sconosciuto seguito da un Push
+diventa un gruppo, così i figli non si perdono; le facce **nascoste** e i
+**punti luce** non sono geometria (i punti luce restano da parte per M7); il
+codice IR di faccia e materiale resta da parte per M4.
+
+**FBX e IVE non si leggono, si dice come convertirli.** FBX è chiuso (l'SDK di
+Autodesk non è ridistribuibile in un plugin); IVE è il formato binario
+interno di OpenSceneGraph, cambia con la versione. Il messaggio dice il
+comando: `osgconv modello.ive modello.flt`, o FBX2glTF / Blender verso glTF
+(M2) o OBJ. Nell'editor, un FBX si importa come asset e la regola usa
+`asset`.
+
+**Gli strumenti**: `geo.Entities.ModelInfo` in Unreal e `geomodel_info` da riga
+di comando dicono le stesse cose (formato, misure, parti, DOF con i limiti,
+switch, texture trovate e no, avvisi): il primo controllo da fare su un
+modello nuovo, prima di metterlo in una regola.
+
+### 12.3 Cosa non è provato
+
+Tutto il codice Unreal (non si compila qui) e i `.flt` **veri**: i test usano
+file scritti byte per byte dalla specifica 16.4. Un database reale avrà
+record e varianti che la specifica descrive male o che i modellatori usano a
+modo loro: `geomodel_info` è fatto per trovarli.
+
+### 12.4 Il prossimo pezzo
+
+M2: glTF 2.0 (`.gltf` e `.glb`, gerarchia, materiali PBR, animazioni) e
+`geoworld convert-models`, che converte una cartella di `.ive`/`.osgb`/`.fbx`
+con `osgconv` e FBX2glTF se ci sono.
